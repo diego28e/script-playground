@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Code Challenge Platform
+
+A Next.js application for coding challenges deployed on AWS Amplify with Supabase PostgreSQL.
+
+## Database Architecture
+
+This project uses a **hybrid approach** for database management:
+
+- **Prisma**: Schema modeling, migrations, and type generation (development only)
+- **Supabase JS Client**: Runtime queries in production (edge/serverless compatible)
+
+### Why This Approach?
+
+- Prisma's `pg.Pool` connections don't work in AWS Amplify's edge runtime
+- Supabase client uses HTTP/REST API, fully compatible with serverless environments
+- We keep Prisma for its superior DX: schema modeling, migrations, and type safety
+
+## Development Workflow
+
+### 1. Schema Changes
+
+Edit `prisma/schema.prisma` and run migrations:
+
+```bash
+npx prisma migrate dev --name your_migration_name
+```
+
+This creates migration files and updates your local database.
+
+### 2. Generate Types
+
+After schema changes, regenerate Prisma types:
+
+```bash
+npx prisma generate
+```
+
+### 3. Deploy Schema to Supabase
+
+Prisma migrations automatically apply to your Supabase database (via `DIRECT_URL`).
+
+### 4. Runtime Queries
+
+All runtime code uses Supabase client:
+
+```typescript
+import { supabase } from "@/lib/supabase";
+
+const { data, error } = await supabase
+  .from("challenge")
+  .select("*")
+  .eq("id", challengeId);
+```
+
+## Environment Variables
+
+Required for local development and production:
+
+```env
+# Supabase (Runtime)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Prisma (Migrations Only)
+DATABASE_URL=postgresql://...:6543/postgres?pgbouncer=true
+DIRECT_URL=postgresql://...:5432/postgres
+
+# Auth
+BETTER_AUTH_SECRET=your-secret
+BETTER_AUTH_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# OAuth
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+```
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deployment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Deploy to AWS Amplify:
 
-## Learn More
+1. Push code to repository
+2. Amplify auto-builds and deploys
+3. Ensure environment variables are set in Amplify console
 
-To learn more about Next.js, take a look at the following resources:
+## Key Files
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `prisma/schema.prisma` - Database schema (Prisma)
+- `lib/supabase.ts` - Supabase client for runtime queries
+- `lib/prisma.ts` - Prisma client (better-auth only)
+- `lib/database.types.ts` - TypeScript types for Supabase
+- `actions/*.ts` - Server actions using Supabase client
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Important Notes
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Prisma client** (`lib/prisma.ts`) is ONLY used by better-auth adapter
+- **All application queries** use Supabase client (`lib/supabase.ts`)
+- This ensures edge/serverless compatibility on AWS Amplify

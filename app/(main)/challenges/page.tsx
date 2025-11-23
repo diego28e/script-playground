@@ -1,5 +1,5 @@
 import { ChallengeCard } from "@/components/challenges/challenge-card";
-import { prisma } from "@/lib/prisma";
+import { getChallenges } from "@/actions/challenges";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { Metadata } from "next";
@@ -16,14 +16,7 @@ export default async function ChallengesPage() {
         headers: await headers(),
     });
 
-    const challenges = await prisma.challenge.findMany({
-        orderBy: {
-            order: "asc",
-        },
-        include: {
-            labels: true,
-        },
-    });
+    const { data: challenges } = await getChallenges();
 
     const isAdmin = session?.user?.role === "ADMIN";
 
@@ -49,7 +42,7 @@ export default async function ChallengesPage() {
                 )}
             </div>
 
-            {challenges.length === 0 ? (
+            {!challenges || challenges.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
                     <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
                         No challenges found

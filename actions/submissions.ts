@@ -1,9 +1,10 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { SubmissionStatus } from "@prisma/client";
+
+type SubmissionStatus = "PENDING" | "PASSED" | "FAILED";
 
 export async function createSubmission(data: {
     challengeId: string;
@@ -21,16 +22,20 @@ export async function createSubmission(data: {
             return { success: false, error: "Unauthorized" };
         }
 
-        const submission = await prisma.submission.create({
-            data: {
+        const { data: submission, error } = await supabase
+            .from("submission")
+            .insert({
                 userId: session.user.id,
                 challengeId: data.challengeId,
                 code: data.code,
                 status: data.status,
-                output: data.output,
-                error: data.error,
-            },
-        });
+                output: data.output || null,
+                error: data.error || null,
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
 
         return { success: true, data: submission };
     } catch (error) {
@@ -49,16 +54,15 @@ export async function getUserSubmissions(challengeId: string) {
             return { success: false, error: "Unauthorized" };
         }
 
-        const submissions = await prisma.submission.findMany({
-            where: {
-                userId: session.user.id,
-                challengeId,
-            },
-            orderBy: {
-                createdAt: "desc",
-            },
-            take: 10,
-        });
+        const { data: submissions, error } = await supabase
+            .from("submission")
+            .select("*")
+            .eq("userId", session.user.id)
+            .eq("challengeId", challengeId)
+            .order("createdAt", { ascending: false })
+            .limit(10);
+
+        if (error) throw error;
 
         return { success: true, data: submissions };
     } catch (error) {
