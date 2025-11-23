@@ -1,0 +1,64 @@
+.tiptap-editor-wrapper {
+  padding: 1rem;
+  min-height: 200px;
+}
+
+.tiptap-editor-wrapper .ProseMirror {
+  outline: none;
+  min-height: 180px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #3f3f46;
+}
+
+.dark .tiptap-editor-wrapper .ProseMirror {
+  color: #d4d4d8;
+}
+
+.tiptap-editor-wrapper .ProseMirror p {
+  margin: 0.5rem 0;
+}
+
+.tiptap-editor-wrapper .ProseMirror p:first-child {
+  margin-top: 0;
+}
+
+.tiptap-editor-wrapper .ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
+.tiptap-editor-wrapper .ProseMirror ul,
+.tiptap-editor-wrapper .ProseMirror ol {
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.tiptap-editor-wrapper .ProseMirror li {
+  margin: 0.25rem 0;
+}
+
+.tiptap-editor-wrapper .ProseMirror strong {
+  font-weight: 600;
+}
+
+.tiptap-editor-wrapper .ProseMirror em {
+  font-style: italic;
+}
+
+.tiptap-editor-wrapper .ProseMirror u {
+  text-decoration: underline;
+}
+
+.tiptap-editor-wrapper .ProseMirror a {
+  color: #3b82f6;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dark .tiptap-editor-wrapper .ProseMirror a {
+  color: #60a5fa;
+}
+
+.tiptap-editor-wrapper .ProseMirror:focus {
+  outline: none;
+}

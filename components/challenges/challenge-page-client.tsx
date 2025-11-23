@@ -78,7 +78,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
                         <div className="h-full overflow-y-auto bg-white p-6 dark:bg-zinc-950">
                             <div className="prose prose-zinc dark:prose-invert max-w-none">
                                 <h2 className="text-2xl font-bold mb-4">Problem Description</h2>
-                                <p className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">{challenge.description}</p>
+                                <div dangerouslySetInnerHTML={{ __html: challenge.description }} />
                             </div>
                         </div>
                     </ResizablePanel>
@@ -101,7 +101,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
                                 <div className="flex-1 overflow-y-auto p-4">
                                     <div className="prose prose-zinc dark:prose-invert max-w-none">
                                         <h2 className="text-xl font-bold mb-4">Problem Description</h2>
-                                        <p className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">{challenge.description}</p>
+                                        <div dangerouslySetInnerHTML={{ __html: challenge.description }} />
                                     </div>
                                 </div>
                             </div>
