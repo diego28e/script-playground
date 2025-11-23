@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export default function Home() {
     return (
-        <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-12 text-center">
             <div className="relative mb-8">
                 <div className="absolute -inset-1 opacity-20 blur-xl" />
                 <Image
