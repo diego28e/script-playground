@@ -39,13 +39,13 @@ export default function Home() {
       {/* Hero Section */}
       <main className="flex flex-1 flex-col items-center justify-center px-4 text-center">
         <div className="relative mb-8">
-          <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-blue-600 to-violet-600 opacity-20 blur-xl" />
+          <div className="absolute -inset-1 opacity-20 blur-xl" />
           <Image
             src="/logo.png"
             alt="Script Playground Logo"
             width={120}
             height={120}
-            className="relative rounded-2xl"
+            className="relative"
             priority
           />
         </div>
