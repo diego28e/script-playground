@@ -18,6 +18,7 @@ model User {
 
   sessions      Session[]
   accounts      Account[]
+  submissions   Submission[]
 
   @@map("user")
 }
@@ -82,8 +83,25 @@ model Challenge {
   updatedAt    DateTime @updatedAt
 
   labels       Label[]
+  submissions  Submission[]
 
   @@map("challenge")
+}
+
+model Submission {
+  id          String           @id @default(cuid())
+  userId      String
+  challengeId String
+  code        String
+  status      SubmissionStatus
+  output      String?
+  error       String?
+  createdAt   DateTime         @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge   Challenge        @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@map("submission")
 }
 
 model Label {
@@ -104,4 +122,10 @@ enum Difficulty {
   EASY
   MEDIUM
   HARD
+}
+
+enum SubmissionStatus {
+  PENDING
+  PASSED
+  FAILED
 }
