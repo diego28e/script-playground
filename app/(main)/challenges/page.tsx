@@ -16,10 +16,6 @@ export default async function ChallengesPage() {
         headers: await headers(),
     });
 
-    console.log("[CHALLENGES PAGE] Session user:", session?.user);
-    console.log("[CHALLENGES PAGE] User role:", session?.user?.role);
-    console.log("[CHALLENGES PAGE] Role type:", typeof session?.user?.role);
-
     const challenges = await prisma.challenge.findMany({
         orderBy: {
             order: "asc",
@@ -30,7 +26,6 @@ export default async function ChallengesPage() {
     });
 
     const isAdmin = session?.user?.role === "ADMIN";
-    console.log("[CHALLENGES PAGE] Is admin:", isAdmin);
 
     return (
         <div className="container mx-auto px-4 py-8">

@@ -3,7 +3,7 @@
 import { Editor } from "@monaco-editor/react";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Send, Settings } from "lucide-react";
+import { Play, RotateCcw, Send, Settings, Wand2, ChevronLeft, ChevronRight } from "lucide-react";
 import { createSubmission } from "@/actions/submissions";
 import { toast } from "sonner";
 import {
@@ -18,13 +18,29 @@ interface ChallengeEditorProps {
     challengeId: string;
 }
 
-export function ChallengeEditor({ initialCode, challengeId }: ChallengeEditorProps) {
+interface ChallengeEditorProps {
+    initialCode: string;
+    challengeId: string;
+    isDescriptionVisible: boolean;
+    onToggleDescription: () => void;
+}
+
+export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible, onToggleDescription }: ChallengeEditorProps) {
     const [code, setCode] = useState(initialCode);
     const [output, setOutput] = useState<string[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [isRunning, setIsRunning] = useState(false);
-    const [autoRun, setAutoRun] = useState(false);
+    const [autoRun, setAutoRun] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('autoRun') === 'true';
+        }
+        return false;
+    });
     const autoRunTimeoutRef = useRef<NodeJS.Timeout>();
+
+    useEffect(() => {
+        localStorage.setItem('autoRun', String(autoRun));
+    }, [autoRun]);
 
     useEffect(() => {
         if (autoRun && code !== initialCode) {
@@ -113,31 +129,77 @@ export function ChallengeEditor({ initialCode, challengeId }: ChallengeEditorPro
         }
     };
 
+    const handleFormat = async () => {
+        try {
+            const prettier = await import('prettier/standalone');
+            const parserBabel = await import('prettier/plugins/babel');
+            const parserEstree = await import('prettier/plugins/estree');
+            
+            const formatted = await prettier.format(code, {
+                parser: 'babel',
+                plugins: [parserBabel, parserEstree],
+                semi: true,
+                singleQuote: true,
+                tabWidth: 2,
+            });
+            setCode(formatted);
+            toast.success('Code formatted');
+        } catch (err) {
+            toast.error('Failed to format code');
+        }
+    };
+
     return (
         <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between border-b border-zinc-700 bg-[#1e1e1e] px-4 py-2">
-                <span className="text-sm text-zinc-400">script.js</span>
+            <div className="flex items-center justify-between border-b border-zinc-700 bg-[#1e1e1e] px-2 py-2 md:px-4">
                 <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onToggleDescription}
+                        className="hidden text-zinc-400 hover:text-zinc-100 md:flex"
+                        title={isDescriptionVisible ? "Hide description" : "Show description"}
+                    >
+                        {isDescriptionVisible ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </Button>
+                    <span className="text-xs text-zinc-400 md:text-sm">script.js</span>
+                </div>
+                <div className="flex items-center gap-1 md:gap-2">
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-zinc-100">
                                 <Settings className="h-4 w-4" />
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuCheckboxItem
-                                checked={autoRun}
-                                onCheckedChange={setAutoRun}
-                            >
-                                Auto-run (1.5s delay)
-                            </DropdownMenuCheckboxItem>
+                        <DropdownMenuContent align="end" className="w-56 bg-white dark:bg-zinc-900">
+                            <div className="px-2 py-1.5">
+                                <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
+                                    <input
+                                        type="checkbox"
+                                        checked={autoRun}
+                                        onChange={(e) => setAutoRun(e.target.checked)}
+                                        className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-zinc-600"
+                                    />
+                                    <span>Auto-run (1.5s delay)</span>
+                                </label>
+                            </div>
                         </DropdownMenuContent>
                     </DropdownMenu>
                     <Button
                         variant="ghost"
                         size="sm"
+                        onClick={handleFormat}
+                        className="text-zinc-400 hover:text-zinc-100"
+                        title="Format code"
+                    >
+                        <Wand2 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={handleReset}
                         className="text-zinc-400 hover:text-zinc-100"
+                        title="Reset to starter"
                     >
                         <RotateCcw className="h-4 w-4" />
                     </Button>
@@ -162,7 +224,7 @@ export function ChallengeEditor({ initialCode, challengeId }: ChallengeEditorPro
                     </Button>
                 </div>
             </div>
-            <div className="flex-1">
+            <div className="flex-1 min-h-0">
                 <Editor
                     height="100%"
                     defaultLanguage="javascript"
@@ -171,16 +233,18 @@ export function ChallengeEditor({ initialCode, challengeId }: ChallengeEditorPro
                     onChange={(value) => setCode(value || "")}
                     options={{
                         minimap: { enabled: false },
-                        fontSize: 14,
+                        fontSize: 13,
                         lineNumbers: "on",
                         scrollBeyondLastLine: false,
                         automaticLayout: true,
+                        wordWrap: "on",
+                        wrappingStrategy: "advanced",
                     }}
                 />
             </div>
-            <div className="border-t border-zinc-700 bg-zinc-900 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-zinc-300">Output</h3>
-                <div className="max-h-32 overflow-y-auto rounded-md bg-zinc-950 p-3 font-mono text-sm">
+            <div className="border-t border-zinc-700 bg-zinc-900 p-2 md:p-4">
+                <h3 className="mb-2 text-xs font-semibold text-zinc-300 md:text-sm">Output</h3>
+                <div className="max-h-24 overflow-y-auto rounded-md bg-zinc-950 p-2 font-mono text-xs md:max-h-32 md:p-3 md:text-sm">
                     {error ? (
                         <div className="text-red-400">
                             <span className="font-semibold">Error:</span> {error}

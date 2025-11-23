@@ -13,18 +13,9 @@ export default async function AdminLayout({
         headers: await headers(),
     });
 
-    console.log("[ADMIN LAYOUT] Session:", JSON.stringify(session, null, 2));
-    console.log("[ADMIN LAYOUT] User role:", session?.user?.role);
-    console.log("[ADMIN LAYOUT] Role type:", typeof session?.user?.role);
-    console.log("[ADMIN LAYOUT] Role check (=== 'ADMIN'):", session?.user?.role === "ADMIN");
-    console.log("[ADMIN LAYOUT] Role check (=== 'admin'):", session?.user?.role === "admin");
-
     if (!session || session.user.role !== "ADMIN") {
-        console.log("[ADMIN LAYOUT] Access denied, redirecting to /");
         redirect("/");
     }
-
-    console.log("[ADMIN LAYOUT] Access granted");
 
     return (
         <div className="flex min-h-screen flex-col space-y-6">

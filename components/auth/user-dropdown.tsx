@@ -18,10 +18,6 @@ export function UserDropdown() {
     const { data: session } = authClient.useSession();
     const router = useRouter();
 
-    console.log("[USER DROPDOWN] Session:", session);
-    console.log("[USER DROPDOWN] User role:", (session?.user as { role?: string })?.role);
-    console.log("[USER DROPDOWN] Is admin:", (session?.user as { role?: string })?.role === "ADMIN");
-
     if (!session) return null;
 
     const handleSignOut = async () => {
