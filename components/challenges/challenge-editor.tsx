@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Play, RotateCcw, Send, Settings, Wand2, ChevronLeft, ChevronRight } from "lucide-react";
 import { createSubmission, getUserSubmissions } from "@/actions/submissions";
 import { toast } from "sonner";
+import confetti from "canvas-confetti";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -133,20 +134,36 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
     const handleSubmit = async () => {
         handleRun();
         
-        const status = error ? 'FAILED' : 'PASSED';
-        const result = await createSubmission({
-            challengeId,
-            code,
-            status,
-            output: output.join('\n'),
-            error: error || undefined,
-        });
+        setTimeout(async () => {
+            const status = error ? 'FAILED' : 'PASSED';
+            const result = await createSubmission({
+                challengeId,
+                code,
+                status,
+                output: output.join('\n'),
+                error: error || undefined,
+            });
 
-        if (result.success) {
-            toast.success(status === 'PASSED' ? 'Solution submitted!' : 'Submission saved');
-        } else {
-            toast.error('Failed to submit solution');
-        }
+            if (result.success) {
+                if (status === 'PASSED') {
+                    const audio = new Audio('/sounds/success.mp3');
+                    audio.volume = 0.5;
+                    audio.play().catch(() => {});
+                    
+                    confetti({
+                        particleCount: 100,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                    
+                    toast.success('🎉 Challenge Passed! Solution submitted!');
+                } else {
+                    toast.info('Submission saved');
+                }
+            } else {
+                toast.error('Failed to submit solution');
+            }
+        }, 100);
     };
 
     const handleReset = () => {
