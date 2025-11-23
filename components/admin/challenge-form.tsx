@@ -93,7 +93,7 @@ export function ChallengeForm({ initialData, isEditing = false }: ChallengeFormP
                     toast.error(result.error as string);
                 }
             }
-        } catch (error) {
+        } catch {
             toast.error("Something went wrong");
         } finally {
             setLoading(false);

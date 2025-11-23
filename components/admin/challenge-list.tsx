@@ -18,7 +18,7 @@ import {
     useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Challenge, Difficulty, Label as LabelType } from "@prisma/client";
+import { Challenge, Label as LabelType } from "@prisma/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,7 +111,7 @@ function SortableChallengeItem({ challenge }: { challenge: Challenge & { labels:
 
 export function ChallengeList({ initialChallenges }: ChallengeListProps) {
     const [challenges, setChallenges] = useState(initialChallenges);
-    const [isSaving, setIsSaving] = useState(false);
+    const [, setIsSaving] = useState(false);
 
     useEffect(() => {
         setChallenges(initialChallenges);
@@ -151,7 +151,7 @@ export function ChallengeList({ initialChallenges }: ChallengeListProps) {
         try {
             await reorderChallenges(orderData);
             toast.success("Order updated");
-        } catch (error) {
+        } catch {
             toast.error("Failed to update order");
         } finally {
             setIsSaving(false);

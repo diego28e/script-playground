@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { Challenge, Difficulty, Prisma } from "@prisma/client";
+import { Difficulty, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 export async function getChallenges() {
@@ -25,6 +25,21 @@ export async function getChallenge(id: string) {
     try {
         const challenge = await prisma.challenge.findUnique({
             where: { id },
+            include: {
+                labels: true,
+            },
+        });
+        return { success: true, data: challenge };
+    } catch (error) {
+        console.error("Failed to fetch challenge:", error);
+        return { success: false, error: "Failed to fetch challenge" };
+    }
+}
+
+export async function getChallengeBySlug(slug: string) {
+    try {
+        const challenge = await prisma.challenge.findUnique({
+            where: { slug },
             include: {
                 labels: true,
             },

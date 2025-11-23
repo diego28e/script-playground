@@ -19,8 +19,8 @@ export function UserDropdown() {
     const router = useRouter();
 
     console.log("[USER DROPDOWN] Session:", session);
-    console.log("[USER DROPDOWN] User role:", (session?.user as any)?.role);
-    console.log("[USER DROPDOWN] Is admin:", (session?.user as any)?.role === "ADMIN");
+    console.log("[USER DROPDOWN] User role:", (session?.user as { role?: string })?.role);
+    console.log("[USER DROPDOWN] Is admin:", (session?.user as { role?: string })?.role === "ADMIN");
 
     if (!session) return null;
 
@@ -57,7 +57,7 @@ export function UserDropdown() {
                 <DropdownMenuItem onClick={() => router.push("/challenges")}>
                     <span>Challenges</span>
                 </DropdownMenuItem>
-                {(session.user as any).role === "ADMIN" && (
+                {(session.user as { role?: string }).role === "ADMIN" && (
                     <DropdownMenuItem onClick={() => router.push("/admin/challenges")}>
                         <Shield className="mr-2 h-4 w-4" />
                         <span>Admin Dashboard</span>

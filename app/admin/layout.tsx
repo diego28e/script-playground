@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { AdminNav } from "@/components/admin/admin-nav";
 
 export default async function AdminLayout({
@@ -36,7 +37,7 @@ export default async function AdminLayout({
                                 Collections
                             </h2>
                             <div className="space-y-1">
-                                <a href="/admin/challenges" className="block rounded-md px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Challenges</a>
+                                <Link href="/admin/challenges" className="block rounded-md px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Challenges</Link>
                             </div>
                         </div>
                     </nav>
