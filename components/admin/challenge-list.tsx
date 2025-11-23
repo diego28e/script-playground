@@ -128,16 +128,16 @@ export function ChallengeList({ initialChallenges }: ChallengeListProps) {
         const { active, over } = event;
 
         if (over && active.id !== over.id) {
+            let reorderedItems: typeof challenges = [];
+            
             setChallenges((items) => {
                 const oldIndex = items.findIndex((item) => item.id === active.id);
                 const newIndex = items.findIndex((item) => item.id === over.id);
-                const newItems = arrayMove(items, oldIndex, newIndex);
-
-                // Trigger save after reorder
-                saveOrder(newItems);
-
-                return newItems;
+                reorderedItems = arrayMove(items, oldIndex, newIndex);
+                return reorderedItems;
             });
+
+            saveOrder(reorderedItems);
         }
     };
 
