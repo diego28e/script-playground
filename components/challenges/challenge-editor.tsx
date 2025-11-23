@@ -4,7 +4,7 @@ import { Editor } from "@monaco-editor/react";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Play, RotateCcw, Send, Settings, Wand2, ChevronLeft, ChevronRight } from "lucide-react";
-import { createSubmission } from "@/actions/submissions";
+import { createSubmission, getUserSubmissions } from "@/actions/submissions";
 import { toast } from "sonner";
 import {
     DropdownMenu,
@@ -27,6 +27,28 @@ interface ChallengeEditorProps {
 
 export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible, onToggleDescription }: ChallengeEditorProps) {
     const [code, setCode] = useState(initialCode);
+    const [isLoadingSubmission, setIsLoadingSubmission] = useState(true);
+
+    useEffect(() => {
+        const loadLastAttempt = async () => {
+            const localDraft = localStorage.getItem(`challenge_${challengeId}_code`);
+            
+            if (localDraft) {
+                setCode(localDraft);
+                setIsLoadingSubmission(false);
+                return;
+            }
+
+            const result = await getUserSubmissions(challengeId);
+            if (result.success && result.data && result.data.length > 0) {
+                setCode(result.data[0].code);
+                toast.info('Loaded your last submission');
+            }
+            setIsLoadingSubmission(false);
+        };
+
+        loadLastAttempt();
+    }, [challengeId]);
     const [output, setOutput] = useState<string[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [isRunning, setIsRunning] = useState(false);
@@ -41,6 +63,13 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
     useEffect(() => {
         localStorage.setItem('autoRun', String(autoRun));
     }, [autoRun]);
+
+    useEffect(() => {
+        const saveTimeout = setTimeout(() => {
+            localStorage.setItem(`challenge_${challengeId}_code`, code);
+        }, 1000);
+        return () => clearTimeout(saveTimeout);
+    }, [code, challengeId]);
 
     useEffect(() => {
         if (autoRun && code !== initialCode) {
@@ -121,8 +150,9 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
     };
 
     const handleReset = () => {
-        if (confirm('Reset to starter code? Your current code will be lost.')) {
+        if (confirm('Reset to starter code? Your current progress will be lost.')) {
             setCode(initialCode);
+            localStorage.removeItem(`challenge_${challengeId}_code`);
             setOutput([]);
             setError(null);
             toast.success('Code reset to starter');
@@ -148,6 +178,14 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
             toast.error('Failed to format code');
         }
     };
+
+    if (isLoadingSubmission) {
+        return (
+            <div className="flex h-full items-center justify-center bg-[#1e1e1e]">
+                <div className="text-zinc-400">Loading...</div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex h-full flex-col">
