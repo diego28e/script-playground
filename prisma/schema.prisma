@@ -14,7 +14,7 @@ model User {
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  role          String    @default("user") // "admin" or "user"
+  role          Role      @default(USER)
 
   sessions      Session[]
   accounts      Account[]
@@ -93,6 +93,11 @@ model Label {
   challenges Challenge[]
 
   @@map("label")
+}
+
+enum Role {
+  USER
+  ADMIN
 }
 
 enum Difficulty {
