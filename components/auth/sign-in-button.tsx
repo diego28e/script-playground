@@ -17,8 +17,8 @@ export function SignInButton() {
                 callbackURL: "/",
             });
         } catch (error) {
-            toast.error("Something went wrong. Please try again.");
-        } finally {
+            console.error("Sign-in error:", error);
+            toast.error("Failed to sign in. Please check your connection and try again.");
             setIsLoading(false);
         }
     };
