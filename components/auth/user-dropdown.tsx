@@ -12,11 +12,15 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { LogOut, User } from "lucide-react";
+import { LogOut, Shield } from "lucide-react";
 
 export function UserDropdown() {
     const { data: session } = authClient.useSession();
     const router = useRouter();
+
+    console.log("[USER DROPDOWN] Session:", session);
+    console.log("[USER DROPDOWN] User role:", (session?.user as any)?.role);
+    console.log("[USER DROPDOWN] Is admin:", (session?.user as any)?.role === "ADMIN");
 
     if (!session) return null;
 
@@ -49,6 +53,16 @@ export function UserDropdown() {
                         </p>
                     </div>
                 </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push("/challenges")}>
+                    <span>Challenges</span>
+                </DropdownMenuItem>
+                {(session.user as any).role === "ADMIN" && (
+                    <DropdownMenuItem onClick={() => router.push("/admin/challenges")}>
+                        <Shield className="mr-2 h-4 w-4" />
+                        <span>Admin Dashboard</span>
+                    </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut}>
                     <LogOut className="mr-2 h-4 w-4" />
