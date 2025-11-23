@@ -36,7 +36,7 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
         }
         return false;
     });
-    const autoRunTimeoutRef = useRef<NodeJS.Timeout>();
+    const autoRunTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         localStorage.setItem('autoRun', String(autoRun));
@@ -137,7 +137,7 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
             
             const formatted = await prettier.format(code, {
                 parser: 'babel',
-                plugins: [parserBabel, parserEstree],
+                plugins: [parserBabel.default, parserEstree.default],
                 semi: true,
                 singleQuote: true,
                 tabWidth: 2,
