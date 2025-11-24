@@ -5,7 +5,7 @@ import { ChallengeEditor } from "@/components/challenges/challenge-editor";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2 } from "lucide-react";
 import { useState, useRef } from "react";
 import { ImperativePanelHandle } from "react-resizable-panels";
 
@@ -44,6 +44,12 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
                             {isDescriptionVisible ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </Button>
                         <h1 className="text-lg font-bold md:text-xl">{challenge.title}</h1>
+                        {challenge.completed && (
+                            <Badge variant="outline" className="border-green-500 text-green-500 bg-green-500/10 gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Solved
+                            </Badge>
+                        )}
                         <Badge variant="outline" className="text-xs">{challenge.difficulty}</Badge>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -111,8 +117,8 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
                     {/* Editor Panel */}
                     <ResizablePanel defaultSize={isDescriptionVisible ? 65 : 100} minSize={40}>
                         <div className="h-full bg-[#1e1e1e]">
-                            <ChallengeEditor 
-                                initialCode={challenge.starterCode} 
+                            <ChallengeEditor
+                                initialCode={challenge.starterCode}
                                 challengeId={challenge.id}
                                 isDescriptionVisible={isDescriptionVisible}
                                 onToggleDescription={toggleDescription}

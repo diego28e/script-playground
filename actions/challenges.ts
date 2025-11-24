@@ -4,13 +4,36 @@ import { prisma } from "@/lib/prisma";
 import { Difficulty } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
-export async function getChallenges() {
+export async function getChallenges(userId?: string) {
     try {
         const challenges = await prisma.challenge.findMany({
             orderBy: { order: "asc" },
             include: { labels: true },
         });
-        return { success: true, data: challenges };
+
+        if (!userId) {
+            return { success: true, data: challenges.map(c => ({ ...c, completed: false })) };
+        }
+
+        const completedChallengeIds = await prisma.submission.findMany({
+            where: {
+                userId,
+                status: "PASSED",
+            },
+            select: {
+                challengeId: true,
+            },
+            distinct: ["challengeId"],
+        });
+
+        const completedSet = new Set(completedChallengeIds.map(s => s.challengeId));
+
+        const challengesWithStatus = challenges.map(challenge => ({
+            ...challenge,
+            completed: completedSet.has(challenge.id),
+        }));
+
+        return { success: true, data: challengesWithStatus };
     } catch (error) {
         console.error("Failed to fetch challenges:", error);
         return { success: false, error: "Failed to fetch challenges" };
@@ -30,13 +53,30 @@ export async function getChallenge(id: string) {
     }
 }
 
-export async function getChallengeBySlug(slug: string) {
+export async function getChallengeBySlug(slug: string, userId?: string) {
     try {
         const challenge = await prisma.challenge.findUnique({
             where: { slug },
             include: { labels: true },
         });
-        return { success: true, data: challenge };
+
+        if (!challenge) {
+            return { success: true, data: null };
+        }
+
+        let completed = false;
+        if (userId) {
+            const submission = await prisma.submission.findFirst({
+                where: {
+                    userId,
+                    challengeId: challenge.id,
+                    status: "PASSED",
+                },
+            });
+            completed = !!submission;
+        }
+
+        return { success: true, data: { ...challenge, completed } };
     } catch (error) {
         console.error("Failed to fetch challenge:", error);
         return { success: false, error: "Failed to fetch challenge" };

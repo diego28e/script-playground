@@ -18,7 +18,8 @@ export default async function ChallengesPage() {
         headers: await headers(),
     });
 
-    const { data: challenges } = await getChallenges();
+    const challengesResult = await getChallenges(session?.user?.id);
+    const challenges = challengesResult.success ? challengesResult.data : [];
 
     const isAdmin = session?.user?.role === "ADMIN";
 

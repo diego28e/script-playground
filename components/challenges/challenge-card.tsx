@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Difficulty } from "@prisma/client";
+import { CheckCircle2 } from "lucide-react";
 
 interface ChallengeCardProps {
     challenge: {
@@ -10,6 +11,7 @@ interface ChallengeCardProps {
         slug: string;
         description: string;
         difficulty: Difficulty;
+        completed?: boolean;
         labels: {
             name: string;
             color: string;
@@ -22,7 +24,12 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
         <Card className="flex h-full flex-col transition-all hover:border-zinc-400 dark:hover:border-zinc-700">
             <CardHeader>
                 <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="line-clamp-1 text-lg break-words min-w-0">{challenge.title}</CardTitle>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <CardTitle className="line-clamp-1 text-lg break-words">{challenge.title}</CardTitle>
+                        {challenge.completed && (
+                            <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" aria-label="Completed" />
+                        )}
+                    </div>
                     <Badge
                         variant={
                             challenge.difficulty === "EASY"
@@ -44,7 +51,7 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
                 </div>
             </CardHeader>
             <CardContent className="flex-1">
-                <div 
+                <div
                     className="line-clamp-3 text-sm text-muted-foreground break-words overflow-hidden"
                     dangerouslySetInnerHTML={{ __html: challenge.description }}
                 />
