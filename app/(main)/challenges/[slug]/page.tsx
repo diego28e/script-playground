@@ -2,6 +2,8 @@ import { getChallengeBySlug } from "@/actions/challenges";
 import { notFound } from "next/navigation";
 import { ChallengePageClient } from "@/components/challenges/challenge-page-client";
 
+export const runtime = 'nodejs';
+
 interface ChallengePageProps {
     params: Promise<{
         slug: string;

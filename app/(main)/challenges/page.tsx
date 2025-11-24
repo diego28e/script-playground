@@ -6,6 +6,8 @@ import { Metadata } from "next";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 
+export const runtime = 'nodejs';
+
 export const metadata: Metadata = {
     title: "Challenges - Script Playground",
     description: "Browse and solve coding challenges.",

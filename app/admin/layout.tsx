@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { AdminNav } from "@/components/admin/admin-nav";
 
+export const runtime = 'nodejs';
+
 export default async function AdminLayout({
     children,
 }: {

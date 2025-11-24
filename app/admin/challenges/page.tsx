@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 
+export const runtime = 'nodejs';
+
 export default async function AdminChallengesPage() {
     const { data: challenges } = await getChallenges();
 

@@ -2,6 +2,8 @@ import { getChallenge } from "@/actions/challenges";
 import { ChallengeForm } from "@/components/admin/challenge-form";
 import { notFound } from "next/navigation";
 
+export const runtime = 'nodejs';
+
 interface PageProps {
     params: Promise<{ id: string }>;
 }
