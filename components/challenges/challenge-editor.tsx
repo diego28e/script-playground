@@ -26,6 +26,9 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
     const [isOutputExpanded, setIsOutputExpanded] = useState(false);
     const [code, setCode] = useState(initialCode);
     const [isLoadingSubmission, setIsLoadingSubmission] = useState(true);
+    const [hasRun, setHasRun] = useState(false);
+    const [lastRunSuccess, setLastRunSuccess] = useState(false);
+    const [hasSubmittedCurrentRun, setHasSubmittedCurrentRun] = useState(false);
 
     useEffect(() => {
         const loadLastAttempt = async () => {
@@ -89,6 +92,8 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
         setIsRunning(true);
         setOutput([]);
         setError(null);
+        setHasRun(true);
+        setHasSubmittedCurrentRun(false);
 
         const logs: string[] = [];
         const originalConsole = {
@@ -118,8 +123,10 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
             const func = new Function(code);
             func();
             setOutput(logs.length > 0 ? logs : ['Code executed successfully']);
+            setLastRunSuccess(true);
         } catch (err: any) {
             setError(err.message || 'An error occurred');
+            setLastRunSuccess(false);
         } finally {
             console.log = originalConsole.log;
             console.error = originalConsole.error;
@@ -130,6 +137,7 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
 
     const handleSubmit = async () => {
         handleRun();
+        setHasSubmittedCurrentRun(true);
         
         setTimeout(async () => {
             const status = error ? 'FAILED' : 'PASSED';
@@ -169,6 +177,8 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
             localStorage.removeItem(`challenge_${challengeId}_code`);
             setOutput([]);
             setError(null);
+            setHasRun(false);
+            setLastRunSuccess(false);
             toast.success('Code reset to starter');
         }
     };
@@ -192,6 +202,10 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
             toast.error('Failed to format code');
         }
     };
+
+    const submitState = !hasRun ? 'initial' : error ? 'failed' : lastRunSuccess ? 'success' : 'initial';
+    const isSubmitReady = submitState === 'success';
+    const shouldPulse = isSubmitReady && !hasSubmittedCurrentRun;
 
     if (isLoadingSubmission) {
         return (
@@ -222,7 +236,12 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
                 <div className="flex items-center gap-1 md:gap-2">
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-zinc-100">
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-zinc-400 hover:text-zinc-100"
+                                title="Settings"
+                            >
                                 <Settings className="h-4 w-4" />
                             </Button>
                         </DropdownMenuTrigger>
@@ -266,16 +285,24 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
                         className="text-green-400 hover:text-green-300"
                     >
                         <Play className="h-4 w-4" />
-                        Run
+                        <span className="hidden sm:inline ml-1">Run</span>
                     </Button>
                     <Button
-                        variant="ghost"
+                        variant={isSubmitReady ? "default" : "ghost"}
                         size="sm"
                         onClick={handleSubmit}
-                        className="text-blue-400 hover:text-blue-300"
+                        disabled={!hasRun}
+                        className={`
+                            transition-all duration-300
+                            ${isSubmitReady 
+                                ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/50 md:rounded-md' + (isMobile && shouldPulse ? ' rounded-full animate-pulse' : isMobile ? ' rounded-full' : '')
+                                : 'text-zinc-400 hover:text-zinc-100 opacity-60'
+                            }
+                        `}
+                        title={!hasRun ? 'Run code first' : error ? 'Fix errors before submitting' : 'Submit your solution!'}
                     >
                         <Send className="h-4 w-4" />
-                        Submit
+                        <span className="hidden md:inline ml-1">Submit</span>
                     </Button>
                 </div>
             </div>
