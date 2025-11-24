@@ -54,6 +54,14 @@ const challenges = await prisma.challenge.findMany({
 });
 ```
 
+## AI Features
+
+The platform includes advanced AI capabilities powered by **Google GenAI**:
+
+- **Explain Code**: Get line-by-line explanations of code logic in Spanish.
+- **Ask AI**: Ask specific questions about the code and get context-aware answers.
+- **Auto-Format**: Code is automatically formatted before execution (configurable via "Auto-run" settings).
+
 ## Environment Variables
 
 Required for local development and production:
@@ -71,6 +79,9 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 # OAuth (Google)
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# AI (Google GenAI)
+GEMINI_API_KEY=your-gemini-api-key
 ```
 
 **Note**: `DATABASE_URL` uses port 6543 (PgBouncer) for connection pooling. `DIRECT_URL` uses port 5432 for migrations.
@@ -97,6 +108,7 @@ Open [http://localhost:3000](http://localhost:3000)
    - `NEXT_PUBLIC_APP_URL` (production URL)
    - `GOOGLE_CLIENT_ID`
    - `GOOGLE_CLIENT_SECRET`
+   - `GEMINI_API_KEY`
 3. **Deploy**: Push to main branch triggers auto-deployment
 
 ### Build Configuration
@@ -114,6 +126,8 @@ Open [http://localhost:3000](http://localhost:3000)
 - `actions/*.ts` - Server actions using Prisma Client
 - `app/**/page.tsx` - Pages with `export const runtime = 'nodejs'`
 - `middleware.ts` - Edge-compatible auth middleware (cookie checks only)
+- `app/terms/page.tsx` - Terms of Service
+- `app/privacy/page.tsx` - Privacy Policy
 
 ## Architecture Decisions
 
