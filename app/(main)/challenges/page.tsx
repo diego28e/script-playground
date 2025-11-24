@@ -36,10 +36,11 @@ export default async function ChallengesPage() {
                 {isAdmin && (
                     <Link
                         href="/admin/challenges"
-                        className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200 md:px-6 md:py-3"
                     >
                         <Plus className="h-4 w-4" />
-                        Manage Challenges
+                        <span className="hidden sm:inline">Manage Challenges</span>
+                        <span className="sm:hidden">Manage</span>
                     </Link>
                 )}
             </div>

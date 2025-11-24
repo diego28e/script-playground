@@ -21,22 +21,22 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
     return (
         <Card className="flex h-full flex-col transition-all hover:border-zinc-400 dark:hover:border-zinc-700">
             <CardHeader>
-                <div className="flex items-start justify-between">
-                    <CardTitle className="line-clamp-1 text-lg">{challenge.title}</CardTitle>
+                <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="line-clamp-1 text-lg break-words min-w-0">{challenge.title}</CardTitle>
                     <Badge
                         variant={
                             challenge.difficulty === "EASY"
-                                ? "secondary" // Green-ish usually, or default
+                                ? "secondary"
                                 : challenge.difficulty === "MEDIUM"
-                                    ? "default" // Yellow-ish
-                                    : "destructive" // Red
+                                    ? "default"
+                                    : "destructive"
                         }
                         className={
                             challenge.difficulty === "EASY"
-                                ? "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400"
+                                ? "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400 shrink-0"
                                 : challenge.difficulty === "MEDIUM"
-                                    ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-400"
-                                    : "bg-red-100 text-red-800 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400"
+                                    ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-400 shrink-0"
+                                    : "bg-red-100 text-red-800 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 shrink-0"
                         }
                     >
                         {challenge.difficulty}
@@ -44,14 +44,15 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
                 </div>
             </CardHeader>
             <CardContent className="flex-1">
-                <p className="line-clamp-3 text-sm text-muted-foreground">
-                    {challenge.description}
-                </p>
+                <div 
+                    className="line-clamp-3 text-sm text-muted-foreground break-words overflow-hidden"
+                    dangerouslySetInnerHTML={{ __html: challenge.description }}
+                />
                 <div className="mt-4 flex flex-wrap gap-2">
                     {challenge.labels.map((label) => (
                         <span
                             key={label.name}
-                            className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                            className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 break-all"
                         >
                             {label.name}
                         </span>
