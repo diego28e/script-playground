@@ -201,71 +201,42 @@ export function ChallengeEditor({
     }
   };
 
-  const handleFormat = async () => {
-    console.log("[FORMAT] Starting code formatting...");
-    console.log(
-      "[FORMAT] Environment:",
-      typeof window !== "undefined" ? "browser" : "server"
-    );
-
+  const handleFormat = () => {
     try {
-      console.log("[FORMAT] Step 1: Importing prettier/standalone...");
-      const prettier = await import("prettier/standalone").catch((e) => {
-        console.error("[FORMAT] Failed to import prettier/standalone:", e);
-        throw new Error(`Prettier standalone import failed: ${e.message}`);
-      });
-      console.log(
-        "[FORMAT] Prettier loaded successfully:",
-        !!prettier,
-        "has format:",
-        !!prettier.format
-      );
+      // Simple JavaScript formatter without external dependencies
+      const lines = code.split('\n');
+      let formatted = '';
+      let indentLevel = 0;
+      const indent = '  ';
 
-      console.log("[FORMAT] Step 2: Importing prettier/plugins/babel...");
-      const parserBabel = await import("prettier/plugins/babel").catch((e) => {
-        console.error("[FORMAT] Failed to import prettier/plugins/babel:", e);
-        throw new Error(`Babel plugin import failed: ${e.message}`);
-      });
-      console.log("[FORMAT] Babel plugin loaded:", !!parserBabel);
+      for (let line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
 
-      console.log("[FORMAT] Step 3: Importing prettier/plugins/estree...");
-      const parserEstree = await import("prettier/plugins/estree").catch(
-        (e) => {
-          console.error(
-            "[FORMAT] Failed to import prettier/plugins/estree:",
-            e
-          );
-          throw new Error(`Estree plugin import failed: ${e.message}`);
+        // Decrease indent for closing braces
+        if (trimmed.startsWith('}') || trimmed.startsWith(']') || trimmed.startsWith(')')) {
+          indentLevel = Math.max(0, indentLevel - 1);
         }
-      );
-      console.log("[FORMAT] Estree plugin loaded:", !!parserEstree);
 
-      console.log("[FORMAT] Step 4: Formatting code with prettier...");
-      console.log("[FORMAT] Code length:", code.length, "characters");
-      const formatted = await prettier.format(code, {
-        parser: "babel",
-        plugins: [parserBabel.default, parserEstree.default],
-        semi: true,
-        singleQuote: true,
-        tabWidth: 2,
-      });
-      console.log(
-        "[FORMAT] Code formatted successfully, new length:",
-        formatted.length
-      );
-      setCode(formatted);
-      toast.success("Code formatted");
+        // Add the line with proper indentation
+        formatted += indent.repeat(indentLevel) + trimmed + '\n';
+
+        // Increase indent after opening braces
+        if (trimmed.endsWith('{') || trimmed.endsWith('[') || trimmed.endsWith('(')) {
+          indentLevel++;
+        }
+        // Decrease indent after closing braces on same line
+        if ((trimmed.startsWith('}') || trimmed.startsWith(']') || trimmed.startsWith(')')) && 
+            (trimmed.endsWith('{') || trimmed.endsWith('['))) {
+          indentLevel++;
+        }
+      }
+
+      setCode(formatted.trim());
+      toast.success('Code formatted');
     } catch (err: any) {
-      console.error("[FORMAT] ===== ERROR DETAILS =====");
-      console.error("[FORMAT] Error object:", err);
-      console.error("[FORMAT] Error name:", err?.name);
-      console.error("[FORMAT] Error message:", err?.message);
-      console.error("[FORMAT] Error stack:", err?.stack);
-      console.error("[FORMAT] Error cause:", err?.cause);
-      console.error("[FORMAT] ===== END ERROR DETAILS =====");
-
-      const errorMsg = err?.message || err?.toString() || "Unknown error";
-      toast.error(`Format failed: ${errorMsg}`);
+      console.error('[FORMAT] Error:', err);
+      toast.error('Failed to format code');
     }
   };
 
