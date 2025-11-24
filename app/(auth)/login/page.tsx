@@ -1,6 +1,7 @@
 import { SignInButton } from "@/components/auth/sign-in-button";
 import { Metadata } from "next";
 import Image from "next/image";
+import Link from "next/link";
 
 export const metadata: Metadata = {
     title: "Login - Script Playground",
@@ -11,7 +12,7 @@ export default function LoginPage() {
     return (
         <div className="container relative h-screen flex-col items-center justify-center grid lg:max-w-none lg:grid-cols-2 lg:px-0">
             <div className="relative hidden h-full flex-col bg-zinc-900 p-10 text-white lg:flex">
-                <div className="relative z-20 flex items-center text-lg font-medium">
+                <Link href="/" className="relative z-20 flex items-center text-lg font-medium hover:opacity-80 transition-opacity">
                     <Image
                         src="/logo.png"
                         alt="Script Playground Logo"
@@ -20,13 +21,13 @@ export default function LoginPage() {
                         className="mr-2 rounded"
                     />
                     Script Playground
-                </div>
+                </Link>
                 <div className="relative z-20 mt-auto">
                     <blockquote className="space-y-2">
                         <p className="text-lg">
-                            &ldquo;This platform has revolutionized how I practice and improve my coding skills. The interface is intuitive and the challenges are top-notch.&rdquo;
+                            Practice and enhance your logic and coding skills in your language. With this app you can get line by line explanation with AI if you need it.
                         </p>
-                        <footer className="text-sm">Sofia Davis</footer>
+                        <footer className="text-sm">Developed by Diego Espinosa</footer>
                     </blockquote>
                 </div>
             </div>
