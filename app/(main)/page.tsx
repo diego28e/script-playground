@@ -32,12 +32,7 @@ export default function Home() {
                 >
                     Start Coding Now
                 </Link>
-                <Link
-                    href="/about"
-                    className="rounded-full border border-zinc-200 bg-white px-8 py-3 text-lg font-semibold text-zinc-900 transition-all hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:hover:bg-zinc-900"
-                >
-                    Learn More
-                </Link>
+
             </div>
         </div>
     );
