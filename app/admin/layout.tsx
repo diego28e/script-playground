@@ -15,9 +15,15 @@ export default async function AdminLayout({
         headers: await headers(),
     });
 
+    console.log("[Admin Layout] Session:", session ? "exists" : "null");
+    console.log("[Admin Layout] User role:", session?.user?.role);
+
     if (!session || session.user.role !== "ADMIN") {
+        console.log("[Admin Layout] Unauthorized, redirecting to /");
         redirect("/");
     }
+
+    console.log("[Admin Layout] Authorized, rendering admin layout");
 
     return (
         <div className="flex min-h-screen flex-col space-y-6">
