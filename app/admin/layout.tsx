@@ -11,19 +11,31 @@ export default async function AdminLayout({
 }: {
     children: React.ReactNode;
 }) {
+    const headersList = await headers();
+    const cookieHeader = headersList.get('cookie');
+    
+    console.log("[Admin Layout] Cookie header:", cookieHeader);
+    console.log("[Admin Layout] All headers:", Array.from(headersList.entries()).map(([k]) => k));
+    
     const session = await auth.api.getSession({
-        headers: await headers(),
+        headers: headersList,
     });
 
-    console.log("[Admin Layout] Session:", session ? "exists" : "null");
+    console.log("[Admin Layout] Session exists:", !!session);
+    console.log("[Admin Layout] Session data:", JSON.stringify(session));
     console.log("[Admin Layout] User role:", session?.user?.role);
 
-    if (!session || session.user.role !== "ADMIN") {
-        console.log("[Admin Layout] Unauthorized, redirecting to /");
+    if (!session) {
+        console.log("[Admin Layout] No session, redirecting");
+        redirect("/");
+    }
+    
+    if (session.user.role !== "ADMIN") {
+        console.log("[Admin Layout] Not admin, redirecting");
         redirect("/");
     }
 
-    console.log("[Admin Layout] Authorized, rendering admin layout");
+    console.log("[Admin Layout] Auth passed");
 
     return (
         <div className="flex min-h-screen flex-col space-y-6">
