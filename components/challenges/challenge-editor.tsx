@@ -17,16 +17,13 @@ import {
 interface ChallengeEditorProps {
     initialCode: string;
     challengeId: string;
-}
-
-interface ChallengeEditorProps {
-    initialCode: string;
-    challengeId: string;
     isDescriptionVisible: boolean;
     onToggleDescription: () => void;
+    isMobile: boolean;
 }
 
-export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible, onToggleDescription }: ChallengeEditorProps) {
+export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible, onToggleDescription, isMobile }: ChallengeEditorProps) {
+    const [isOutputExpanded, setIsOutputExpanded] = useState(false);
     const [code, setCode] = useState(initialCode);
     const [isLoadingSubmission, setIsLoadingSubmission] = useState(true);
 
@@ -206,17 +203,20 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
 
     return (
         <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between border-b border-zinc-700 bg-[#1e1e1e] px-2 py-2 md:px-4">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between border-b border-zinc-700 bg-[#1e1e1e] px-2 py-2 md:px-4 shrink-0">
                 <div className="flex items-center gap-2">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={onToggleDescription}
-                        className="hidden text-zinc-400 hover:text-zinc-100 md:flex"
-                        title={isDescriptionVisible ? "Hide description" : "Show description"}
-                    >
-                        {isDescriptionVisible ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </Button>
+                    {!isMobile && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={onToggleDescription}
+                            className="text-zinc-400 hover:text-zinc-100"
+                            title={isDescriptionVisible ? "Hide description" : "Show description"}
+                        >
+                            {isDescriptionVisible ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </Button>
+                    )}
                     <span className="text-xs text-zinc-400 md:text-sm">script.js</span>
                 </div>
                 <div className="flex items-center gap-1 md:gap-2">
@@ -279,7 +279,8 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
                     </Button>
                 </div>
             </div>
-            <div className="flex-1 min-h-0">
+            {/* Editor */}
+            <div className={isMobile ? "flex-1 min-h-0 overflow-hidden" : "flex-1 min-h-0"}>
                 <Editor
                     height="100%"
                     defaultLanguage="javascript"
@@ -288,18 +289,49 @@ export function ChallengeEditor({ initialCode, challengeId, isDescriptionVisible
                     onChange={(value) => setCode(value || "")}
                     options={{
                         minimap: { enabled: false },
-                        fontSize: 13,
+                        fontSize: isMobile ? 12 : 13,
                         lineNumbers: "on",
                         scrollBeyondLastLine: false,
                         automaticLayout: true,
                         wordWrap: "on",
                         wrappingStrategy: "advanced",
+                        scrollbar: {
+                            vertical: isMobile ? 'auto' : 'visible',
+                            horizontal: 'auto',
+                        },
                     }}
                 />
             </div>
-            <div className="border-t border-zinc-700 bg-zinc-900 p-2 md:p-4">
-                <h3 className="mb-2 text-xs font-semibold text-zinc-300 md:text-sm">Output</h3>
-                <div className="max-h-24 overflow-y-auto rounded-md bg-zinc-950 p-2 font-mono text-xs md:max-h-32 md:p-3 md:text-sm">
+
+            {/* Output Panel */}
+            <div 
+                className={`border-t border-zinc-700 bg-zinc-900 shrink-0 transition-all duration-200 ${
+                    isMobile 
+                        ? isOutputExpanded ? 'h-[50vh]' : 'h-[140px]'
+                        : 'h-auto'
+                }`}
+            >
+                <div className="flex items-center justify-between px-2 py-2 md:px-4 md:py-3">
+                    <h3 className="text-xs font-semibold text-zinc-300 md:text-sm">Output</h3>
+                    {isMobile && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsOutputExpanded(!isOutputExpanded)}
+                            className="text-zinc-400 hover:text-zinc-100 h-6 px-2"
+                        >
+                            <span className="text-xs">{isOutputExpanded ? 'Collapse' : 'Expand'}</span>
+                        </Button>
+                    )}
+                </div>
+                <div 
+                    className={`overflow-y-auto rounded-md bg-zinc-950 mx-2 mb-2 p-2 font-mono text-xs md:mx-4 md:mb-4 md:p-3 md:text-sm ${
+                        isMobile
+                            ? isOutputExpanded ? 'h-[calc(50vh-60px)]' : 'h-[90px]'
+                            : 'max-h-32'
+                    }`}
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                >
                     {error ? (
                         <div className="text-red-400">
                             <span className="font-semibold">Error:</span> {error}
