@@ -5,8 +5,12 @@ import { revalidatePath } from "next/cache";
 
 type Difficulty = "EASY" | "MEDIUM" | "HARD";
 
+console.log("[Challenges Action] Module loaded");
+
 export async function getChallenges() {
+    console.log("[getChallenges] Starting fetch");
     try {
+        console.log("[getChallenges] Calling Supabase");
         const { data: challenges, error } = await supabase
             .from("challenge")
             .select(`
@@ -15,16 +19,25 @@ export async function getChallenges() {
             `)
             .order("order", { ascending: true });
 
-        if (error) throw error;
+        console.log("[getChallenges] Supabase response - error:", error);
+        console.log("[getChallenges] Supabase response - data count:", challenges?.length);
+
+        if (error) {
+            console.error("[getChallenges] Supabase error:", error);
+            throw error;
+        }
 
         const formatted = challenges?.map((c: any) => ({
             ...c,
             labels: c.labels?.map((l: any) => l.label) || []
         }));
 
+        console.log("[getChallenges] Success, returning data");
         return { success: true, data: formatted };
     } catch (error) {
-        console.error("Failed to fetch challenges:", error);
+        console.error("[getChallenges] CATCH ERROR:", error);
+        console.error("[getChallenges] Error type:", typeof error);
+        console.error("[getChallenges] Error stack:", error instanceof Error ? error.stack : 'N/A');
         return { success: false, error: "Failed to fetch challenges" };
     }
 }
