@@ -3,28 +3,28 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Session } from "better-auth/types";
 
 export default async function authMiddleware(request: NextRequest) {
-    const baseURL = request.nextUrl.origin;
-    console.log("[Middleware] Request URL:", request.url);
-    console.log("[Middleware] Base URL:", baseURL);
-    console.log("[Middleware] Fetching session from:", `${baseURL}/api/auth/get-session`);
+  const baseURL = process.env.BETTER_AUTH_URL || request.nextUrl.origin;
+  console.log("[Middleware] Request URL:", request.url);
+  console.log("[Middleware] Origin:", request.nextUrl.origin);
+  console.log("[Middleware] BETTER_AUTH_URL:", process.env.BETTER_AUTH_URL);
+  console.log("[Middleware] Using baseURL:", baseURL);
 
-    const { data: session } = await betterFetch<Session>(
-        "/api/auth/get-session",
-        {
-            baseURL,
-            headers: {
-                //get the cookie from the request
-                cookie: request.headers.get("cookie") || "",
-            },
-        },
-    );
-
-    if (!session) {
-        return NextResponse.redirect(new URL("/login", request.url));
+  const { data: session } = await betterFetch<Session>(
+    "/api/auth/get-session",
+    {
+      baseURL,
+      headers: {
+        cookie: request.headers.get("cookie") || "",
+      },
     }
-    return NextResponse.next();
+  );
+
+  if (!session) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  return NextResponse.next();
 }
 
 export const config = {
-    matcher: ["/challenges/:path*"],
+  matcher: ["/admin/:path*"],
 };
