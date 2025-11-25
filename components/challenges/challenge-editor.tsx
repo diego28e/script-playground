@@ -560,7 +560,7 @@ export function ChallengeEditor({
 
       {/* AI Dialog */}
       <Dialog open={isAIDialogOpen} onOpenChange={setIsAIDialogOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-purple-500" />
@@ -600,7 +600,7 @@ export function ChallengeEditor({
             )}
 
             {aiResponse && (
-              <div className="prose prose-sm dark:prose-invert max-w-none bg-zinc-50/50 dark:bg-zinc-900/50 p-3 sm:p-4 rounded-lg overflow-x-auto break-words">
+              <div className="prose prose-sm dark:prose-invert max-w-none bg-zinc-50/50 dark:bg-zinc-900/50 p-3 sm:p-4 rounded-lg [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:break-words [&_*]:break-words">
                 <ReactMarkdown>{aiResponse}</ReactMarkdown>
               </div>
             )}
