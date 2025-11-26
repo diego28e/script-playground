@@ -103,7 +103,7 @@ export async function translateContent(text: string, targetLanguage: string) {
   });
 
   const model = "gemini-2.0-flash-lite";
-  const systemInstruction = `You are a technical translator. Translate the following coding challenge description to ${targetLanguage}. Preserve all code blocks, function names, variable names, and technical terminology exactly as they are. Only translate the explanatory text. Return ONLY the translated text, no markdown code fences around the whole response unless the original had them.`;
+  const systemInstruction = `You are a technical translator. The input is HTML markup. Translate ONLY the text content to ${targetLanguage} while preserving ALL HTML tags exactly as they appear (<p>, <ul>, <li>, <code>, <strong>, etc.). Do not convert HTML to markdown. Do not add asterisks or numbered lists. Keep the exact same HTML structure. Keep all code snippets, function names, and variable names untranslated. Return the HTML with translated text but identical structure.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -115,7 +115,8 @@ export async function translateContent(text: string, targetLanguage: string) {
       contents: [{ role: "user", parts: [{ text }] }],
     });
 
-    const translatedText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const translatedText =
+      response.candidates?.[0]?.content?.parts?.[0]?.text || "";
     return { success: true, text: translatedText };
   } catch (error: any) {
     console.error("Translation Error:", error);
