@@ -324,13 +324,16 @@ export function ChallengeForm({
                 <SelectValue placeholder="Add existing label..." />
               </SelectTrigger>
               <SelectContent className="bg-white dark:bg-zinc-950">
-                <div className="px-2 pb-1">
+                <div
+                  className="px-2 pb-1"
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
                   <Input
                     placeholder="Search labels..."
                     value={labelSearch}
                     onChange={(e) => setLabelSearch(e.target.value)}
                     className="h-8"
-                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
                   />
                 </div>
                 {availableLabels
