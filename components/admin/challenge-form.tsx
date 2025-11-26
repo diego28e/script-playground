@@ -72,6 +72,7 @@ export function ChallengeForm({
   });
 
   const [newLabelName, setNewLabelName] = useState("");
+  const [labelSearch, setLabelSearch] = useState("");
 
   useEffect(() => {
     fetchLabels();
@@ -187,29 +188,10 @@ export function ChallengeForm({
       </div>
 
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <Label>Description</Label>
-          <div className="flex items-center gap-2 bg-muted p-1 rounded-md">
-            <button
-              type="button"
-              onClick={() => setActiveTab("en")}
-              className={`px-3 py-1 text-xs font-medium rounded-sm transition-all ${activeTab === "en" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              English
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("es")}
-              className={`px-3 py-1 text-xs font-medium rounded-sm transition-all ${activeTab === "es" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              Spanish
-            </button>
-          </div>
-        </div>
-
-        <div className="relative">
-          {activeTab === "es" && (
-            <div className="absolute top-2 right-2 z-10">
+          <div className="flex items-center gap-2">
+            {activeTab === "es" && (
               <Button
                 type="button"
                 variant="outline"
@@ -236,18 +218,45 @@ export function ChallengeForm({
                   }
                 }}
                 disabled={isTranslating || !formData.description.en}
-                className="h-8 gap-2 bg-background/80 backdrop-blur-sm"
+                className="h-7 gap-1.5 text-xs"
               >
                 {isTranslating ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  <Sparkles className="h-3 w-3 text-indigo-500" />
+                  <Sparkles className="h-3 w-3" />
                 )}
-                Translate from English
+                <span className="hidden sm:inline">Translate</span>
+                <span className="sm:hidden">AI</span>
               </Button>
+            )}
+            <div className="flex items-center gap-2 bg-muted p-1 rounded-md">
+              <button
+                type="button"
+                onClick={() => setActiveTab("en")}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 ${
+                  activeTab === "en"
+                    ? "bg-gradient-to-b from-slate-700 to-slate-800 text-white shadow-lg shadow-slate-900/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("es")}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 ${
+                  activeTab === "es"
+                    ? "bg-gradient-to-b from-slate-700 to-slate-800 text-white shadow-lg shadow-slate-900/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
+              >
+                ES
+              </button>
             </div>
-          )}
+          </div>
+        </div>
 
+        <div className="relative">
           <RichTextEditor
             value={
               activeTab === "en"
@@ -310,18 +319,40 @@ export function ChallengeForm({
             })}
           </div>
           <div className="flex gap-2">
-            <Select onValueChange={toggleLabel}>
+            <Select onValueChange={toggleLabel} value="">
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Add existing label..." />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="bg-white dark:bg-zinc-950">
+                <div className="px-2 pb-1">
+                  <Input
+                    placeholder="Search labels..."
+                    value={labelSearch}
+                    onChange={(e) => setLabelSearch(e.target.value)}
+                    className="h-8"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
                 {availableLabels
-                  .filter((l) => !formData.labels.includes(l.id))
+                  .filter(
+                    (l) =>
+                      !formData.labels.includes(l.id) &&
+                      l.name.toLowerCase().includes(labelSearch.toLowerCase())
+                  )
                   .map((label) => (
                     <SelectItem key={label.id} value={label.id}>
                       {label.name}
                     </SelectItem>
                   ))}
+                {availableLabels.filter(
+                  (l) =>
+                    !formData.labels.includes(l.id) &&
+                    l.name.toLowerCase().includes(labelSearch.toLowerCase())
+                ).length === 0 && (
+                  <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                    No labels found
+                  </div>
+                )}
               </SelectContent>
             </Select>
             <div className="flex gap-2 min-w-[200px]">
