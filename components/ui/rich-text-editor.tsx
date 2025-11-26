@@ -1,11 +1,24 @@
 "use client";
 
 import { useEditor, EditorContent } from "@tiptap/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import StarterKit from "@tiptap/starter-kit";
-import Underline from "@tiptap/extension-underline";
-import Link from "@tiptap/extension-link";
-import { Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Undo, Redo, Link as LinkIcon } from "lucide-react";
+import { Underline } from "@tiptap/extension-underline";
+import { Link } from "@tiptap/extension-link";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Color } from "@tiptap/extension-color";
+import {
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  List,
+  ListOrdered,
+  Undo,
+  Redo,
+  Link as LinkIcon,
+  Minus,
+  Palette,
+} from "lucide-react";
 import { Button } from "./button";
 import "./rich-text-editor.css";
 
@@ -15,11 +28,26 @@ interface RichTextEditorProps {
 }
 
 export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const colors = [
+    "#000000",
+    "#424242",
+    "#dc2626",
+    "#f97316",
+    "#ca8a04",
+    "#16a34a",
+    "#2563eb",
+    "#9333ea",
+    "#ec4899",
+  ];
+
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Underline,
+      Underline.configure(),
       Link.configure({ openOnClick: false }),
+      TextStyle.configure(),
+      Color.configure(),
     ],
     content: value,
     immediatelyRender: false,
@@ -94,6 +122,40 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
         >
           <LinkIcon className="h-4 w-4" />
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => editor.chain().focus().setHorizontalRule().run()}
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+        <div className="relative">
+          <Button
+            type="button"
+            size="sm"
+            variant={showColorPicker ? "default" : "ghost"}
+            onClick={() => setShowColorPicker(!showColorPicker)}
+          >
+            <Palette className="h-4 w-4" />
+          </Button>
+          {showColorPicker && (
+            <div className="absolute top-full mt-1 p-2 bg-white dark:bg-zinc-900 border rounded-md shadow-lg z-50 flex gap-1">
+              {colors.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => {
+                    editor.chain().focus().setColor(color).run();
+                    setShowColorPicker(false);
+                  }}
+                  className="w-6 h-6 rounded border-2 border-zinc-300 dark:border-zinc-700 hover:scale-110 transition-transform"
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         <div className="flex-1" />
         <Button
           type="button"

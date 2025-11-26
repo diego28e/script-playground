@@ -62,9 +62,15 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.84.0
         version: 2.84.0
+      '@tiptap/extension-color':
+        specifier: ^3.11.0
+        version: 3.11.0(@tiptap/extension-text-style@3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0)))
       '@tiptap/extension-link':
         specifier: ^3.11.0
         version: 3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))(@tiptap/pm@3.11.0)
+      '@tiptap/extension-text-style':
+        specifier: ^3.11.0
+        version: 3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))
       '@tiptap/extension-underline':
         specifier: ^3.11.0
         version: 3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))
@@ -1273,6 +1279,11 @@ packages:
     peerDependencies:
       '@tiptap/core': ^3.11.0
 
+  '@tiptap/extension-color@3.11.0':
+    resolution: {integrity: sha512-4H+3nyheow0tBt+q/Pkkm/pR/F6vUAdKZaq1HtWFi7LcFzCYxdB3Si625EparKO3kMvGvULjdd+/zt68NS7Acw==}
+    peerDependencies:
+      '@tiptap/extension-text-style': ^3.11.0
+
   '@tiptap/extension-document@3.11.0':
     resolution: {integrity: sha512-N2G3cwL2Dtur/CgD/byJmFx9T5no6fTO/U462VP3rthQYrRA1AB3TCYqtlwJkmyoxRTNd4qIg4imaPl8ej6Heg==}
     peerDependencies:
@@ -1350,6 +1361,11 @@ packages:
 
   '@tiptap/extension-strike@3.11.0':
     resolution: {integrity: sha512-XVP/WMYLrqLBfUsGPu2H9MrOUZLhGUaxtZ3hSRffDi/lsw53x/coZ9eO0FxOB9R7z2ksHWmticIs+0YnKt9LNQ==}
+    peerDependencies:
+      '@tiptap/core': ^3.11.0
+
+  '@tiptap/extension-text-style@3.11.0':
+    resolution: {integrity: sha512-q8RM4gzmdnUHosL65SIJzTTmL29bm+3hNPdloOuJyLd4sTYs2q+cues5mH5/n85HqX3+TvKrfrTVb1Yj62E1NA==}
     peerDependencies:
       '@tiptap/core': ^3.11.0
 
@@ -4876,6 +4892,10 @@ snapshots:
     dependencies:
       '@tiptap/core': 3.11.0(@tiptap/pm@3.11.0)
 
+  '@tiptap/extension-color@3.11.0(@tiptap/extension-text-style@3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0)))':
+    dependencies:
+      '@tiptap/extension-text-style': 3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))
+
   '@tiptap/extension-document@3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))':
     dependencies:
       '@tiptap/core': 3.11.0(@tiptap/pm@3.11.0)
@@ -4940,6 +4960,10 @@ snapshots:
       '@tiptap/core': 3.11.0(@tiptap/pm@3.11.0)
 
   '@tiptap/extension-strike@3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))':
+    dependencies:
+      '@tiptap/core': 3.11.0(@tiptap/pm@3.11.0)
+
+  '@tiptap/extension-text-style@3.11.0(@tiptap/core@3.11.0(@tiptap/pm@3.11.0))':
     dependencies:
       '@tiptap/core': 3.11.0(@tiptap/pm@3.11.0)
 
