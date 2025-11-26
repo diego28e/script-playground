@@ -92,3 +92,36 @@ export async function generateAIResponse(
     };
   }
 }
+
+export async function translateContent(text: string, targetLanguage: string) {
+  if (!process.env.GEMINI_API_KEY) {
+    return { success: false, error: "GEMINI_API_KEY is not set" };
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+  });
+
+  const model = "gemini-2.0-flash-lite";
+  const systemInstruction = `You are a technical translator. Translate the following coding challenge description to ${targetLanguage}. Preserve all code blocks, function names, variable names, and technical terminology exactly as they are. Only translate the explanatory text. Return ONLY the translated text, no markdown code fences around the whole response unless the original had them.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      config: {
+        temperature: 0.2,
+        systemInstruction: [{ text: systemInstruction }],
+      },
+      contents: [{ role: "user", parts: [{ text }] }],
+    });
+
+    const translatedText = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    return { success: true, text: translatedText };
+  } catch (error: any) {
+    console.error("Translation Error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to translate content",
+    };
+  }
+}

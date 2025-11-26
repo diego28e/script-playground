@@ -1,15 +1,18 @@
+"use client";
+
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Difficulty } from "@prisma/client";
 import { CheckCircle2 } from "lucide-react";
+import { useLanguage } from "@/components/providers/language-provider";
 
 interface ChallengeCardProps {
     challenge: {
         id: string;
         title: string;
         slug: string;
-        description: string;
+        description: any;
         difficulty: Difficulty;
         completed?: boolean;
         labels: {
@@ -20,6 +23,27 @@ interface ChallengeCardProps {
 }
 
 export function ChallengeCard({ challenge }: ChallengeCardProps) {
+    const { language } = useLanguage();
+
+    const getDescription = () => {
+        let desc = challenge.description;
+
+        if (typeof desc === 'string') {
+            try {
+                const parsed = JSON.parse(desc);
+                if (typeof parsed === 'object' && parsed !== null) {
+                    desc = parsed;
+                } else {
+                    return desc;
+                }
+            } catch {
+                return desc;
+            }
+        }
+
+        return desc?.[language] || desc?.['en'] || "";
+    };
+
     return (
         <Card className="flex h-full flex-col transition-all hover:border-zinc-400 dark:hover:border-zinc-700">
             <CardHeader>
@@ -53,7 +77,7 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
             <CardContent className="flex-1">
                 <div
                     className="line-clamp-3 text-sm text-muted-foreground break-words overflow-hidden"
-                    dangerouslySetInnerHTML={{ __html: challenge.description }}
+                    dangerouslySetInnerHTML={{ __html: getDescription() }}
                 />
                 <div className="mt-4 flex flex-wrap gap-2">
                     {challenge.labels.map((label) => (

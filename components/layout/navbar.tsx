@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { UserDropdown } from "@/components/auth/user-dropdown";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
 
 export function Navbar() {
     const { data: session, isPending, error } = authClient.useSession();
@@ -39,9 +40,13 @@ export function Navbar() {
                     {isPending ? (
                         <div className="h-8 w-8 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
                     ) : session && !error ? (
-                        <UserDropdown />
+                        <>
+                            <LanguageSwitcher />
+                            <UserDropdown />
+                        </>
                     ) : (
                         <>
+                            <LanguageSwitcher />
                             <Link
                                 href="/login"
                                 className="text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"

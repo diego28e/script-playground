@@ -86,7 +86,7 @@ export async function getChallengeBySlug(slug: string, userId?: string) {
 export async function createChallenge(data: {
     title: string;
     slug: string;
-    description: string;
+    description: any;
     starterCode: string;
     solutionCode?: string;
     difficulty: Difficulty;
@@ -126,7 +126,7 @@ export async function updateChallenge(
     data: {
         title?: string;
         slug?: string;
-        description?: string;
+        description?: any;
         starterCode?: string;
         solutionCode?: string;
         difficulty?: Difficulty;

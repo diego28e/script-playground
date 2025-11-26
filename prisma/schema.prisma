@@ -7,17 +7,16 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String       @id @default(cuid())
   name          String?
-  email         String    @unique
+  email         String       @unique
   emailVerified Boolean?
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  role          Role      @default(USER)
-
-  sessions      Session[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  role          Role         @default(USER)
   accounts      Account[]
+  sessions      Session[]
   submissions   Submission[]
 
   @@map("user")
@@ -26,16 +25,14 @@ model User {
 model Session {
   id        String   @id @default(cuid())
   userId    String
-  token     String
+  token     String   @unique
   expiresAt DateTime
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([token])
   @@map("session")
 }
 
@@ -46,14 +43,13 @@ model Account {
   providerId            String
   accessToken           String?
   refreshToken          String?
-  idToken               String?
   accessTokenExpiresAt  DateTime?
   refreshTokenExpiresAt DateTime?
   scope                 String?
   password              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
-
+  idToken               String?
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("account")
@@ -71,25 +67,24 @@ model Verification {
 }
 
 model Challenge {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String       @id @default(cuid())
   title        String
-  slug         String   @unique
-  description  String
+  slug         String       @unique
+  description  Json
   starterCode  String
   solutionCode String?
-  order        Int      @default(0)
-  difficulty   Difficulty @default(EASY)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  labels       Label[]
+  order        Int          @default(0)
+  difficulty   Difficulty   @default(EASY)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
   submissions  Submission[]
+  labels       Label[]
 
   @@map("challenge")
 }
 
 model Submission {
-  id          String           @id @default(uuid()) @db.Uuid
+  id          String           @id @default(cuid())
   userId      String
   challengeId String
   code        String
@@ -97,15 +92,14 @@ model Submission {
   output      String?
   error       String?
   createdAt   DateTime         @default(now())
-
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   challenge   Challenge        @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("submission")
 }
 
 model Label {
-  id         String      @id @default(uuid()) @db.Uuid
+  id         String      @id @default(cuid())
   name       String
   color      String      @default("#000000")
   challenges Challenge[]
