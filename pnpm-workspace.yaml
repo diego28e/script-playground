@@ -1,0 +1,6 @@
+# pnpm 11 fails an install when a dependency has an install script that is neither allowed nor denied here.
+# pnpm 10 skipped these three scripts, and the app has always built and run without them.
+allowBuilds:
+  "@prisma/engines": false
+  prisma: false
+  unrs-resolver: false
