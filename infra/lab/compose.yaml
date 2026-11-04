@@ -1,0 +1,31 @@
+# The lab's hub. Student containers are not listed here: the hub starts one per student from LAB_IMAGE.
+# Needs Docker Compose v2: `docker compose up -d --build` from this folder (see README.md).
+name: lab
+
+services:
+  hub:
+    build: hub
+    image: lab-hub:6.1.1
+    container_name: jupyterhub
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      LAB_NETWORK: jupyterhub
+      LAB_HUB_HOST: jupyterhub
+    # Loopback only: nginx on the host terminates TLS. A published 0.0.0.0 port would skip the host firewall.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Lets the hub start and stop student containers. This makes the hub root-equivalent on the host:
+      # no student code ever runs in it, and student containers never get the socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - hub-data:/srv/jupyterhub/data
+    networks:
+      - jupyterhub
+
+networks:
+  jupyterhub:
+    name: jupyterhub
+
+volumes:
+  hub-data:

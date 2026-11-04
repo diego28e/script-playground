@@ -1,0 +1,2 @@
+# Scripts copied into the Linux images must keep LF endings, even in a Windows checkout.
+*.sh text eol=lf

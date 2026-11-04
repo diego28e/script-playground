@@ -1,0 +1,10 @@
+{
+  "argv": ["/opt/course/bin/python", "-Xfrozen_modules=off", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+  "display_name": "Python (lc-mastery)",
+  "language": "python",
+  "metadata": { "debugger": true },
+  "env": {
+    "LC_MASTERY_ROOT": "/home/learner/work/langchain-langgraph-mastery",
+    "PIP_CONSTRAINT": "/opt/course/constraints.txt"
+  }
+}
