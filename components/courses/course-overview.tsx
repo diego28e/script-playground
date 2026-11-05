@@ -10,7 +10,7 @@ import { enrollInCourse, type getCourseBySlug } from "@/actions/courses";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { InlineCode, formatHours } from "@/components/courses/inline-code";
-import { labNotebookUrl, sourceFileUrl } from "@/lib/lab";
+import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
 
 export type CourseDetail = NonNullable<Awaited<ReturnType<typeof getCourseBySlug>>["data"]>;
 type CourseLesson = CourseDetail["modules"][number]["lessons"][number];
@@ -33,7 +33,7 @@ const COPY = {
         requirements: "Requisitos del proyecto",
         prerequisites: "Antes de empezar",
         openInLab: "Abrir en el laboratorio",
-        readGuide: "Leer la guía",
+        openLesson: "Abrir la lección",
         enrollError: "No pudimos inscribirte. Inténtalo de nuevo.",
         enrolled: "¡Listo! Ya estás inscrito.",
         kinds: { NOTEBOOK: "Notebook", READING: "Lectura", PROJECT: "Proyecto", VIDEO: "Video", PRACTICE: "Práctica" },
@@ -56,7 +56,7 @@ const COPY = {
         requirements: "Project requirements",
         prerequisites: "Before you start",
         openInLab: "Open in the lab",
-        readGuide: "Read the guide",
+        openLesson: "Open the lesson",
         enrollError: "We couldn't enroll you. Try again.",
         enrolled: "You're enrolled.",
         kinds: { NOTEBOOK: "Notebook", READING: "Reading", PROJECT: "Project", VIDEO: "Video", PRACTICE: "Practice" },
@@ -89,8 +89,10 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
     const lessons = course.modules.flatMap((courseModule) => courseModule.lessons);
     const completed = lessons.filter((lesson) => course.progress[lesson.id] === "COMPLETED").length;
     const totalMinutes = lessons.reduce((sum, lesson) => sum + (lesson.estimatedMinutes ?? 0), 0);
-    const next = lessons.find((lesson) => course.progress[lesson.id] !== "COMPLETED");
-    const nextHref = next ? lessonHref(course, next) : null;
+    // "Continue" opens the first unfinished lesson's page in the lesson workspace.
+    const nextModule = course.modules.find((courseModule) => courseModule.lessons.some((lesson) => course.progress[lesson.id] !== "COMPLETED"));
+    const next = nextModule?.lessons.find((lesson) => course.progress[lesson.id] !== "COMPLETED");
+    const nextHref = nextModule && next ? lessonPath(course.slug, nextModule.slug, next.slug) : null;
     const parts = [...new Set(course.modules.map((courseModule) => courseModule.part ?? ""))];
 
     const enroll = () =>
@@ -153,7 +155,7 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
                                 <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
                             </ShimmerButton>
                         ) : nextHref && next ? (
-                            <ShimmerButton href={nextHref} external tone="signal" size="lg">
+                            <ShimmerButton href={nextHref} tone="signal" size="lg">
                                 {t.continueWith(next.code ?? next.title)}
                                 <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
                             </ShimmerButton>
@@ -198,7 +200,7 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
                                     </header>
                                     <ol className="border-t border-border">
                                         {courseModule.lessons.map((lesson) => (
-                                            <LessonRow key={lesson.id} course={course} lesson={lesson} t={t} />
+                                            <LessonRow key={lesson.id} course={course} moduleSlug={courseModule.slug} lesson={lesson} t={t} />
                                         ))}
                                     </ol>
                                 </article>
@@ -210,7 +212,7 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
     );
 }
 
-function LessonRow({ course, lesson, t }: { course: CourseDetail; lesson: CourseLesson; t: (typeof COPY)["es"] }) {
+function LessonRow({ course, moduleSlug, lesson, t }: { course: CourseDetail; moduleSlug: string; lesson: CourseLesson; t: (typeof COPY)["es"] }) {
     const Icon = KIND_ICONS[lesson.kind];
     const status = course.progress[lesson.id];
     const href = lessonHref(course, lesson);
@@ -261,14 +263,18 @@ function LessonRow({ course, lesson, t }: { course: CourseDetail; lesson: Course
                             <span className="font-medium text-foreground">{t.prerequisites}:</span> {lesson.prerequisites}
                         </p>
                     )}
-                    {href && (
-                        <div>
-                            <ShimmerButton href={href} external tone={inLab ? "ink" : "glass"} size="sm" onHover>
-                                {inLab ? t.openInLab : t.readGuide}
+                    <div className="flex flex-wrap gap-2">
+                        <ShimmerButton href={lessonPath(course.slug, moduleSlug, lesson.slug)} tone="ink" size="sm" onHover>
+                            {t.openLesson}
+                            <ArrowRight className="size-3.5" strokeWidth={2.5} aria-hidden="true" />
+                        </ShimmerButton>
+                        {href && inLab && (
+                            <ShimmerButton href={href} external tone="glass" size="sm" onHover>
+                                {t.openInLab}
                                 <ExternalLink className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
                             </ShimmerButton>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </details>
         </li>

@@ -12,3 +12,8 @@ export function sourceFileUrl(repoUrl: string | null, ref: string | null, source
   if (!repoUrl || !ref || !sourcePath) return null;
   return `${repoUrl}/blob/${ref}/${sourcePath}`;
 }
+
+/** A lesson's page in the platform's lesson workspace. */
+export function lessonPath(courseSlug: string, moduleSlug: string, lessonSlug: string) {
+  return `/courses/${encodeURIComponent(courseSlug)}/${encodeURIComponent(moduleSlug)}/${encodeURIComponent(lessonSlug)}`;
+}

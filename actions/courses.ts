@@ -127,7 +127,8 @@ export async function enrollInCourse(courseId: string) {
       update: {},
     });
     revalidatePath("/courses");
-    revalidatePath(`/courses/${course.slug}`);
+    // "layout" also refreshes the course's lesson pages under it.
+    revalidatePath(`/courses/${course.slug}`, "layout");
     return { success: true };
   } catch (error) {
     console.error("Failed to enroll:", error);
