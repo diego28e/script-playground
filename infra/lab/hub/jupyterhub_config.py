@@ -11,19 +11,43 @@ def env_set(name):
 
 
 # --- Who can sign in -------------------------------------------------------------------------------
-# Google login. OAuthenticator reads OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET and OAUTH_CALLBACK_URL from the
-# environment. The username is the Google account's email.
-c.JupyterHub.authenticator_class = "google"
+# Students sign in with their Academia del Código account: the platform is the OpenID Connect provider
+# (lib/auth.ts in the platform) and this hub is its trusted client, created once at /admin/lab-access.
+# OAuthenticator reads OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET and OAUTH_CALLBACK_URL from the environment.
+platform = os.environ["LAB_PLATFORM_URL"].rstrip("/")
+# Where the hub itself reaches the platform for tokens and user info. The same address in production; on a
+# development machine the hub's container reaches the host's platform at host.docker.internal instead.
+platform_api = os.environ.get("LAB_PLATFORM_INTERNAL_URL", platform).rstrip("/")
 
-# Go straight to Google instead of showing the hub's "Sign in with Google" page.
-c.Authenticator.auto_login = True
+c.JupyterHub.authenticator_class = "generic-oauth"
+c.GenericOAuthenticator.login_service = "Academia del Código"
+c.GenericOAuthenticator.authorize_url = f"{platform}/api/auth/oauth2/authorize"
+c.GenericOAuthenticator.token_url = f"{platform_api}/api/auth/oauth2/token"
+c.GenericOAuthenticator.userdata_url = f"{platform_api}/api/auth/oauth2/userinfo"
+c.GenericOAuthenticator.scope = ["openid", "profile", "email"]
+# The client is registered for client_secret_basic, and the platform refuses any other method.
+c.GenericOAuthenticator.basic_auth = True
+c.GenericOAuthenticator.enable_pkce = True
+# The username is the account's email, as it was with Google, so every student keeps their volume
+# (jupyterhub-user-{username}) and their work.
+c.GenericOAuthenticator.username_claim = "email"
 
-# Only the listed accounts can sign in. The server limit below counts running servers, not people, so
-# without this list a second account could start a server while yours is stopped and take the slot.
+# Who gets in is the platform's `groups` claim (lib/lab-access.ts in the platform): "lab" for anyone enrolled
+# in a published course, "lab-admin" for platform admins. Enrolling in a course is what grants the lab.
+c.GenericOAuthenticator.manage_groups = True
+c.GenericOAuthenticator.auth_state_groups_key = "oauth_user.groups"
+c.GenericOAuthenticator.allowed_groups = {"lab"}
+c.GenericOAuthenticator.admin_groups = {"lab-admin"}
+# Optional extra accounts by email, e.g. a break-glass admin while the platform is down for maintenance.
 c.Authenticator.allowed_users = env_set("LAB_ALLOWED_USERS")
 c.Authenticator.admin_users = env_set("LAB_ADMIN_USERS")
-if not c.Authenticator.allowed_users:
-    sys.exit("LAB_ALLOWED_USERS must list at least one Google account email (see infra/lab/.env.example)")
+
+# Go straight to the platform's sign-in instead of showing the hub's own login button. A student already
+# signed in on the platform comes back without seeing a login page at all.
+c.Authenticator.auto_login = True
+# Groups are read at sign-in, so a hub login lasts a day: a student who leaves every course loses the lab
+# within a day, and one who enrolls gets it at their next sign-in (usually without noticing one).
+c.JupyterHub.cookie_max_age_days = 1
 
 # --- How many students at once -----------------------------------------------------------------------
 # Running student servers across the hub; a start beyond it is refused until one stops.
@@ -61,6 +85,8 @@ c.JupyterHub.cookie_secret_file = "/srv/jupyterhub/data/jupyterhub_cookie_secret
 
 # Academia del Código branding: templates/ extends the hub's own pages (see templates/page.html).
 c.JupyterHub.template_paths = ["/srv/jupyterhub/templates"]
+# The platform's address, for links in the pages (e.g. "Ver los cursos" on the no-access page).
+c.JupyterHub.template_vars = {"platform_url": platform}
 
 # Stop a student's server after an hour without activity, which frees its slot.
 c.JupyterHub.services = [

@@ -3,9 +3,11 @@
 Replaces Google Colab for the LangChain & LangGraph Mastery course. It runs on the Oracle Ampere server
 (Ubuntu 24.04, **arm64**), behind the host's nginx and a Let's Encrypt certificate.
 
-JupyterHub signs students in with Google and starts one container per student from the student image.
-It is set up for **one student** today (`LAB_MAX_ACTIVE_SERVERS=1` and a one-account allow-list); opening
-the platform to more students is a change to `.env`, not a rebuild (see [Opening up](#opening-up)).
+JupyterHub signs students in with their **Academia del Código account** (the platform is its OpenID Connect
+provider, so a student signed in on the platform walks straight in) and starts one container per student from
+the student image. Who gets a lab follows enrollment: anyone enrolled in a published course, and platform admins
+as lab admins. It runs **one server at a time** today (`LAB_MAX_ACTIVE_SERVERS=1`); opening up to more students
+is a change to `.env`, not a rebuild (see [Opening up](#opening-up)).
 
 | File | Purpose |
 |---|---|
@@ -13,10 +15,10 @@ the platform to more students is a change to `.env`, not a rebuild (see [Opening
 | `start-lab.sh` | On a student's first start: clone the course into their volume and create its `.env` |
 | `kernel.json` | Registers the kernel as `lc-mastery` / "Python (lc-mastery)", the name the course's checks expect |
 | `jupyter_server_config.py` | The course kernel as the only kernel, dotfiles visible, idle kernels shut down after an hour |
-| `hub/Dockerfile`, `hub/jupyterhub_config.py` | JupyterHub 6.1.1 with Google login (OAuthenticator), DockerSpawner and the idle culler |
+| `hub/Dockerfile`, `hub/jupyterhub_config.py` | JupyterHub 6.1.1 signing in through the platform (OAuthenticator's generic OAuth), DockerSpawner and the idle culler |
 | `compose.yaml` | Runs the hub on `127.0.0.1:8000` |
 | `nginx/lab.conf` | The host nginx site, with WebSocket support for kernels and terminals |
-| `.env.example` | The OAuth client, the allow-list, the server limit and the per-student limits |
+| `.env.example` | The platform client, the server limit and the per-student limits |
 
 ## What lives where
 
@@ -46,8 +48,9 @@ Prerequisites:
   `sudo apt install docker-compose-v2 docker-buildx`.
 - A DNS A record `lab.academiadelcodigo.com` → `149.130.186.62` (the domain's DNS is in Route 53); ports
   80/443 open (they already are).
-- A Google OAuth client: in the Google Cloud project of the platform's login, create an OAuth client of type
-  *Web application* with the authorized redirect URI `https://lab.academiadelcodigo.com/hub/oauth_callback`.
+- The hub's client on the platform: as an admin, open `https://academiadelcodigo.com/admin/lab-access` and
+  create it with the callback `https://lab.academiadelcodigo.com/hub/oauth_callback`. Copy its client ID and
+  secret (the secret is shown once).
 
 1. Copy this folder to `~/lab` on the server (from the repo root on your PC), then, on the server, pick the
    course commit to install from:
@@ -66,7 +69,7 @@ Prerequisites:
    docker run --rm --entrypoint python lab-lc-mastery:2026-10-19 -c "import onnxruntime, fastembed, chromadb; print(onnxruntime.__version__)"
    ```
 
-3. Create the hub's `.env` and fill in the OAuth client, the callback URL and your Google email:
+3. Create the hub's `.env` and fill in the platform client's ID and secret:
 
    ```bash
    cp ~/lab/.env.example ~/lab/.env && chmod 600 ~/lab/.env
@@ -89,15 +92,16 @@ Prerequisites:
    curl -sS https://lab.academiadelcodigo.com/hub/api
    ```
 
-6. Open `https://lab.academiadelcodigo.com`, sign in with Google and start your server. The first start clones the
+6. Open `https://lab.academiadelcodigo.com`, sign in with your platform account and start your server. The first start clones the
    course into your volume. Open `langchain-langgraph-mastery/.env` in JupyterLab and add your keys.
 
 ## Test on your PC
 
-The same hub runs on Docker Desktop, with Google login through `http://localhost:<port>`. Pick a port that is
+The same hub runs on Docker Desktop, signing in through the platform running on your PC. Pick a port that is
 free on your PC first (on Windows, `netstat -ano | grep -E "127.0.0.1:8100\s"` prints nothing when 8100 is
-free); the examples use 8100. Add `http://localhost:8100/hub/oauth_callback` to the OAuth client's authorized
-redirect URIs (Google allows plain HTTP for `localhost` only), then, from the repo root:
+free); the examples use 8100. With the platform running locally (`pnpm dev`), create a client at
+`http://localhost:3000/admin/lab-access` with the callback `http://localhost:8100/hub/oauth_callback`, then, from
+the repo root:
 
 1. Build the student image for your PC's own architecture (no emulation, so it starts fast and onnxruntime works):
 
@@ -110,6 +114,8 @@ redirect URIs (Google allows plain HTTP for `localhost` only), then, from the re
    ```bash
    LAB_HUB_PORT=8100
    OAUTH_CALLBACK_URL=http://localhost:8100/hub/oauth_callback
+   LAB_PLATFORM_URL=http://localhost:3000
+   LAB_PLATFORM_INTERNAL_URL=http://host.docker.internal:3000
    LAB_IMAGE=lab-lc-mastery:local
    LAB_MEM_LIMIT=4G
    LAB_CPU_LIMIT=2
@@ -144,7 +150,7 @@ Change these in `.env`, then `docker compose up -d`:
 | Setting | One student | Several students |
 |---|---|---|
 | `LAB_MAX_ACTIVE_SERVERS` | 1 | about 4-5 on this server (4 cores, 24 GB; a running lab uses 1-3 GB) |
-| `LAB_ALLOWED_USERS` | your account | your students' accounts |
+| Who gets in | enroll in a course (or be an admin) | students enroll in a course on the platform; nothing changes here |
 | `LAB_MEM_LIMIT`, `LAB_CPU_LIMIT` | 12G, 3 | about 4G and 1 each |
 
 Decide too who pays for API calls: each student's own keys in their `.env`, or the platform's.

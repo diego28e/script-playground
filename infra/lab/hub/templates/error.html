@@ -1,0 +1,28 @@
+{#- Error pages. A 403 means the platform signed the student in but their account has no lab yet (lab access
+    follows enrollment, see lib/lab-access.ts in the platform), so say that and point to the courses.
+    Every other error keeps the hub's own page. -#}
+{% extends "templates/error.html" %}
+{% from "adc_macros.html" import card_top, arrow with context %}
+
+{% block main %}
+  {% if status_code == 403 %}
+    <div class="adc-page">
+      <div class="adc-card">
+        <div class="adc-card-head">
+          {{ card_top() }}
+          <h1>Tu cuenta todavía no tiene laboratorio</h1>
+          <p>El laboratorio es para quienes están inscritos en un curso. Inscríbete en uno y vuelve a entrar: tu laboratorio estará listo.</p>
+        </div>
+        <div class="adc-card-body">
+          <a role="button" class="adc-btn adc-btn-primary" href="{{ platform_url }}/courses">Ver los cursos{{ arrow() }}</a>
+          <a role="button" class="adc-btn adc-btn-quiet" href="{{ base_url }}login">Ya me inscribí, volver a entrar</a>
+        </div>
+        <div class="adc-card-foot">
+          <a href="{{ platform_url }}">Ir a Academia del Código</a>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock main %}
