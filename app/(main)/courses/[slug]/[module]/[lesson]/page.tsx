@@ -6,6 +6,8 @@ import { lessonPath } from "@/lib/lab";
 import { getLessonWorkspace } from "@/actions/lessons";
 import { LessonWorkspace } from "@/components/courses/lesson-workspace";
 import { LessonMarkdown } from "@/components/courses/lesson-markdown";
+import { parseLessonVideo, type LessonVideo } from "@/lib/lesson-video";
+import { resolveMediaUrls } from "@/lib/media";
 
 export const runtime = "nodejs";
 
@@ -25,7 +27,19 @@ export default async function LessonPage({ params }: Props) {
     const result = await getLessonWorkspace(slug, moduleSlug, lessonSlug, session?.user?.id);
     if (!result.success) throw new Error(result.error);
     if (!result.data) notFound();
-    const data = result.data;
+    const { video: storedVideo, ...lesson } = result.data.lesson;
+    const data = { ...result.data, lesson };
+
+    // The lesson's video, checked again (it was checked on import) and with its /media/ paths turned into signed
+    // URLs here, so the signing key never leaves the server. A broken video hides the player, not the lesson.
+    let video: LessonVideo | null = null;
+    if (storedVideo) {
+        try {
+            video = resolveMediaUrls(parseLessonVideo(storedVideo));
+        } catch (error) {
+            console.error(`Lesson ${lesson.id} has a video that can't be shown:`, error);
+        }
+    }
 
     // A reading lesson's guide is rendered here, on the server, so its Markdown libraries never reach the browser.
     let reading = null;
@@ -49,5 +63,5 @@ export default async function LessonPage({ params }: Props) {
         );
     }
 
-    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} />;
+    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} video={video} />;
 }

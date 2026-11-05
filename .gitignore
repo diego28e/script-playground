@@ -43,3 +43,6 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# course media tried locally before upload (lib/media.ts)
+/public/media/

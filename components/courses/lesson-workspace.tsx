@@ -25,10 +25,14 @@ import { enrollInCourse } from "@/actions/courses";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { InlineCode } from "@/components/courses/inline-code";
+import { LessonVideo } from "@/components/courses/lesson-video";
+import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
 import { cn } from "@/lib/utils";
 
-export type LessonWorkspaceData = NonNullable<Extract<Awaited<ReturnType<typeof getLessonWorkspace>>, { success: true }>["data"]>;
+type WorkspaceResult = NonNullable<Extract<Awaited<ReturnType<typeof getLessonWorkspace>>, { success: true }>["data"]>;
+// The page takes the stored video off the lesson and passes it checked and signed, as `video`.
+export type LessonWorkspaceData = Omit<WorkspaceResult, "lesson"> & { lesson: Omit<WorkspaceResult["lesson"], "video"> };
 
 const COPY = {
     es: {
@@ -100,9 +104,11 @@ type Props = {
     signedIn: boolean;
     /** A READING lesson's guide, rendered on the server (components/courses/lesson-markdown.tsx). */
     reading?: ReactNode;
+    /** The lesson's video, with URLs the browser can load (app/(main)/courses/[slug]/[module]/[lesson]/page.tsx). */
+    video?: LessonVideoData | null;
 };
 
-export function LessonWorkspace({ data, signedIn, reading }: Props) {
+export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
     const { language } = useLanguage();
     const t = COPY[language];
     const router = useRouter();
@@ -130,9 +136,8 @@ export function LessonWorkspace({ data, signedIn, reading }: Props) {
     const [status, setOptimisticStatus] = useOptimistic<LessonStatus | undefined>(progress[lesson.id]);
     const completed = status === "COMPLETED";
 
-    const toggleComplete = () =>
+    const toggleComplete = (target = !completed) =>
         startSaving(async () => {
-            const target = !completed;
             setOptimisticStatus(target ? "COMPLETED" : "IN_PROGRESS");
             try {
                 const result = await setLessonCompleted(lesson.id, target);
@@ -201,7 +206,7 @@ export function LessonWorkspace({ data, signedIn, reading }: Props) {
                                 tone={completed ? "ink" : "glass"}
                                 size="lg"
                                 onHover
-                                onClick={toggleComplete}
+                                onClick={() => toggleComplete()}
                                 pending={saving}
                                 pendingLabel={t.saving}
                                 aria-pressed={completed}
@@ -262,8 +267,24 @@ export function LessonWorkspace({ data, signedIn, reading }: Props) {
                     </section>
                 )}
 
+                {video && (
+                    <section className="border-b border-border py-8">
+                        <LessonVideo
+                            // A new lesson is a new player, with its own state.
+                            key={lesson.id}
+                            video={video}
+                            lessonId={lesson.id}
+                            title={lesson.title.replaceAll("`", "")}
+                            language={language}
+                            tracking={tracking}
+                            initialState={data.videoState}
+                            // Watching a video lesson to the end completes it; in a notebook lesson the video is only a part.
+                            onFinished={lesson.kind === "VIDEO" && tracking && !completed ? () => toggleComplete(true) : undefined}
+                        />
+                    </section>
+                )}
                 {lesson.kind === "READING" && reading && <section className="py-8">{reading}</section>}
-                {(lesson.kind === "VIDEO" || lesson.kind === "PRACTICE") && (
+                {((lesson.kind === "VIDEO" && !video) || lesson.kind === "PRACTICE") && (
                     <p className="my-8 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-sm text-muted-foreground">{t.unavailable}</p>
                 )}
 

@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Academia del Codigo course media: a private S3 bucket served only through CloudFront at media.academiadelcodigo.com,
+  with signed URLs (the platform signs them; see lib/media.ts) and CORS for the platform's origins.
+  Deploy in us-east-1: CloudFront only accepts certificates from that region. See infra/media/README.md.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: media.academiadelcodigo.com
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: The Route 53 zone of academiadelcodigo.com.
+  PublicKeyPem:
+    Type: String
+    NoEcho: false
+    Description: The PEM public key whose private half signs media URLs (media-signing-public.pem).
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: https://academiadelcodigo.com,https://www.academiadelcodigo.com,http://localhost:3000
+    Description: Pages allowed to read captions (the player fetches them with CORS).
+  PriceClass:
+    Type: String
+    Default: PriceClass_All
+    AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+    Description: PriceClass_All includes South American edges, close to most learners.
+
+Resources:
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub academia-course-media-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # An overwritten or deleted video can be brought back; old versions are removed after 30 days.
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Name
+          Value: academia-course-media
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SigningPublicKey:
+    Type: AWS::CloudFront::PublicKey
+    Properties:
+      PublicKeyConfig:
+        Name: !Sub ${AWS::StackName}-signing-key
+        CallerReference: !Sub ${AWS::StackName}-signing-key-1
+        EncodedKey: !Ref PublicKeyPem
+        Comment: Signs course media URLs (MEDIA_KEY_PAIR_ID in the platform)
+
+  SigningKeyGroup:
+    Type: AWS::CloudFront::KeyGroup
+    Properties:
+      KeyGroupConfig:
+        Name: !Sub ${AWS::StackName}-signers
+        Items:
+          - !Ref SigningPublicKey
+
+  CorsPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-cors
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items: ["*"]
+          AccessControlAllowMethods:
+            Items: [GET, HEAD, OPTIONS]
+          AccessControlAllowOrigins:
+            Items: !Ref AllowedOrigins
+          AccessControlExposeHeaders:
+            Items: [Content-Length, Content-Range, Accept-Ranges]
+          AccessControlMaxAgeSec: 86400
+          OriginOverride: true
+
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      # CloudFormation writes the validation record into the zone and waits for the certificate.
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Academia del Codigo course media
+        Enabled: true
+        Aliases:
+          - !Ref DomainName
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: !Ref PriceClass
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: media-bucket
+            DomainName: !GetAtt MediaBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: media-bucket
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          # Managed "CachingOptimized": the signature in the query string is not part of the cache key, so every
+          # learner's signed URL is served from the same cached copy.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref CorsPolicy
+          TrustedKeyGroups:
+            - !Ref SigningKeyGroup
+
+  # Only this distribution may read the bucket.
+  MediaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${MediaBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  DnsIpv4:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # CloudFront's own zone, the same for every distribution
+
+  DnsIpv6:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+Outputs:
+  BucketName:
+    Value: !Ref MediaBucket
+  DistributionId:
+    Value: !Ref Distribution
+  MediaBaseUrl:
+    Description: MEDIA_BASE_URL in the platform
+    Value: !Sub https://${DomainName}
+  KeyPairId:
+    Description: MEDIA_KEY_PAIR_ID in the platform
+    Value: !Ref SigningPublicKey

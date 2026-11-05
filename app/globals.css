@@ -277,3 +277,27 @@
     font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 }
+
+/* learning-kit (lk-react) components, such as the lesson video's quizzes, take the site's colours, type and corners.
+   The tokens point at the site's own variables, so they follow the light/dark switch with no provider. */
+.lk-scope {
+  --lk-color-primary: var(--primary);
+  --lk-color-primary-hover: color-mix(in oklab, var(--primary) 85%, var(--background));
+  --lk-color-surface: var(--card);
+  --lk-color-surface-raised: var(--muted);
+  --lk-color-border: var(--border);
+  --lk-color-text: var(--foreground);
+  --lk-color-text-muted: var(--muted-foreground);
+  --lk-color-focus-ring: var(--ring);
+  --lk-color-media-accent: var(--signal);
+  --lk-font-family-base: inherit;
+  --lk-radius-sm: calc(var(--radius) - 0.25rem);
+  --lk-radius-base: var(--radius);
+  --lk-radius-lg: calc(var(--radius) + 0.25rem);
+}
+
+.dark .lk-scope {
+  --lk-color-success: #4ade80;
+  --lk-color-error: #f87171;
+  --lk-color-warning: #fbbf24;
+}

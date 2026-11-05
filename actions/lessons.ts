@@ -2,6 +2,8 @@
 
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 
@@ -56,6 +58,7 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         objectives: true,
         sourcePath: true,
         body: true,
+        video: true,
       },
     });
 
@@ -67,16 +70,23 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
 
     let enrolled = false;
     const progress: Record<string, LessonStatus> = {};
+    let videoState: VideoState | null = null;
     if (userId) {
       const [enrollment, rows] = await Promise.all([
         prisma.enrollment.findUnique({ where: { userId_courseId: { userId, courseId: course.id } } }),
         prisma.lessonProgress.findMany({
           where: { userId, lesson: { module: { courseId: course.id } } },
-          select: { lessonId: true, status: true },
+          select: { lessonId: true, status: true, videoState: true },
         }),
       ]);
       enrolled = Boolean(enrollment);
-      rows.forEach((row) => (progress[row.lessonId] = row.status));
+      for (const row of rows) {
+        progress[row.lessonId] = row.status;
+        if (row.lessonId === lesson.id && lesson.video) {
+          const parsed = VideoStateSchema.safeParse(row.videoState);
+          videoState = parsed.success ? parsed.data : null;
+        }
+      }
     }
 
     return {
@@ -90,6 +100,7 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         next: next && { moduleSlug: next.moduleSlug, slug: next.slug, code: next.code, title: next.title },
         enrolled,
         progress,
+        videoState,
       },
     };
   } catch (error) {
@@ -150,6 +161,45 @@ export async function setLessonCompleted(lessonId: string, completed: boolean) {
     return { success: true };
   } catch (error) {
     console.error("Failed to set lesson completion:", error);
+    return { success: false, error: "Failed to save your progress" };
+  }
+}
+
+/**
+ * A learner's place in a lesson video, kept on their LessonProgress row: where to resume (lk-core MediaProgress),
+ * each quiz answer by slot id, which were handed in, and the practice score each earned.
+ */
+const VideoStateSchema = z.object({
+  progress: z.object({ progressVersion: z.literal("1.0"), at: z.number().min(0), furthest: z.number().min(0) }).optional(),
+  responses: z.record(z.string(), z.unknown()).default({}),
+  submitted: z.array(z.string()).max(200).default([]),
+  scores: z.record(z.string(), z.object({ score: z.number(), maxScore: z.number(), passed: z.boolean() })).default({}),
+  finishedAt: z.string().optional(),
+});
+export type VideoState = z.infer<typeof VideoStateSchema>;
+
+// Answers are small; a state this large is not one the player wrote.
+const VIDEO_STATE_MAX_BYTES = 64 * 1024;
+
+/** Saves the learner's whole video state (the player sends all of it, so the latest save is always complete). */
+export async function saveVideoState(lessonId: string, state: VideoState) {
+  try {
+    const parsed = VideoStateSchema.safeParse(state);
+    if (!parsed.success || JSON.stringify(parsed.data).length > VIDEO_STATE_MAX_BYTES) {
+      return { success: false, error: "Invalid video state" };
+    }
+    const learner = await enrolledLearner(lessonId);
+    if ("error" in learner) return { success: false, error: learner.error };
+    // Parsed from JSON-safe input, so it is JSON; zod's `unknown` answers just can't say so to Prisma's types.
+    const videoState = parsed.data as Prisma.InputJsonObject;
+    await prisma.lessonProgress.upsert({
+      where: { userId_lessonId: { userId: learner.userId, lessonId } },
+      create: { userId: learner.userId, lessonId, videoState },
+      update: { videoState, lastViewedAt: new Date() },
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to save video state:", error);
     return { success: false, error: "Failed to save your progress" };
   }
 }

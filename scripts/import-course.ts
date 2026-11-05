@@ -6,6 +6,11 @@
 // README.md (module title, part, goals, estimated time), lesson notebooks NN-MM-slug.ipynb, guides NN-MM-slug.md,
 // and project notebooks under project/ (solutions/ is skipped).
 //
+// A lesson video is a sidecar file, NN-MM-slug.video.json, in lk-core's format (lib/lesson-video.ts): beside a
+// notebook or guide of the same name it adds a video to that lesson; on its own it is a video lesson. Its files are
+// referred to as /media/<key> and uploaded to the media bucket separately (infra/media/README.md). A sidecar that
+// fails lk-core's checks stops the import with every problem listed.
+//
 // Re-running is safe: the course, modules and lessons are matched by slug and updated in place. Nothing is
 // deleted; lessons that disappeared from the repository are reported, because deleting them would delete
 // students' progress. --dry-run parses and prints without touching the database.
@@ -15,7 +20,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
-import type { LessonKind } from "@prisma/client";
+import { Prisma, type LessonKind } from "@prisma/client";
+import { parseLessonVideo } from "@/lib/lesson-video";
 
 type ParsedLesson = {
   slug: string;
@@ -28,6 +34,8 @@ type ParsedLesson = {
   objectives: string[];
   sourcePath: string | null;
   body: string | null;
+  // The sidecar's JSON, checked; DbNull clears a video whose sidecar was removed.
+  video: Prisma.InputJsonValue | typeof Prisma.DbNull;
 };
 
 type ParsedModule = {
@@ -110,6 +118,7 @@ function parseNotebook(repo: string, path: string, kind: LessonKind): ParsedLess
     objectives,
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body: null,
+    video: Prisma.DbNull,
   };
 }
 
@@ -128,6 +137,38 @@ function parseGuide(repo: string, path: string): ParsedLesson {
     objectives: [],
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body,
+    video: Prisma.DbNull,
+  };
+}
+
+/** Reads a NN-MM-slug.video.json sidecar; throws with the file name and every problem lk-core found. */
+function readVideo(repo: string, path: string) {
+  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  try {
+    return { raw: raw as Prisma.InputJsonValue, video: parseLessonVideo(raw) };
+  } catch (error) {
+    throw new Error(`${relative(repo, path)} is not a valid lesson video:\n${(error as Error).message}`);
+  }
+}
+
+/** A sidecar with no notebook or guide of its name is a lesson of its own. */
+function parseVideoLesson(repo: string, path: string): ParsedLesson {
+  const slug = basename(path, ".video.json");
+  const { raw, video } = readVideo(repo, path);
+  const heading = video.kind === "interactive" ? (video.group.title ?? slug) : (video.media.alt ?? slug);
+  const [, title] = splitHeading(heading);
+  return {
+    slug,
+    code: `${slug.slice(0, 2)}.${slug.slice(3, 5)}`,
+    title,
+    kind: "VIDEO",
+    estimatedTime: null,
+    estimatedMinutes: null,
+    prerequisites: null,
+    objectives: [],
+    sourcePath: null,
+    body: null,
+    video: raw,
   };
 }
 
@@ -141,6 +182,18 @@ function parseModule(repo: string, folder: string): ParsedModule {
   const lessons = files.map((file) =>
     file.endsWith(".md") ? parseGuide(repo, join(dir, file)) : parseNotebook(repo, join(dir, file), "NOTEBOOK"),
   );
+  // Videos: attached to the lesson of the same name (the first, when a notebook and a guide share it), or their own.
+  for (const file of readdirSync(dir).filter((name) => /^\d{2}-\d{2}-.+\.video\.json$/.test(name)).sort()) {
+    const slug = basename(file, ".video.json");
+    const owner = lessons.find((lesson) => lesson.slug === slug);
+    if (owner) {
+      owner.video = readVideo(repo, join(dir, file)).raw;
+    } else {
+      const lesson = parseVideoLesson(repo, join(dir, file));
+      const at = lessons.findIndex((other) => other.slug.slice(0, 5) > slug.slice(0, 5));
+      lessons.splice(at === -1 ? lessons.length : at, 0, lesson);
+    }
+  }
   const projectDir = join(dir, "project");
   if (existsSync(projectDir)) {
     for (const file of readdirSync(projectDir).filter((name) => name.endsWith(".ipynb")).sort()) {
@@ -183,10 +236,12 @@ function parseCourse(repo: string, slug?: string): ParsedCourse {
 
 function printSummary(course: ParsedCourse) {
   const lessons = course.modules.flatMap((module) => module.lessons);
-  const byKind = Object.fromEntries(["NOTEBOOK", "READING", "PROJECT"].map((kind) => [kind, lessons.filter((lesson) => lesson.kind === kind).length]));
+  const byKind = Object.fromEntries(["NOTEBOOK", "READING", "PROJECT", "VIDEO"].map((kind) => [kind, lessons.filter((lesson) => lesson.kind === kind).length]));
   console.log(`${course.title} (${course.slug}) @ ${course.sourceRef.slice(0, 7)}`);
   console.log(`  ${course.modules.length} modules, ${lessons.length} lessons ${JSON.stringify(byKind)}`);
-  const missing = lessons.filter((lesson) => lesson.kind !== "READING" && lesson.objectives.length === 0).map((lesson) => lesson.slug);
+  const withVideo = lessons.filter((lesson) => lesson.video !== Prisma.DbNull).map((lesson) => lesson.slug);
+  if (withVideo.length) console.log(`  with a video: ${withVideo.join(", ")}`);
+  const missing = lessons.filter((lesson) => lesson.kind !== "READING" && lesson.kind !== "VIDEO" && lesson.objectives.length === 0).map((lesson) => lesson.slug);
   if (missing.length) console.log(`  without objectives or requirements: ${missing.join(", ")}`);
   const untimed = lessons.filter((lesson) => lesson.estimatedMinutes === null).map((lesson) => lesson.slug);
   if (untimed.length) console.log(`  without an estimated time: ${untimed.join(", ")}`);
