@@ -1,16 +1,18 @@
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
-// The Academia del Código mark: "{a}" in mono on an ink tile. The lab's hub pages draw the same mark.
-export function BrandMark({ className }: { className?: string }) {
+// The Academia del Código logo: the circuit "{▶}" mark, cropped from public/logo.png to its drawn area.
+// The lab's hub pages ship the same file (infra/lab/hub/static/academia-logo.png).
+export function BrandMark({ className, priority }: { className?: string; priority?: boolean }) {
   return (
-    <span
+    <Image
+      src="/brand/logo.png"
+      alt=""
       aria-hidden="true"
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-xl bg-ink font-mono text-[13px] font-medium text-ink-foreground",
-        className,
-      )}
-    >
-      {"{a}"}
-    </span>
+      width={321}
+      height={179}
+      priority={priority}
+      className={cn("h-8 w-auto shrink-0 select-none", className)}
+    />
   );
 }

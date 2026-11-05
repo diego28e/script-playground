@@ -45,8 +45,7 @@
     .navbar.bg-body-tertiary { background: var(--adc-surface) !important; border-bottom: 1px solid var(--adc-border); }
     .adc-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--adc-ink); }
     .adc-brand:hover { color: var(--adc-ink); }
-    .adc-mark { width: 30px; height: 30px; border-radius: 10px; background: var(--adc-ink); color: var(--adc-bg);
-      display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; }
+    .adc-mark { height: 30px; width: auto; flex-shrink: 0; }
     .adc-name { font-weight: 600; font-size: 15px; line-height: 1.1; }
     .adc-sub { display: block; font-size: 12px; font-weight: 400; color: var(--adc-muted); }
     .btn-primary, .btn-jupyter {
@@ -69,7 +68,7 @@
       border: 1px solid var(--adc-border); border-radius: 24px; box-shadow: 0 20px 40px -12px var(--adc-shadow); }
     .adc-card-head { padding: 24px 28px 0; }
     .adc-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .adc-card-top .adc-mark { border-radius: 12px; width: 32px; height: 32px; }
+    .adc-card-top .adc-mark { height: 32px; }
     .adc-eyebrow { display: inline-flex; align-items: center; gap: 6px; font: 500 10px "Geist Mono", ui-monospace, monospace;
       text-transform: uppercase; letter-spacing: .18em; color: var(--adc-muted); }
     .adc-card h1 { font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
@@ -112,7 +111,7 @@
 
 {% block logo %}
   <a class="navbar-brand adc-brand" href="{{ logo_url or base_url }}" title="Inicio">
-    <span class="adc-mark adc-mono" aria-hidden="true">{a}</span>
+    <img class="adc-mark" src="{{ static_url('images/academia-logo.png') }}" alt="" width="54" height="30">
     <span class="adc-name">Academia del Código<span class="adc-sub">Laboratorio</span></span>
   </a>
 {% endblock logo %}
