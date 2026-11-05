@@ -7,11 +7,14 @@ const globalForPrisma = globalThis as unknown as {
   pool: Pool | undefined;
 };
 
+// Supabase requires TLS; the local development database (infra/dev) has none.
+const isLocalDatabase = /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL ?? "");
+
 const pool =
   globalForPrisma.pool ??
   new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    ssl: isLocalDatabase ? false : { rejectUnauthorized: false },
   });
 
 const adapter = new PrismaPg(pool);
