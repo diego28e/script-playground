@@ -1,0 +1,26 @@
+{
+  "@jupyterlab/apputils-extension:themes": {
+    "adaptive-theme": true,
+    "preferred-light-theme": "JupyterLab Light",
+    "preferred-dark-theme": "JupyterLab Dark",
+    "theme-scrollbars": true,
+    "overrides": {
+      "code-font-family": "'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+      "code-font-size": "13px"
+    }
+  },
+  "@jupyterlab/apputils-extension:notification": {
+    "checkForUpdates": false,
+    "fetchNews": "false"
+  },
+  "@jupyterlab/notebook-extension:tracker": {
+    "codeCellConfig": {
+      "lineNumbers": true,
+      "lineWrap": false
+    },
+    "recordTiming": true
+  },
+  "@jupyterlab/docmanager-extension:plugin": {
+    "autosaveInterval": 60
+  }
+}

@@ -10,6 +10,7 @@ RUN python3 -m pip install --no-cache-dir \
       jupyterhub-idle-culler==2.0.0
 
 COPY jupyterhub_config.py /srv/jupyterhub/jupyterhub_config.py
+COPY templates /srv/jupyterhub/templates
 # The database and cookie secret live here (a volume in compose.yaml).
 RUN mkdir -p /srv/jupyterhub/data
 

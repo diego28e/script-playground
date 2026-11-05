@@ -1,0 +1,41 @@
+{#- The hub's home page, for one server per student. Keeps the ids the hub's home.js binds (#start, #stop). -#}
+{% extends "templates/home.html" %}
+
+{% block main %}
+  <div class="container">
+    <div class="adc-card">
+      {% if default_server.active %}
+        <h1>Tu laboratorio está encendido</h1>
+        <p>Vuelve a tus notebooks, o apágalo si terminaste: se apaga solo tras una hora sin actividad y tus
+          archivos se conservan.</p>
+      {% else %}
+        <h1>Tu laboratorio está apagado</h1>
+        <p>Enciéndelo para seguir con el curso. Tus notebooks y tu archivo <code>.env</code> te esperan donde los
+          dejaste.</p>
+      {% endif %}
+      <div class="adc-actions">
+        <a id="start" role="button" class="btn btn-primary" href="{{ url }}">
+          {% if default_server.active %}Abrir mi laboratorio{% else %}Encender mi laboratorio{% endif %}
+        </a>
+        {% if default_server.active %}
+          <a id="stop" role="button" class="btn btn-outline-danger">Apagar</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock main %}
+
+{% block script %}
+  {{ super() }}
+  <script>
+    // home.js relabels #start in English after a stop; keep the Spanish label.
+    (function () {
+      var start = document.getElementById("start");
+      if (!start) return;
+      new MutationObserver(function () {
+        if (start.textContent.trim() === "Start My Server") start.textContent = "Encender mi laboratorio";
+        if (start.getAttribute("title") === "Your server is stopping") start.setAttribute("title", "Apagando…");
+      }).observe(start, { childList: true, characterData: true, subtree: true, attributes: true });
+    })();
+  </script>
+{% endblock script %}

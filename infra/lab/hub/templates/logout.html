@@ -1,0 +1,16 @@
+{#- Shown after signing out. With auto_login on, the hub shows this page instead of sending you straight back
+    to Google, so signing out sticks. -#}
+{% extends "templates/logout.html" %}
+
+{% block main %}
+  <div id="logout-main" class="container">
+    <div class="adc-card">
+      <h1>Cerraste sesión</h1>
+      <p>Tu laboratorio sigue guardado. Puedes volver cuando quieras.</p>
+      <div class="adc-actions">
+        <a role="button" class="btn btn-primary" href="{{ login_url }}">Volver a entrar</a>
+        <a role="button" class="btn btn-outline-contrast" href="https://academiadelcodigo.com">Ir a Academia del Código</a>
+      </div>
+    </div>
+  </div>
+{% endblock main %}

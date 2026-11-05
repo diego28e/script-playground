@@ -92,6 +92,35 @@ Prerequisites:
 6. Open `https://lab.academiadelcodigo.com`, sign in with Google and start your server. The first start clones the
    course into your volume. Open `langchain-langgraph-mastery/.env` in JupyterLab and add your keys.
 
+## Test on your PC
+
+The same hub runs on Docker Desktop, with Google login through `http://localhost:<port>`. Pick a port that is
+free on your PC first (on Windows, `netstat -ano | grep -E "127.0.0.1:8100\s"` prints nothing when 8100 is
+free); the examples use 8100. Add `http://localhost:8100/hub/oauth_callback` to the OAuth client's authorized
+redirect URIs (Google allows plain HTTP for `localhost` only), then, from the repo root:
+
+1. Build the student image for your PC's own architecture (no emulation, so it starts fast and onnxruntime works):
+
+   ```bash
+   docker build -t lab-lc-mastery:local --build-arg COURSE_REF=<course commit sha> infra/lab
+   ```
+
+2. Create `infra/lab/.env` from `.env.example` (it is git-ignored) with these differences from the server's:
+
+   ```bash
+   LAB_HUB_PORT=8100
+   OAUTH_CALLBACK_URL=http://localhost:8100/hub/oauth_callback
+   LAB_IMAGE=lab-lc-mastery:local
+   LAB_MEM_LIMIT=4G
+   LAB_CPU_LIMIT=2
+   ```
+
+3. Start it, open `http://localhost:8100` and sign in; stop it with `docker compose down` (your volume stays):
+
+   ```bash
+   docker compose -f infra/lab/compose.yaml up -d --build
+   ```
+
 ## Day to day
 
 - **Course content changed** (notebooks, `src/mastery`): `git pull` in a JupyterLab terminal, inside

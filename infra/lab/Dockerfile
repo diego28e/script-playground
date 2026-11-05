@@ -73,6 +73,8 @@ RUN echo "${COURSE_ROOT}/src" > "$(/opt/course/bin/python -c 'import sysconfig; 
 
 COPY kernel.json /opt/jupyter/share/jupyter/kernels/lc-mastery/kernel.json
 COPY jupyter_server_config.py /opt/jupyter/etc/jupyter/jupyter_server_config.py
+# JupyterLab defaults (theme follows the system, line numbers, no news pop-up); a student's own settings win.
+COPY overrides.json /opt/jupyter/share/jupyter/lab/settings/overrides.json
 COPY start-lab.sh /usr/local/bin/start-lab
 RUN chmod 755 /usr/local/bin/start-lab
 

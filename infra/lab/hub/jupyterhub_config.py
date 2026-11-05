@@ -15,6 +15,9 @@ def env_set(name):
 # environment. The username is the Google account's email.
 c.JupyterHub.authenticator_class = "google"
 
+# Go straight to Google instead of showing the hub's "Sign in with Google" page.
+c.Authenticator.auto_login = True
+
 # Only the listed accounts can sign in. The server limit below counts running servers, not people, so
 # without this list a second account could start a server while yours is stopped and take the slot.
 c.Authenticator.allowed_users = env_set("LAB_ALLOWED_USERS")
@@ -45,7 +48,8 @@ c.DockerSpawner.extra_host_config = {
 }
 c.DockerSpawner.http_timeout = 120
 c.DockerSpawner.start_timeout = 300
-c.Spawner.default_url = "/lab"
+# Open JupyterLab with the file browser in the course folder.
+c.Spawner.default_url = "/lab/tree/langchain-langgraph-mastery"
 
 # --- The hub itself ----------------------------------------------------------------------------------
 # Listens inside its container; compose publishes 8000 on 127.0.0.1 only and nginx terminates TLS.
@@ -54,6 +58,9 @@ c.JupyterHub.hub_ip = "0.0.0.0"
 c.JupyterHub.hub_connect_ip = os.environ.get("LAB_HUB_HOST", "jupyterhub")
 c.JupyterHub.db_url = "sqlite:////srv/jupyterhub/data/jupyterhub.sqlite"
 c.JupyterHub.cookie_secret_file = "/srv/jupyterhub/data/jupyterhub_cookie_secret"
+
+# Academia del Código branding: templates/ extends the hub's own pages (see templates/page.html).
+c.JupyterHub.template_paths = ["/srv/jupyterhub/templates"]
 
 # Stop a student's server after an hour without activity, which frees its slot.
 c.JupyterHub.services = [

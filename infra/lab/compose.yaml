@@ -14,7 +14,7 @@ services:
       LAB_HUB_HOST: jupyterhub
     # Loopback only: nginx on the host terminates TLS. A published 0.0.0.0 port would skip the host firewall.
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${LAB_HUB_PORT:-8000}:8000"
     volumes:
       # Lets the hub start and stop student containers. This makes the hub root-equivalent on the host:
       # no student code ever runs in it, and student containers never get the socket.

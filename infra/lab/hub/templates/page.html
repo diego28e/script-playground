@@ -1,0 +1,91 @@
+{#- Academia del Código branding for every hub page. Extends JupyterHub's own page.html and replaces only
+    the blocks below, so the hub's scripts and its light/dark switch keep working. -#}
+{% extends "templates/page.html" %}
+
+{% block title %}Laboratorio · Academia del Código{% endblock title %}
+
+{% block meta %}
+  <meta name="description" content="Laboratorio de notebooks de Academia del Código">
+{% endblock meta %}
+
+{% block favicon %}
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23121826'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='14' font-weight='bold' fill='%23F7F6F2' text-anchor='middle'%3E%7Ba%7D%3C/text%3E%3C/svg%3E">
+{% endblock favicon %}
+
+{% block stylesheet %}
+  {{ super() }}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+  <style>
+    :root, [data-bs-theme="light"] {
+      --adc-bg: #f7f6f2; --adc-surface: #ffffff; --adc-ink: #121826; --adc-muted: #5a6372;
+      --adc-border: #e3e1da; --adc-accent: #2d5be3; --adc-accent-hover: #2349c0; --adc-on-accent: #ffffff;
+      --adc-danger: #b42318; --adc-spark: #d98a1e;
+    }
+    [data-bs-theme="dark"] {
+      --adc-bg: #0c1118; --adc-surface: #141b26; --adc-ink: #e8ecf2; --adc-muted: #98a2b3;
+      --adc-border: #263142; --adc-accent: #7d9bff; --adc-accent-hover: #9db4ff; --adc-on-accent: #0c1118;
+      --adc-danger: #f97066; --adc-spark: #f2b155;
+    }
+    body {
+      --bs-body-bg: var(--adc-bg); --bs-body-color: var(--adc-ink); --bs-secondary-color: var(--adc-muted);
+      --bs-border-color: var(--adc-border); --bs-link-color-rgb: 45, 91, 227;
+      font-family: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--adc-bg); color: var(--adc-ink);
+    }
+    code, pre, .adc-mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .navbar.bg-body-tertiary { background: var(--adc-surface) !important; border-bottom: 1px solid var(--adc-border); }
+    .adc-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--adc-ink); }
+    .adc-brand:hover { color: var(--adc-ink); }
+    .adc-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--adc-ink); color: var(--adc-bg);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; }
+    .adc-name { font-weight: 600; font-size: 15px; line-height: 1.1; }
+    .adc-sub { display: block; font-size: 12px; font-weight: 400; color: var(--adc-muted); }
+    .btn-primary, .btn-jupyter {
+      --bs-btn-bg: var(--adc-accent); --bs-btn-border-color: var(--adc-accent); --bs-btn-color: var(--adc-on-accent);
+      --bs-btn-hover-bg: var(--adc-accent-hover); --bs-btn-hover-border-color: var(--adc-accent-hover);
+      --bs-btn-hover-color: var(--adc-on-accent); --bs-btn-active-bg: var(--adc-accent-hover);
+      --bs-btn-active-border-color: var(--adc-accent-hover); --bs-btn-active-color: var(--adc-on-accent);
+    }
+    .btn { border-radius: 10px; font-weight: 500; }
+    .progress { height: 8px; border-radius: 999px; background: var(--adc-border); }
+    .progress-bar { background: var(--adc-accent); }
+    .adc-card { max-width: 520px; margin: 4rem auto; padding: 2rem 2.25rem; background: var(--adc-surface);
+      border: 1px solid var(--adc-border); border-radius: 16px; }
+    .adc-card h1 { font-size: 1.35rem; font-weight: 600; margin-bottom: .5rem; }
+    .adc-card p { color: var(--adc-muted); }
+    .adc-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
+    #progress-details summary, #progress-log { color: var(--adc-muted); font-size: .875rem; }
+    .btn-outline-contrast { border-color: var(--adc-border); }
+  </style>
+{% endblock stylesheet %}
+
+{% block logo %}
+  <a class="navbar-brand adc-brand" href="{{ logo_url or base_url }}" title="Inicio">
+    <span class="adc-mark adc-mono" aria-hidden="true">{a}</span>
+    <span class="adc-name">Academia del Código<span class="adc-sub">Laboratorio</span></span>
+  </a>
+{% endblock logo %}
+
+{% block nav_bar_left_items %}
+  <li class="nav-item">
+    <a class="nav-link" href="{{ base_url }}home">Mi laboratorio</a>
+  </li>
+  {% if "admin-ui" in parsed_scopes %}
+    <li class="nav-item">
+      <a class="nav-link" href="{{ base_url }}admin">Administración</a>
+    </li>
+  {% endif %}
+{% endblock nav_bar_left_items %}
+
+{% block login_widget %}
+  <span id="login_widget">
+    {% if user %}
+      <span class="me-2 text-body-secondary">{{ user.name }}</span>
+      <a id="logout" role="button" class="btn btn-sm btn-outline-contrast" href="{{ logout_url }}">Salir</a>
+    {% else %}
+      <a id="login" role="button" class="btn btn-sm btn-outline-contrast" href="{{ login_url }}">Entrar</a>
+    {% endif %}
+  </span>
+{% endblock login_widget %}
