@@ -21,16 +21,16 @@ export function LanguageSwitcher() {
                     <span className="sr-only">Toggle language</span>
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800">
+            <DropdownMenuContent align="end">
                 <DropdownMenuItem
                     onClick={() => setLanguage("en")}
-                    className={language === "en" ? "bg-zinc-100 dark:bg-zinc-800" : ""}
+                    className={language === "en" ? "bg-accent text-accent-foreground" : ""}
                 >
                     English
                 </DropdownMenuItem>
                 <DropdownMenuItem
                     onClick={() => setLanguage("es")}
-                    className={language === "es" ? "bg-zinc-100 dark:bg-zinc-800" : ""}
+                    className={language === "es" ? "bg-accent text-accent-foreground" : ""}
                 >
                     Español
                 </DropdownMenuItem>
