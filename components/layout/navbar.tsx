@@ -11,12 +11,11 @@ import { useLanguage } from "@/components/providers/language-provider";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { cn } from "@/lib/utils";
-
-const LAB_URL = "https://lab.academiadelcodigo.com";
+import { LAB_URL } from "@/lib/lab";
 
 const COPY = {
-    en: { challenges: "Challenges", lab: "Lab", signIn: "Sign in", start: "Get started" },
-    es: { challenges: "Retos", lab: "Laboratorio", signIn: "Entrar", start: "Empezar" },
+    en: { courses: "Courses", challenges: "Challenges", lab: "Lab", signIn: "Sign in", start: "Get started" },
+    es: { courses: "Cursos", challenges: "Retos", lab: "Laboratorio", signIn: "Entrar", start: "Empezar" },
 };
 
 const NAV_LINK =
@@ -40,21 +39,30 @@ export function Navbar() {
                             Academia del Código
                         </span>
                     </Link>
-                    {signedIn && (
-                        <nav className="hidden items-center gap-1 sm:flex" aria-label="Principal">
-                            <Link
-                                href="/challenges"
-                                aria-current={pathname.startsWith("/challenges") ? "page" : undefined}
-                                className={cn(NAV_LINK, pathname.startsWith("/challenges") && "text-foreground")}
-                            >
-                                {t.challenges}
-                            </Link>
-                            <a href={LAB_URL} target="_blank" rel="noopener noreferrer" className={cn(NAV_LINK, "inline-flex items-center gap-1.5")}>
-                                {t.lab}
-                                <ExternalLink className="size-3.5" aria-hidden="true" />
-                            </a>
-                        </nav>
-                    )}
+                    <nav className="hidden items-center gap-1 sm:flex" aria-label="Principal">
+                        <Link
+                            href="/courses"
+                            aria-current={pathname.startsWith("/courses") ? "page" : undefined}
+                            className={cn(NAV_LINK, pathname.startsWith("/courses") && "text-foreground")}
+                        >
+                            {t.courses}
+                        </Link>
+                        {signedIn && (
+                            <>
+                                <Link
+                                    href="/challenges"
+                                    aria-current={pathname.startsWith("/challenges") ? "page" : undefined}
+                                    className={cn(NAV_LINK, pathname.startsWith("/challenges") && "text-foreground")}
+                                >
+                                    {t.challenges}
+                                </Link>
+                                <a href={LAB_URL} target="_blank" rel="noopener noreferrer" className={cn(NAV_LINK, "inline-flex items-center gap-1.5")}>
+                                    {t.lab}
+                                    <ExternalLink className="size-3.5" aria-hidden="true" />
+                                </a>
+                            </>
+                        )}
+                    </nav>
                 </div>
                 <div className="flex items-center gap-1">
                     <LanguageSwitcher />
@@ -70,7 +78,7 @@ export function Navbar() {
                             <Link href="/login" className={NAV_LINK}>
                                 {t.signIn}
                             </Link>
-                            <ShimmerButton href="/challenges" tone="ink" size="sm" onHover className="ml-1 whitespace-nowrap">
+                            <ShimmerButton href="/courses" tone="ink" size="sm" onHover className="ml-1 whitespace-nowrap">
                                 {t.start}
                             </ShimmerButton>
                         </>

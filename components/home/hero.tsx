@@ -6,7 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { useLanguage } from "@/components/providers/language-provider";
 
-const LAB_URL = "https://lab.academiadelcodigo.com";
+import { LAB_URL } from "@/lib/lab";
 
 const COPY = {
     es: {
@@ -156,7 +156,7 @@ export function Hero() {
                 />
                 <div className="hero-reveal mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row" style={{ animationDelay: "3.6s" }}>
                     {/* The page's one main call to action: the only button that sweeps on its own. */}
-                    <ShimmerButton href="/challenges" tone="signal" size="lg">
+                    <ShimmerButton href="/courses" tone="signal" size="lg">
                         {t.start}
                         <ArrowRight className="size-4 transition-transform group-hover/shimmer:translate-x-0.5" strokeWidth={2.5} aria-hidden="true" />
                     </ShimmerButton>

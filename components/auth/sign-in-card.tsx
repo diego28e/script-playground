@@ -51,11 +51,19 @@ function GoogleIcon() {
   );
 }
 
+// Only same-site paths: "/courses/x" passes, while "//evil.com" or "https://..." fall back to the home page.
+function safeNextPath(value: string | null) {
+  return value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
+}
+
 export function SignInCard() {
   const { language } = useLanguage();
   const t = COPY[language];
+  const searchParams = useSearchParams();
   // Better Auth sends a failed Google sign-in back here with ?error=<code>.
-  const returnedError = useSearchParams().get("error");
+  const returnedError = searchParams.get("error");
+  // Pages that ask for sign-in pass ?next=/their/path so the student lands back where they were.
+  const next = safeNextPath(searchParams.get("next"));
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -75,8 +83,8 @@ export function SignInCard() {
     try {
       const { error } = await authClient.signIn.social({
         provider: "google",
-        callbackURL: "/",
-        errorCallbackURL: "/login",
+        callbackURL: next,
+        errorCallbackURL: next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`,
       });
       if (error) throw error;
     } catch (error) {
