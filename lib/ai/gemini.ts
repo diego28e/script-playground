@@ -4,9 +4,14 @@ import { ApiError, GoogleGenAI, type Content, type GenerateContentConfig, type T
 // Every Gemini call on the platform goes through generateWithFallback: one model chain, per-attempt timeouts,
 // and one structured log line per attempt plus one per call, all sharing a trace ID. Logs are JSON on stdout,
 // which Amplify ships to CloudWatch (/aws/amplify/<app id>). They never contain prompts, code or answers.
+// Only signed-in users reach this (actions/ai.ts checks), so every call line names who made it.
 //
-// Find a call:   filter @message like /"traceId":"<id>"/
-// Fallback rate: filter @message like /"event":"ai.call"/ | stats count(*) by model, fallbackUsed
+// CloudWatch Logs Insights queries (log group /aws/amplify/del16ro80clg0):
+//   One call:           filter @message like /"traceId":"<id>"/
+//   Who spends most:    filter @message like /"event":"ai.call"/ | stats count(*) as calls, sum(tokens.total) as tokens by userId | sort tokens desc
+//   Spend by feature:   filter @message like /"event":"ai.call"/ | stats count(*) as calls, sum(tokens.total) as tokens by feature, model
+//   Fallback rate:      filter @message like /"event":"ai.call"/ | stats count(*) by model, fallbackUsed
+//   Refused (signed out or not allowed): filter @message like /"event":"ai.denied"/ | stats count(*) by feature, reason
 
 /**
  * Tried in order. The primary is the newest Flash model; the fallback is an older, lighter generation that
@@ -25,11 +30,15 @@ export type AiResult =
   | { ok: true; text: string; model: string; traceId: string }
   | { ok: false; reason: "unavailable" | "blocked" | "misconfigured"; traceId: string };
 
+type Tokens = { input: number; output: number; thoughts: number; total: number };
+
 type Attempt = {
   model: string;
   outcome: "ok" | "error" | "timeout" | "empty" | "blocked";
   status?: number;
   latencyMs: number;
+  /** Billed tokens, when the provider answered (failed and timed-out attempts usually bill nothing). */
+  tokens?: Tokens;
 };
 
 // Worth trying the next model: the model is missing or retired, busy, slow, failing, or rejected a setting.
@@ -38,9 +47,10 @@ function shouldFallBack(status: number | undefined) {
   return status === undefined || ![401, 403].includes(status);
 }
 
-function log(level: "info" | "warn" | "error", entry: Record<string, unknown>) {
+export function logAi(level: "info" | "warn" | "error", entry: Record<string, unknown>) {
   console[level](JSON.stringify({ ts: new Date().toISOString(), ...entry }));
 }
+const log = logAi;
 
 export async function generateWithFallback({
   feature,
@@ -52,7 +62,8 @@ export async function generateWithFallback({
   feature: AiFeature;
   contents: Content[];
   config: GenerateContentConfig;
-  userId?: string | null;
+  /** The signed-in user the call is for; it is how spend is traced back to people. */
+  userId: string;
   /** Override the chain, e.g. a feature that needs a stronger model. Defaults to MODEL_CHAIN. */
   models?: ReadonlyArray<{ model: string; timeoutMs: number }>;
 }): Promise<AiResult> {
@@ -66,13 +77,23 @@ export async function generateWithFallback({
       event: "ai.call",
       traceId,
       feature,
-      userId: userId ?? null,
+      userId,
       outcome: result.ok ? "ok" : result.reason,
       model: result.ok ? result.model : null,
       fallbackUsed: result.ok ? result.model !== models[0]?.model : null,
       attempts: attempts.map((attempt) => `${attempt.model}:${attempt.outcome}${attempt.status ? `:${attempt.status}` : ""}`),
       totalMs: Date.now() - started,
       inputChars,
+      // Summed over every attempt that billed, fallback included: what this call cost.
+      tokens: attempts.reduce<Tokens>(
+        (sum, attempt) => ({
+          input: sum.input + (attempt.tokens?.input ?? 0),
+          output: sum.output + (attempt.tokens?.output ?? 0),
+          thoughts: sum.thoughts + (attempt.tokens?.thoughts ?? 0),
+          total: sum.total + (attempt.tokens?.total ?? 0),
+        }),
+        { input: 0, output: 0, thoughts: 0, total: 0 },
+      ),
     });
     return result;
   };
@@ -105,7 +126,13 @@ export async function generateWithFallback({
       const text = response.text ?? "";
       const blocked = candidate?.finishReason === "SAFETY" || Boolean(response.promptFeedback?.blockReason);
       const outcome: Attempt["outcome"] = blocked ? "blocked" : text ? "ok" : "empty";
-      attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted });
+      const tokens: Tokens = {
+        input: usage?.promptTokenCount ?? 0,
+        output: usage?.candidatesTokenCount ?? 0,
+        thoughts: usage?.thoughtsTokenCount ?? 0,
+        total: usage?.totalTokenCount ?? 0,
+      };
+      attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted, tokens });
       log(outcome === "ok" ? "info" : "warn", {
         event: "ai.attempt",
         traceId,
@@ -115,12 +142,8 @@ export async function generateWithFallback({
         outcome,
         finishReason: candidate?.finishReason ?? null,
         latencyMs: Date.now() - attemptStarted,
-        tokens: {
-          input: usage?.promptTokenCount ?? null,
-          output: usage?.candidatesTokenCount ?? null,
-          thoughts: usage?.thoughtsTokenCount ?? null,
-          total: usage?.totalTokenCount ?? null,
-        },
+        userId,
+        tokens,
         outputChars: text.length,
       });
       if (outcome === "ok") return finish({ ok: true, text, model, traceId });
@@ -138,6 +161,7 @@ export async function generateWithFallback({
         traceId,
         feature,
         attempt: index + 1,
+        userId,
         model,
         outcome: timedOut ? "timeout" : "error",
         status: status ?? null,

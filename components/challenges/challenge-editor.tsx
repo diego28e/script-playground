@@ -2,6 +2,9 @@
 
 import { Editor } from "@monaco-editor/react";
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import {
     Play,
@@ -15,6 +18,7 @@ import {
     FileCode2,
     MessageSquare,
     AlignLeft,
+    LogIn,
 } from "lucide-react";
 import { createSubmission, getUserSubmissions } from "@/actions/submissions";
 import { generateAIResponse } from "@/actions/ai";
@@ -70,6 +74,12 @@ export function ChallengeEditor({
     const [aiResponse, setAiResponse] = useState("");
     const [isAiLoading, setIsAiLoading] = useState(false);
     const [aiError, setAiError] = useState<string | null>(null);
+    // AI calls need a signed-in user (they are billed and traced per person). The menu checks up front;
+    // this covers a session that expired while the page was open.
+    const [aiNeedsSignIn, setAiNeedsSignIn] = useState(false);
+    const { data: session, isPending: sessionPending } = authClient.useSession();
+    const pathname = usePathname();
+    const signInHref = `/login?next=${encodeURIComponent(pathname)}`;
     const [userQuestion, setUserQuestion] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -303,13 +313,24 @@ export function ChallengeEditor({
         }
     };
 
+    const showAiResult = (result: Awaited<ReturnType<typeof generateAIResponse>>) => {
+        if (result.success) {
+            setAiResponse(result.text);
+        } else if (result.reason === "unauthenticated") {
+            setAiNeedsSignIn(true);
+            setAiError(result.error);
+        } else {
+            setAiError(`${result.error} (ref ${result.traceId.slice(0, 8)})`);
+        }
+    };
+
     const requestExplanation = async () => {
         setIsAiLoading(true);
         setAiError(null);
+        setAiNeedsSignIn(false);
         try {
             const result = await generateAIResponse(code, challengeDescription, "explain");
-            if (result.success) setAiResponse(result.text);
-            else setAiError(`${result.error} (ref ${result.traceId.slice(0, 8)})`);
+            showAiResult(result);
         } catch {
             setAiError("We couldn't reach the AI service. Check your connection and try again.");
         } finally {
@@ -334,10 +355,10 @@ export function ChallengeEditor({
         if (!userQuestion.trim() || isAiLoading) return;
         setIsAiLoading(true);
         setAiError(null);
+        setAiNeedsSignIn(false);
         try {
             const result = await generateAIResponse(code, challengeDescription, "ask", userQuestion);
-            if (result.success) setAiResponse(result.text);
-            else setAiError(`${result.error} (ref ${result.traceId.slice(0, 8)})`);
+            showAiResult(result);
         } catch {
             setAiError("We couldn't reach the AI service. Check your connection and try again.");
         } finally {
@@ -424,7 +445,7 @@ export function ChallengeEditor({
                                 variant="ghost"
                                 size="sm"
                                 className="text-code-muted hover:text-code-foreground"
-                                title="AI Assistant"
+                                title={session ? "AI Assistant" : "AI Assistant (sign in to use)"}
                             >
                                 <Sparkles className="h-4 w-4 text-spark" />
                             </Button>
@@ -433,20 +454,36 @@ export function ChallengeEditor({
                             align="end"
                             className="w-56"
                         >
-                            <DropdownMenuItem
-                                onClick={() => handleAIRequest("explain")}
-                                className="cursor-pointer"
-                            >
-                                <FileCode2 className="mr-2 h-4 w-4" />
-                                <span>Explain line by line</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onClick={() => handleAIRequest("ask")}
-                                className="cursor-pointer"
-                            >
-                                <MessageSquare className="mr-2 h-4 w-4" />
-                                <span>Ask about the code</span>
-                            </DropdownMenuItem>
+                            {session || sessionPending ? (
+                                <>
+                                    <DropdownMenuItem
+                                        onClick={() => handleAIRequest("explain")}
+                                        disabled={sessionPending}
+                                    >
+                                        <FileCode2 className="mr-2 h-4 w-4" />
+                                        <span>Explain line by line</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        onClick={() => handleAIRequest("ask")}
+                                        disabled={sessionPending}
+                                    >
+                                        <MessageSquare className="mr-2 h-4 w-4" />
+                                        <span>Ask about the code</span>
+                                    </DropdownMenuItem>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="px-2 pb-1 pt-1.5 text-xs leading-relaxed text-muted-foreground">
+                                        The AI assistant explains your code and answers questions about it. Sign in to use it.
+                                    </p>
+                                    <DropdownMenuItem asChild>
+                                        <Link href={signInHref}>
+                                            <LogIn className="mr-2 h-4 w-4" />
+                                            <span>Sign in</span>
+                                        </Link>
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                         </DropdownMenuContent>
                     </DropdownMenu>
 
@@ -629,14 +666,23 @@ export function ChallengeEditor({
                         {aiError && !isAiLoading && (
                             <div role="alert" className="flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
                                 <p className="text-destructive">{aiError}</p>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="self-start"
-                                    onClick={() => (aiMode === "explain" ? requestExplanation() : handleAskSubmit())}
-                                >
-                                    Try again
-                                </Button>
+                                {aiNeedsSignIn ? (
+                                    <Button asChild size="sm" className="self-start">
+                                        <Link href={signInHref}>
+                                            <LogIn className="mr-2 h-4 w-4" />
+                                            Sign in
+                                        </Link>
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="self-start"
+                                        onClick={() => (aiMode === "explain" ? requestExplanation() : handleAskSubmit())}
+                                    >
+                                        Try again
+                                    </Button>
+                                )}
                             </div>
                         )}
 
