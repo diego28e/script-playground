@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import type { ActivityResult, LearnerResponse, MediaProgress } from "@intellectif/lk-core";
@@ -99,16 +99,27 @@ function useVideoState(lessonId: string, tracking: boolean, initialState: VideoS
 }
 
 /**
- * lk-react 23.7.1 reads the video's length and applies the resume point in its `loadedmetadata` handler. When the
- * file is cached, the browser can load the metadata before React has attached the player to the page, and React
- * drops events for an element it hasn't mounted yet: the learner starts at 0:00 with no length shown. When the
- * player's <video> appears with its metadata already loaded, this replays the event so the SDK's own handler runs.
+ * The box around either player. It watches the video's metadata to size the player to the picture (a vertical
+ * video gets a narrow portrait frame instead of a strip in a 16:9 one), and it works around a race:
+ *
+ * lk-react 23.7.1 reads the video's length and applies the resume point in its `loadedmetadata` handler, and the
+ * plain player resumes in its own. When the file is cached, the browser can load the metadata before React has
+ * attached the player (a slow render, or before hydration for the server-rendered plain player), and React drops
+ * events for an element it hasn't mounted yet: the learner starts at 0:00 with no length shown. When the <video>
+ * appears with its metadata already loaded, this replays the event so the players' own handlers run.
  */
-function useReplayMissedMetadata() {
+function usePlayerBox() {
     const ref = useRef<HTMLDivElement>(null);
+    const [portrait, setPortrait] = useState(false);
     useEffect(() => {
         const container = ref.current;
         if (!container) return;
+        // Capture: media events don't bubble, but they do pass through ancestors on the way down.
+        const onMetadata = (event: Event) => {
+            const element = event.target;
+            if (element instanceof HTMLVideoElement && element.videoWidth > 0) setPortrait(element.videoHeight > element.videoWidth);
+        };
+        container.addEventListener("loadedmetadata", onMetadata, true);
         let done = false;
         const check = () => {
             const element = container.querySelector("video");
@@ -120,23 +131,35 @@ function useReplayMissedMetadata() {
         const observer = new MutationObserver(check);
         observer.observe(container, { childList: true, subtree: true });
         check();
-        return () => observer.disconnect();
+        return () => {
+            observer.disconnect();
+            container.removeEventListener("loadedmetadata", onMetadata, true);
+        };
     }, []);
-    return ref;
+    return { ref, portrait };
 }
+
+// A portrait player is as tall as the screen allows and at most 24rem wide, but never narrower than 18rem, which the
+// controls need, nor wider than the column.
+const BOX =
+    "lk-scope mx-auto w-full overflow-hidden rounded-2xl data-[portrait]:max-w-[min(100%,max(18rem,min(24rem,calc((100svh-9rem)*9/16))))]";
 
 export function LessonVideo({ video, lessonId, title, language, tracking, initialState, onFinished }: Props) {
     const t = COPY[language];
     const { initial, update } = useVideoState(lessonId, tracking, initialState, t.saveError);
     const onProgress = (progress: MediaProgress) => update((current) => ({ ...current, progress }), 4000);
-    const playerRef = useReplayMissedMetadata();
+    const { ref: boxRef, portrait } = usePlayerBox();
 
     if (video.kind === "plain") {
-        return <PlainVideo media={video.media} initial={initial} onProgress={onProgress} onEnded={onFinished} fallback={t.noVideo} />;
+        return (
+            <div ref={boxRef} className={BOX} data-portrait={portrait || undefined}>
+                <PlainVideo media={video.media} portrait={portrait} initial={initial} onProgress={onProgress} onEnded={onFinished} fallback={t.noVideo} />
+            </div>
+        );
     }
 
     return (
-        <div ref={playerRef} className="lk-scope overflow-hidden rounded-2xl">
+        <div ref={boxRef} className={BOX} data-portrait={portrait || undefined}>
             <InteractiveVideo
                 group={video.group}
                 renderMode="practice"
@@ -178,12 +201,14 @@ export function LessonVideo({ video, lessonId, title, language, tracking, initia
 /** A video with no questions yet: the browser's own player, with captions, a poster and resume. */
 function PlainVideo({
     media,
+    portrait,
     initial,
     onProgress,
     onEnded,
     fallback,
 }: {
     media: Extract<LessonVideoData, { kind: "plain" }>["media"];
+    portrait: boolean;
     initial: VideoState;
     onProgress: (progress: MediaProgress) => void;
     onEnded?: () => void;
@@ -193,17 +218,12 @@ function PlainVideo({
     const furthest = useRef(initial.progress?.furthest ?? 0);
     const lastReport = useRef(0);
 
-    // Resume where the learner left off, unless that was the very end.
+    // Resume where the learner left off, unless that was the very end. Metadata that loaded before hydration is
+    // replayed by the box around the player (usePlayerBox), so this handler always runs once.
     const resume = (element: HTMLVideoElement) => {
         const at = initial.progress?.at ?? 0;
         if (at > 0 && at < element.duration - 5) element.currentTime = at;
     };
-    // The <video> is in the server's HTML, so its metadata can load before React attaches onLoadedMetadata.
-    useEffect(() => {
-        if (ref.current && ref.current.readyState >= HTMLMediaElement.HAVE_METADATA) resume(ref.current);
-        // Once, on mount: later loads are the handler's.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
 
     const report = (element: HTMLVideoElement, force = false) => {
         const at = element.currentTime;
@@ -223,7 +243,7 @@ function PlainVideo({
             crossOrigin="anonymous"
             poster={media.poster}
             aria-label={media.alt}
-            className="aspect-video w-full rounded-2xl bg-black"
+            className={portrait ? "aspect-[9/16] w-full bg-black" : "aspect-video w-full bg-black"}
             onLoadedMetadata={(event) => resume(event.currentTarget)}
             onTimeUpdate={(event) => report(event.currentTarget)}
             onPause={(event) => report(event.currentTarget, true)}

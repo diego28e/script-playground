@@ -296,6 +296,11 @@
   --lk-radius-lg: calc(var(--radius) + 0.25rem);
 }
 
+/* A vertical video gets a portrait frame (components/courses/lesson-video.tsx sets data-portrait). */
+.lk-scope[data-portrait] .lk-iv-video {
+  aspect-ratio: 9 / 16;
+}
+
 .dark .lk-scope {
   --lk-color-success: #4ade80;
   --lk-color-error: #f87171;

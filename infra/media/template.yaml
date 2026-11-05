@@ -18,7 +18,7 @@ Parameters:
   AllowedOrigins:
     Type: CommaDelimitedList
     Default: https://academiadelcodigo.com,https://www.academiadelcodigo.com,http://localhost:3000
-    Description: Pages allowed to read captions (the player fetches them with CORS).
+    Description: Pages allowed to read captions (the player fetches them with CORS) and to upload to the bucket (the admin page).
   PriceClass:
     Type: String
     Default: PriceClass_All
@@ -55,6 +55,21 @@ Resources:
               NoncurrentDays: 30
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
+          # Originals uploaded from the admin page, kept only until MediaConvert has encoded them.
+          - Id: expire-uploads
+            Status: Enabled
+            Prefix: uploads/
+            ExpirationInDays: 7
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+      # The admin page uploads straight from the browser with presigned URLs; reading still goes through CloudFront.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [PUT]
+            AllowedOrigins: !Ref AllowedOrigins
+            AllowedHeaders: ["*"]
+            ExposedHeaders: [ETag]
+            MaxAge: 3600
       Tags:
         - Key: Name
           Value: academia-course-media
@@ -165,6 +180,72 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
 
+  # MediaConvert reads an original from uploads/ and writes the web version under courses/.
+  MediaConvertRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-mediaconvert
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: mediaconvert.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: encode-course-media
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${MediaBucket.Arn}/uploads/*
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${MediaBucket.Arn}/courses/*
+
+  # The platform's server on Amplify (attach it as the app's compute role): it hands the admin page upload URLs,
+  # starts encoding jobs and reads their status, with no access keys stored anywhere.
+  PlatformComputeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-platform-compute
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: amplify.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: course-media-uploads
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PresignUploads
+                Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  - !Sub ${MediaBucket.Arn}/uploads/*
+                  - !Sub ${MediaBucket.Arn}/courses/*
+              - Sid: CleanUpOriginals
+                Effect: Allow
+                Action: s3:DeleteObject
+                Resource: !Sub ${MediaBucket.Arn}/uploads/*
+              - Sid: Encode
+                Effect: Allow
+                Action:
+                  - mediaconvert:CreateJob
+                  - mediaconvert:GetJob
+                Resource: "*"
+              - Sid: HandMediaConvertItsRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt MediaConvertRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: mediaconvert.amazonaws.com
+
   DnsIpv4:
     Type: AWS::Route53::RecordSet
     Properties:
@@ -196,3 +277,9 @@ Outputs:
   KeyPairId:
     Description: MEDIA_KEY_PAIR_ID in the platform
     Value: !Ref SigningPublicKey
+  MediaConvertRoleArn:
+    Description: MEDIA_CONVERT_ROLE_ARN in the platform
+    Value: !GetAtt MediaConvertRole.Arn
+  PlatformComputeRoleArn:
+    Description: The Amplify app's compute role (App settings, IAM roles)
+    Value: !GetAtt PlatformComputeRole.Arn

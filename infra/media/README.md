@@ -6,7 +6,7 @@ at `https://media.academiadelcodigo.com` can read. The platform hands the browse
 
 | File | Purpose |
 |---|---|
-| `template.yaml` | CloudFormation: the bucket, the distribution with its certificate and DNS records, the signing key group and the CORS policy for captions |
+| `template.yaml` | CloudFormation: the bucket, the distribution with its certificate and DNS records, the signing key group, the CORS rules, and the two roles the admin page's uploads need (MediaConvert's, and the platform's compute role on Amplify) |
 
 ## Why this shape
 
@@ -21,7 +21,11 @@ at `https://media.academiadelcodigo.com` can read. The platform hands the browse
   the same cached copy.
 - **CORS on the distribution.** The player reads captions with `fetch` (it draws them itself and builds the
   transcript from them), which a different origin only allows with CORS headers.
-- **Cost.** S3 storage is about US$0.023 per GB-month. CloudFront's always-free tier covers 1 TB of transfer and
+- **Encoding with MediaConvert.** The admin page (`/admin/videos`) sends the original straight from the browser to S3
+  with a presigned URL (no file passes through the app server), and AWS Elemental MediaConvert turns it into a web MP4.
+  Amplify's servers can't run ffmpeg on large files, and a managed encoder needs nothing to maintain.
+- **Cost.** S3 storage is about US$0.023 per GB-month. MediaConvert charges per minute of output, about US$0.015 for a
+  minute of HD (a ten-minute lesson is about 15 cents). CloudFront's always-free tier covers 1 TB of transfer and
   10 million requests a month; beyond it, about US$0.085 per GB in North America and US$0.110 in South America.
 
 ## One-time setup
@@ -72,7 +76,42 @@ can read them at runtime:
         - echo "MEDIA_PRIVATE_KEY_B64=$MEDIA_PRIVATE_KEY_B64" >> .env.production
 ```
 
+### 5. Turn on uploads from the admin page
+
+Update the stack with the upload roles and rules (the same command as step 2, plus `--capabilities`, because the
+stack now creates IAM roles):
+
+```bash
+aws cloudformation deploy --template-file infra/media/template.yaml --stack-name academia-media --parameter-overrides HostedZoneId=Z04257232FTAKK2T6HGOT "PublicKeyPem=$(cat ~/.academia-media/media-signing-public.pem)" --capabilities CAPABILITY_NAMED_IAM --profile dalejo --region us-east-1
+```
+
+Then, in Amplify:
+
+1. **App settings → IAM roles → Compute role:** choose `academia-media-platform-compute` (the
+   `PlatformComputeRoleArn` output). The app's server then calls S3 and MediaConvert as that role; no keys are stored.
+2. **Environment variables:** add `MEDIA_BUCKET` (the `BucketName` output) and `MEDIA_CONVERT_ROLE_ARN` (the
+   `MediaConvertRoleArn` output), and two more lines in the build spec:
+
+```yaml
+        - echo "MEDIA_BUCKET=$MEDIA_BUCKET" >> .env.production
+        - echo "MEDIA_CONVERT_ROLE_ARN=$MEDIA_CONVERT_ROLE_ARN" >> .env.production
+```
+
+To upload from `pnpm dev`, put the same two variables in `.env.local` with `AWS_PROFILE=dalejo`, and open the site
+at `http://localhost:3000` (the bucket accepts uploads only from the platform and that address).
+
 ## Adding a video to a lesson
+
+**The admin page does it for you:** open `/admin/videos`, choose the lesson, pick the file, a poster frame and any
+caption files, and press **Upload and encode**. The page shows the upload and the encode, and attaches the video to
+the lesson when it is ready (an interactive video keeps its quizzes). You can leave the page while it encodes.
+
+**Quizzes come from the course repository.** A lesson whose video has quizzes has a `NN-MM-slug.video.json` next to
+it (the steps below), and the import puts that file's video back on the lesson every time. To change such a video,
+upload it from the admin page, then copy the paths it attached into the sidecar (or the next import restores the old
+ones).
+
+**By hand,** for a video you encode yourself:
 
 ### 1. Encode it for the web
 

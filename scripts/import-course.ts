@@ -9,7 +9,8 @@
 // A lesson video is a sidecar file, NN-MM-slug.video.json, in lk-core's format (lib/lesson-video.ts): beside a
 // notebook or guide of the same name it adds a video to that lesson; on its own it is a video lesson. Its files are
 // referred to as /media/<key> and uploaded to the media bucket separately (infra/media/README.md). A sidecar that
-// fails lk-core's checks stops the import with every problem listed.
+// fails lk-core's checks stops the import with every problem listed. A lesson with no sidecar keeps the video it
+// has, so a video uploaded from the admin page (/admin/videos) survives a re-import.
 //
 // Re-running is safe: the course, modules and lessons are matched by slug and updated in place. Nothing is
 // deleted; lessons that disappeared from the repository are reported, because deleting them would delete
@@ -20,7 +21,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
-import { Prisma, type LessonKind } from "@prisma/client";
+import type { LessonKind, Prisma } from "@prisma/client";
 import { parseLessonVideo } from "@/lib/lesson-video";
 
 type ParsedLesson = {
@@ -34,8 +35,8 @@ type ParsedLesson = {
   objectives: string[];
   sourcePath: string | null;
   body: string | null;
-  // The sidecar's JSON, checked; DbNull clears a video whose sidecar was removed.
-  video: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  // The sidecar's JSON, checked; undefined leaves the lesson's video as it is.
+  video: Prisma.InputJsonValue | undefined;
 };
 
 type ParsedModule = {
@@ -118,7 +119,7 @@ function parseNotebook(repo: string, path: string, kind: LessonKind): ParsedLess
     objectives,
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body: null,
-    video: Prisma.DbNull,
+    video: undefined,
   };
 }
 
@@ -137,7 +138,7 @@ function parseGuide(repo: string, path: string): ParsedLesson {
     objectives: [],
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body,
-    video: Prisma.DbNull,
+    video: undefined,
   };
 }
 
@@ -239,8 +240,8 @@ function printSummary(course: ParsedCourse) {
   const byKind = Object.fromEntries(["NOTEBOOK", "READING", "PROJECT", "VIDEO"].map((kind) => [kind, lessons.filter((lesson) => lesson.kind === kind).length]));
   console.log(`${course.title} (${course.slug}) @ ${course.sourceRef.slice(0, 7)}`);
   console.log(`  ${course.modules.length} modules, ${lessons.length} lessons ${JSON.stringify(byKind)}`);
-  const withVideo = lessons.filter((lesson) => lesson.video !== Prisma.DbNull).map((lesson) => lesson.slug);
-  if (withVideo.length) console.log(`  with a video: ${withVideo.join(", ")}`);
+  const withVideo = lessons.filter((lesson) => lesson.video !== undefined).map((lesson) => lesson.slug);
+  if (withVideo.length) console.log(`  with a video from the repository: ${withVideo.join(", ")}`);
   const missing = lessons.filter((lesson) => lesson.kind !== "READING" && lesson.kind !== "VIDEO" && lesson.objectives.length === 0).map((lesson) => lesson.slug);
   if (missing.length) console.log(`  without objectives or requirements: ${missing.join(", ")}`);
   const untimed = lessons.filter((lesson) => lesson.estimatedMinutes === null).map((lesson) => lesson.slug);

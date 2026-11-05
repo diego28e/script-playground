@@ -182,10 +182,42 @@ model Lesson {
   updatedAt        DateTime         @updatedAt
   module           CourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress         LessonProgress[]
+  videoUploads     VideoUpload[]
 
   @@unique([moduleId, slug])
   @@index([moduleId, position])
   @@map("lesson")
+}
+
+// A video uploaded from the admin page (/admin/videos, actions/videos.ts): the original goes to S3 under uploads/,
+// MediaConvert writes the web version under outputPrefix, and when it is ready the lesson's video points at it.
+model VideoUpload {
+  id              String            @id @default(cuid())
+  lessonId        String
+  status          VideoUploadStatus @default(UPLOADING)
+  fileName        String
+  // S3 key of the original (deleted once encoded; the bucket also expires uploads/ after 7 days).
+  sourceKey       String
+  // S3 prefix the encoded files land under, e.g. courses/<course>/<lesson>/<upload id>/.
+  outputPrefix    String
+  posterKey       String?
+  // [{ kind, srclang, label, default, key }], the caption files uploaded with the video.
+  captions        Json              @default("[]")
+  // As the browser reported them: the displayed size and the length.
+  width           Int?
+  height          Int?
+  durationSeconds Float?
+  jobId           String?
+  // MediaConvert's percentage while encoding.
+  percent         Int?
+  error           String?
+  createdById     String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  lesson          Lesson            @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId, createdAt])
+  @@map("video_upload")
 }
 
 model Enrollment {
@@ -233,6 +265,13 @@ enum LessonKind {
   READING
   PRACTICE
   PROJECT
+}
+
+enum VideoUploadStatus {
+  UPLOADING
+  ENCODING
+  READY
+  FAILED
 }
 
 enum ProgressStatus {
