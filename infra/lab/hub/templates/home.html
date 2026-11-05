@@ -1,25 +1,32 @@
 {#- The hub's home page, for one server per student. Keeps the ids the hub's home.js binds (#start, #stop). -#}
 {% extends "templates/home.html" %}
+{% from "adc_macros.html" import card_top, arrow %}
 
 {% block main %}
-  <div class="container">
+  <div class="adc-page">
     <div class="adc-card">
-      {% if default_server.active %}
-        <h1>Tu laboratorio está encendido</h1>
-        <p>Vuelve a tus notebooks, o apágalo si terminaste: se apaga solo tras una hora sin actividad y tus
-          archivos se conservan.</p>
-      {% else %}
-        <h1>Tu laboratorio está apagado</h1>
-        <p>Enciéndelo para seguir con el curso. Tus notebooks y tu archivo <code>.env</code> te esperan donde los
-          dejaste.</p>
-      {% endif %}
-      <div class="adc-actions">
-        <a id="start" role="button" class="btn btn-primary" href="{{ url }}">
-          {% if default_server.active %}Abrir mi laboratorio{% else %}Encender mi laboratorio{% endif %}
+      <div class="adc-card-head">
+        {{ card_top() }}
+        {% if default_server.active %}
+          <h1>Tu laboratorio está encendido</h1>
+          <p>Vuelve a tus notebooks donde los dejaste. Se apaga solo tras una hora sin actividad y tus archivos se
+            conservan.</p>
+        {% else %}
+          <h1>Tu laboratorio está apagado</h1>
+          <p>Enciéndelo para seguir con el curso. Tus notebooks y tu archivo <code>.env</code> te esperan donde los
+            dejaste.</p>
+        {% endif %}
+      </div>
+      <div class="adc-card-body">
+        <a id="start" role="button" class="adc-btn adc-btn-primary" href="{{ url }}">
+          {% if default_server.active %}Abrir mi laboratorio{% else %}Encender mi laboratorio{% endif %}{{ arrow() }}
         </a>
         {% if default_server.active %}
-          <a id="stop" role="button" class="btn btn-outline-danger">Apagar</a>
+          <a id="stop" role="button" class="adc-btn adc-btn-quiet adc-btn-danger">Apagar el laboratorio</a>
         {% endif %}
+      </div>
+      <div class="adc-card-foot">
+        Tus notebooks viven en tu propio espacio · <a href="https://academiadelcodigo.com">academiadelcodigo.com</a>
       </div>
     </div>
   </div>
@@ -28,12 +35,16 @@
 {% block script %}
   {{ super() }}
   <script>
-    // home.js relabels #start in English after a stop; keep the Spanish label.
+    // home.js relabels #start in English after a stop; keep the Spanish label (and the arrow).
     (function () {
       var start = document.getElementById("start");
       if (!start) return;
+      var arrow = start.querySelector(".adc-arrow");
       new MutationObserver(function () {
-        if (start.textContent.trim() === "Start My Server") start.textContent = "Encender mi laboratorio";
+        if (start.textContent.trim() === "Start My Server") {
+          start.textContent = "Encender mi laboratorio";
+          if (arrow) start.appendChild(arrow);
+        }
         if (start.getAttribute("title") === "Your server is stopping") start.setAttribute("title", "Apagando…");
       }).observe(start, { childList: true, characterData: true, subtree: true, attributes: true });
     })();

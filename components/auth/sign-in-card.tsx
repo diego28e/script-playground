@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
+import { LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { BrandMark } from "@/components/brand/brand-mark";
+import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { useLanguage } from "@/components/providers/language-provider";
 
 // The look follows the identifier-first sign-in card; Google is the only method today, so the email
@@ -102,25 +103,18 @@ export function SignInCard() {
       </div>
 
       <div className="px-7 pb-5 pt-5">
-        <button
-          type="button"
-          onClick={signIn}
-          aria-busy={pending}
-          aria-disabled={pending || undefined}
-          className={`relative flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-colors duration-150 hover:bg-primary/90 motion-reduce:transition-none ${FOCUS}`}
-        >
+        <ShimmerButton tone="ink" size="lg" fullWidth onHover onClick={signIn} aria-busy={pending} aria-disabled={pending || undefined}>
           <span className={`flex items-center gap-2.5 ${pending ? "invisible" : ""}`}>
             <GoogleIcon />
             {t.cta}
-            <ArrowRight className="absolute right-4 size-4" aria-hidden="true" />
           </span>
           {pending && (
-            <span role="status" className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs">
+            <span role="status" className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 whitespace-nowrap text-xs">
               <LoaderCircle className="size-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
               {t.opening}
             </span>
           )}
-        </button>
+        </ShimmerButton>
 
         <div className="relative mt-1 flex min-h-8 items-center">
           {showError ? (

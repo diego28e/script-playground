@@ -5,7 +5,9 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Academia del Código palette, in shadcn's token names so components/ui and shadcn components use it.
-   The same ink, paper and cobalt values brand the lab (infra/lab/hub/templates/page.html). */
+   The same ink, paper and chartreuse values brand the lab (infra/lab/hub/templates/page.html).
+   Buttons: `primary` is ink (paper in dark), `signal` is the chartreuse reserved for a page's one main call to
+   action, and `spark` the amber reserved for the AI tutor. */
 :root {
   --radius: 0.75rem;
   --background: #f7f6f2;
@@ -14,23 +16,44 @@
   --card-foreground: #121826;
   --popover: #ffffff;
   --popover-foreground: #121826;
-  --primary: #2d5be3;
-  --primary-foreground: #ffffff;
+  --primary: #121826;
+  --primary-foreground: #f7f6f2;
   --secondary: #eeede7;
   --secondary-foreground: #121826;
   --muted: #efeee8;
   --muted-foreground: #5a6372;
-  --accent: #e8eefc;
-  --accent-foreground: #1d3fa8;
+  --accent: #ebe9e2;
+  --accent-foreground: #121826;
   --destructive: #b42318;
   --destructive-foreground: #ffffff;
   --border: #e3e1da;
   --input: #d8d5cc;
-  --ring: #2d5be3;
+  --ring: #121826;
   --ink: #121826;
   --ink-foreground: #f7f6f2;
+  --signal: #c8f24e;
+  --signal-strong: #b6e239;
+  --signal-foreground: #121826;
   /* Reserved for the AI tutor, so AI always looks like AI. */
   --spark: #c47a12;
+  /* Lifted pill buttons: a tile shadow for resting controls, a float shadow for the ink call to action. */
+  --shadow-tile: 0 1px 2px rgba(18, 24, 38, 0.08), 0 6px 16px -8px rgba(18, 24, 38, 0.22);
+  --shadow-float: 0 1px 2px rgba(18, 24, 38, 0.12), 0 12px 28px -10px rgba(18, 24, 38, 0.45);
+  /* Code surfaces stay dark in both themes, in this palette rather than an editor's own greys. */
+  --code-bg: #0f1520;
+  --code-panel: #141b26;
+  --code-border: #263142;
+  --code-foreground: #e8ecf2;
+  --code-muted: #98a2b3;
+  /* Hero: a paper gradient, graph-paper grid, guide lines that draw in, and a soft cursor light. */
+  --hero-from: #fbfaf7;
+  --hero-via: #f4f2ec;
+  --hero-to: #e9e6dc;
+  --hero-grid: rgba(18, 24, 38, 0.07);
+  --hero-guide: rgba(18, 24, 38, 0.45);
+  --hero-detail: #5a6372;
+  --hero-spot: rgba(150, 190, 40, 0.1);
+  --hero-glow: rgba(18, 24, 38, 0.18);
 }
 
 .dark {
@@ -40,22 +63,35 @@
   --card-foreground: #e8ecf2;
   --popover: #141b26;
   --popover-foreground: #e8ecf2;
-  --primary: #7d9bff;
+  --primary: #f2f1ec;
   --primary-foreground: #0c1118;
   --secondary: #1c2533;
   --secondary-foreground: #e8ecf2;
   --muted: #1a2230;
   --muted-foreground: #98a2b3;
-  --accent: #1b2744;
-  --accent-foreground: #c9d6ff;
+  --accent: #1c2533;
+  --accent-foreground: #e8ecf2;
   --destructive: #f97066;
   --destructive-foreground: #0c1118;
   --border: #263142;
   --input: #2c3a4f;
-  --ring: #7d9bff;
+  --ring: #c8f24e;
   --ink: #e8ecf2;
   --ink-foreground: #0c1118;
+  --signal: #c8f24e;
+  --signal-strong: #d8f77a;
+  --signal-foreground: #0c1118;
   --spark: #f2b155;
+  --shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 32px -10px rgba(200, 242, 78, 0.18);
+  --hero-from: #111a27;
+  --hero-via: #05080d;
+  --hero-to: #172030;
+  --hero-grid: rgba(148, 163, 184, 0.08);
+  --hero-guide: rgba(203, 213, 225, 0.5);
+  --hero-detail: #cbd5e1;
+  --hero-spot: rgba(200, 242, 78, 0.07);
+  --hero-glow: rgba(203, 213, 225, 0.45);
   color-scheme: dark;
 }
 
@@ -82,12 +118,106 @@
   --color-ink: var(--ink);
   --color-ink-foreground: var(--ink-foreground);
   --color-spark: var(--spark);
+  --color-signal: var(--signal);
+  --color-signal-strong: var(--signal-strong);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-code: var(--code-bg);
+  --color-code-panel: var(--code-panel);
+  --color-code-border: var(--code-border);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-muted: var(--code-muted);
+  --color-hero-from: var(--hero-from);
+  --color-hero-via: var(--hero-via);
+  --color-hero-to: var(--hero-to);
+  --color-hero-detail: var(--hero-detail);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Hero motion (components/home/hero.tsx). Words rise out of a blur one after another; the grid's guide lines
+   draw in; detail dots and particles breathe. With reduced motion everything is simply shown. */
+@keyframes hero-word-appear {
+  0% { opacity: 0; transform: translateY(30px) scale(0.8); filter: blur(10px); }
+  50% { opacity: 0.8; transform: translateY(10px) scale(0.95); filter: blur(2px); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes hero-line-draw {
+  0% { stroke-dashoffset: 1000; opacity: 0; }
+  50% { opacity: 0.3; }
+  100% { stroke-dashoffset: 0; opacity: 0.15; }
+}
+@keyframes hero-pulse {
+  0%, 100% { opacity: 0.1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.1); }
+}
+@keyframes hero-underline { to { width: 100%; } }
+/* The sheen crosses a ShimmerButton, then rests for the remaining 40% of the cycle. */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-160%); }
+  60%, 100% { transform: translateX(360%); }
+}
+@keyframes hero-float {
+  0%, 100% { transform: translate(0, 0); opacity: 0.2; }
+  25% { transform: translate(5px, -10px); opacity: 0.6; }
+  50% { transform: translate(-3px, -5px); opacity: 0.4; }
+  75% { transform: translate(7px, -15px); opacity: 0.8; }
+}
+
+@layer components {
+  .hero-word {
+    display: inline-block;
+    opacity: 0;
+    animation: hero-word-appear 0.8s ease-out forwards;
+    transition: color 0.3s ease, transform 0.3s ease, text-shadow 0.3s ease;
+  }
+  .hero-word:hover { transform: translateY(-2px); text-shadow: 0 0 20px var(--hero-glow); }
+  .hero-reveal { opacity: 0; animation: hero-word-appear 1s ease-out forwards; }
+  .hero-line {
+    stroke: var(--hero-guide);
+    stroke-width: 0.5;
+    stroke-dasharray: 5 5;
+    stroke-dashoffset: 1000;
+    opacity: 0;
+    animation: hero-line-draw 2s ease-out forwards;
+  }
+  .hero-dot { fill: var(--hero-detail); opacity: 0; transform-box: fill-box; transform-origin: center; animation: hero-pulse 3s ease-in-out infinite; }
+  .hero-underline { position: relative; }
+  .hero-underline::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -6px;
+    width: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--hero-guide), transparent);
+    animation: hero-underline 2s ease-out 2.4s forwards;
+  }
+  .hero-particle {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    border-radius: 9999px;
+    background: var(--hero-detail);
+    opacity: 0;
+    animation: hero-float 4s ease-in-out infinite;
+  }
+  .hero-spot {
+    background-image: radial-gradient(circle, var(--hero-spot), transparent 70%);
+    transition: opacity 300ms ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer-sheen { display: none; }
+    .hero-word, .hero-reveal { animation: none; opacity: 1; }
+    .hero-line { animation: none; stroke-dashoffset: 0; opacity: 0.15; }
+    .hero-dot, .hero-particle { animation: none; opacity: 0.25; }
+    .hero-underline::after { animation: none; width: 100%; }
+    .hero-spot { display: none; }
+  }
 }
 
 @layer base {
@@ -98,6 +228,7 @@
   body {
     background: var(--background);
     color: var(--foreground);
-    font-family: var(--font-sans);
+    /* `@theme inline` doesn't emit --font-sans as a variable, so use next/font's Geist variable directly. */
+    font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 }

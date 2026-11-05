@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { createSubmission, getUserSubmissions } from "@/actions/submissions";
 import { generateAIResponse } from "@/actions/ai";
+import { defineAcademiaTheme } from "@/lib/monaco-theme";
 import { toast } from "sonner";
 import confetti from "canvas-confetti";
 import {
@@ -342,8 +343,8 @@ export function ChallengeEditor({
 
     if (isLoadingSubmission) {
         return (
-            <div className="flex h-full items-center justify-center bg-[#1e1e1e]">
-                <div className="text-zinc-400">Loading...</div>
+            <div className="flex h-full items-center justify-center bg-code-panel">
+                <div className="text-code-muted">Loading...</div>
             </div>
         );
     }
@@ -351,14 +352,14 @@ export function ChallengeEditor({
     return (
         <div className="flex h-full flex-col">
             {/* Toolbar */}
-            <div className="flex items-center justify-between border-b border-zinc-700 bg-[#1e1e1e] px-2 py-2 md:px-4 shrink-0">
+            <div className="flex items-center justify-between border-b border-code-border bg-code-panel px-2 py-2 md:px-4 shrink-0">
                 <div className="flex items-center gap-2">
                     {!isMobile && (
                         <Button
                             variant="ghost"
                             size="sm"
                             onClick={onToggleDescription}
-                            className="text-zinc-400 hover:text-zinc-100"
+                            className="text-code-muted hover:text-code-foreground"
                             title={
                                 isDescriptionVisible ? "Hide description" : "Show description"
                             }
@@ -370,7 +371,7 @@ export function ChallengeEditor({
                             )}
                         </Button>
                     )}
-                    <span className="text-xs text-zinc-400 md:text-sm">script.js</span>
+                    <span className="text-xs text-code-muted md:text-sm">script.js</span>
                 </div>
                 <div className="flex items-center gap-1 md:gap-2">
                     <DropdownMenu>
@@ -378,7 +379,7 @@ export function ChallengeEditor({
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="text-zinc-400 hover:text-zinc-100"
+                                className="text-code-muted hover:text-code-foreground"
                                 title="Settings"
                             >
                                 <Settings className="h-4 w-4" />
@@ -386,15 +387,15 @@ export function ChallengeEditor({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                             align="end"
-                            className="w-56 bg-white dark:bg-zinc-900"
+                            className="w-56"
                         >
                             <div className="px-2 py-1.5">
-                                <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
+                                <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
                                     <input
                                         type="checkbox"
                                         checked={autoRun}
                                         onChange={(e) => setAutoRun(e.target.checked)}
-                                        className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-zinc-600"
+                                        className="h-4 w-4 rounded border-input accent-[var(--primary)] focus:ring-2 focus:ring-ring"
                                     />
                                     <span>Auto-run (1.5s delay)</span>
                                 </label>
@@ -407,26 +408,26 @@ export function ChallengeEditor({
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="text-zinc-400 hover:text-zinc-100"
+                                className="text-code-muted hover:text-code-foreground"
                                 title="AI Assistant"
                             >
-                                <Sparkles className="h-4 w-4 text-purple-400" />
+                                <Sparkles className="h-4 w-4 text-spark" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                             align="end"
-                            className="w-56 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                            className="w-56"
                         >
                             <DropdownMenuItem
                                 onClick={() => handleAIRequest("explain")}
-                                className="text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                                className="cursor-pointer"
                             >
                                 <FileCode2 className="mr-2 h-4 w-4" />
                                 <span>Explain line by line</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onClick={() => handleAIRequest("ask")}
-                                className="text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                                className="cursor-pointer"
                             >
                                 <MessageSquare className="mr-2 h-4 w-4" />
                                 <span>Ask about the code</span>
@@ -438,7 +439,7 @@ export function ChallengeEditor({
                         variant="ghost"
                         size="sm"
                         onClick={handleReset}
-                        className="text-zinc-400 hover:text-zinc-100"
+                        className="text-code-muted hover:text-code-foreground"
                         title="Reset to starter"
                     >
                         <RotateCcw className="h-4 w-4" />
@@ -447,7 +448,7 @@ export function ChallengeEditor({
                         variant="ghost"
                         size="sm"
                         onClick={handleFormat}
-                        className="text-zinc-400 hover:text-zinc-100"
+                        className="text-code-muted hover:text-code-foreground"
                         title="Format Code"
                     >
                         <AlignLeft className="h-4 w-4" />
@@ -470,13 +471,9 @@ export function ChallengeEditor({
                         className={`
                             transition-all duration-300
                             ${isSubmitReady
-                                ? "bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/50 md:rounded-md" +
-                                (isMobile && shouldPulse
-                                    ? " rounded-full animate-pulse"
-                                    : isMobile
-                                        ? " rounded-full"
-                                        : "")
-                                : "text-zinc-400 hover:text-zinc-100 opacity-60"
+                                ? "bg-signal text-signal-foreground shadow-[var(--shadow-tile)] hover:bg-signal-strong" +
+                                (isMobile && shouldPulse ? " animate-pulse" : "")
+                                : "text-code-muted hover:text-code-foreground opacity-60"
                             }
                         `}
                         title={
@@ -501,7 +498,8 @@ export function ChallengeEditor({
                 <Editor
                     height="100%"
                     defaultLanguage="javascript"
-                    theme="vs-dark"
+                    beforeMount={defineAcademiaTheme}
+                    theme="academia-dark"
                     value={code}
                     onChange={(value) => setCode(value || "")}
                     options={{
@@ -522,11 +520,11 @@ export function ChallengeEditor({
 
             {/* Output Panel */}
             <div
-                className={`border-t border-zinc-700 bg-zinc-900 shrink-0 transition-all duration-200 ${isMobile ? (isOutputExpanded ? "h-[50vh]" : "h-[140px]") : "h-auto"
+                className={`border-t border-code-border bg-code-panel shrink-0 transition-all duration-200 ${isMobile ? (isOutputExpanded ? "h-[50vh]" : "h-[140px]") : "h-auto"
                     }`}
             >
                 <div className="flex items-center justify-between px-2 py-2 md:px-4 md:py-3">
-                    <h3 className="text-xs font-semibold text-zinc-300 md:text-sm">
+                    <h3 className="text-xs font-semibold text-code-foreground md:text-sm">
                         Output
                     </h3>
                     {isMobile && (
@@ -534,7 +532,7 @@ export function ChallengeEditor({
                             variant="ghost"
                             size="sm"
                             onClick={() => setIsOutputExpanded(!isOutputExpanded)}
-                            className="text-zinc-400 hover:text-zinc-100 h-6 px-2"
+                            className="text-code-muted hover:text-code-foreground h-6 px-2"
                         >
                             <span className="text-xs">
                                 {isOutputExpanded ? "Collapse" : "Expand"}
@@ -543,7 +541,7 @@ export function ChallengeEditor({
                     )}
                 </div>
                 <div
-                    className={`overflow-y-auto rounded-md bg-zinc-950 mx-2 mb-2 p-2 font-mono text-xs md:mx-4 md:mb-4 md:p-3 md:text-sm ${isMobile
+                    className={`overflow-y-auto rounded-md bg-code mx-2 mb-2 p-2 font-mono text-xs md:mx-4 md:mb-4 md:p-3 md:text-sm ${isMobile
                         ? isOutputExpanded
                             ? "h-[calc(50vh-60px)]"
                             : "h-[90px]"
@@ -557,12 +555,12 @@ export function ChallengeEditor({
                         </div>
                     ) : output.length > 0 ? (
                         output.map((line, i) => (
-                            <div key={i} className="text-zinc-300">
+                            <div key={i} className="text-code-foreground">
                                 {line}
                             </div>
                         ))
                     ) : (
-                        <div className="text-zinc-500">Run your code to see output...</div>
+                        <div className="text-code-muted">Run your code to see output...</div>
                     )}
                 </div>
             </div>
@@ -572,7 +570,7 @@ export function ChallengeEditor({
                 <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Bot className="h-5 w-5 text-purple-500" />
+                            <Bot className="h-5 w-5 text-spark" />
                             {aiMode === "explain" ? "Code Explanation" : "Ask AI"}
                         </DialogTitle>
                         <DialogDescription>
@@ -602,14 +600,14 @@ export function ChallengeEditor({
                         )}
 
                         {isAiLoading && aiMode === "explain" && (
-                            <div className="flex items-center justify-center py-8 text-zinc-500">
+                            <div className="flex items-center justify-center py-8 text-muted-foreground">
                                 <Sparkles className="h-6 w-6 animate-spin mr-2" />
                                 Analyzing code...
                             </div>
                         )}
 
                         {aiResponse && (
-                            <div className="prose prose-sm dark:prose-invert max-w-none bg-zinc-50/50 dark:bg-zinc-900/50 p-3 sm:p-4 rounded-lg [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:break-words [&_*]:break-words">
+                            <div className="prose prose-sm dark:prose-invert max-w-none bg-muted/40 p-3 sm:p-4 rounded-lg [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_code]:break-words [&_*]:break-words">
                                 <ReactMarkdown>{aiResponse}</ReactMarkdown>
                             </div>
                         )}

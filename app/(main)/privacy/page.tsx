@@ -4,18 +4,18 @@ export default function PrivacyPage() {
     return (
         <div className="container mx-auto max-w-4xl py-12 px-4 sm:px-6 lg:px-8">
             <div className="space-y-8">
-                <div className="border-b border-zinc-200 pb-5 dark:border-zinc-700">
-                    <h1 className="text-3xl font-bold leading-tight tracking-tight text-zinc-900 dark:text-zinc-100">
+                <div className="border-b border-border pb-5">
+                    <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground">
                         Privacy Policy
                     </h1>
-                    <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                    <p className="mt-2 text-sm text-muted-foreground">
                         Last updated: {new Date().toLocaleDateString()}
                     </p>
                 </div>
 
                 <div className="prose prose-zinc dark:prose-invert max-w-none">
                     <p>
-                        At Script Playground, we respect your privacy and are committed to
+                        At Academia del Código, we respect your privacy and are committed to
                         protecting your personal data. This Privacy Policy explains how we
                         collect, use, and safeguard your information when you use our
                         Service.

@@ -4,31 +4,31 @@ export default function TermsPage() {
     return (
         <div className="container mx-auto max-w-4xl py-12 px-4 sm:px-6 lg:px-8">
             <div className="space-y-8">
-                <div className="border-b border-zinc-200 pb-5 dark:border-zinc-700">
-                    <h1 className="text-3xl font-bold leading-tight tracking-tight text-zinc-900 dark:text-zinc-100">
+                <div className="border-b border-border pb-5">
+                    <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground">
                         Terms of Service
                     </h1>
-                    <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                    <p className="mt-2 text-sm text-muted-foreground">
                         Last updated: {new Date().toLocaleDateString()}
                     </p>
                 </div>
 
                 <div className="prose prose-zinc dark:prose-invert max-w-none">
                     <p>
-                        Welcome to Script Playground. By accessing or using our website, you
+                        Welcome to Academia del Código. By accessing or using our website, you
                         agree to be bound by these Terms of Service and our Privacy Policy.
                     </p>
 
                     <h3>1. Acceptance of Terms</h3>
                     <p>
-                        By accessing or using Script Playground, you agree to comply with
+                        By accessing or using Academia del Código, you agree to comply with
                         and be bound by these Terms. If you do not agree to these Terms, you
                         may not access or use the Service.
                     </p>
 
                     <h3>2. Use of Service</h3>
                     <p>
-                        Script Playground provides a platform for coding challenges and
+                        Academia del Código provides a platform for coding challenges and
                         practice. You agree to use the Service only for lawful purposes and
                         in accordance with these Terms.
                     </p>
@@ -72,7 +72,7 @@ export default function TermsPage() {
                     <p>
                         The Service and its original content (excluding user-generated code),
                         features, and functionality are and will remain the exclusive
-                        property of Script Playground and its licensors.
+                        property of Academia del Código and its licensors.
                     </p>
 
                     <h3>6. Disclaimer of Warranties</h3>
@@ -85,7 +85,7 @@ export default function TermsPage() {
 
                     <h3>7. Limitation of Liability</h3>
                     <p>
-                        In no event shall Script Playground be liable for any indirect,
+                        In no event shall Academia del Código be liable for any indirect,
                         incidental, special, consequential, or punitive damages, including
                         without limitation, loss of profits, data, use, goodwill, or other
                         intangible losses, resulting from your access to or use of or

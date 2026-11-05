@@ -80,7 +80,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       {/* Header */}
-      <div className="border-b bg-zinc-50 px-4 py-3 dark:bg-zinc-900 md:px-6 md:py-4">
+      <div className="border-b bg-muted/40 px-4 py-3 md:px-6 md:py-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2">
             <TooltipProvider>
@@ -162,13 +162,13 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
       </div>
 
       {/* Mobile Tab Navigation */}
-      <div className="flex border-b bg-zinc-50 dark:bg-zinc-900 md:hidden">
+      <div className="flex border-b bg-muted/40 md:hidden">
         <button
           onClick={() => setMobileView("description")}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
             mobileView === "description"
-              ? "border-b-2 border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
-              : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+              ? "border-b-2 border-foreground text-foreground"
+              : "text-muted-foreground hover:text-foreground"
           }`}
         >
           <BookOpen className="h-4 w-4" />
@@ -178,8 +178,8 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
           onClick={() => setMobileView("code")}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
             mobileView === "code"
-              ? "border-b-2 border-zinc-900 text-zinc-900 dark:border-zinc-50 dark:text-zinc-50"
-              : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+              ? "border-b-2 border-foreground text-foreground"
+              : "text-muted-foreground hover:text-foreground"
           }`}
         >
           <Code2 className="h-4 w-4" />
@@ -191,7 +191,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
       <div className="flex-1 overflow-hidden md:hidden">
         {mobileView === "description" ? (
           <div
-            className="h-full overflow-y-auto bg-white p-4 dark:bg-zinc-950"
+            className="h-full overflow-y-auto bg-background p-4"
             style={{ WebkitOverflowScrolling: "touch" }}
           >
             <div className="prose prose-zinc dark:prose-invert max-w-none prose-sm">
@@ -222,7 +222,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
             onCollapse={() => setIsDescriptionVisible(false)}
             onExpand={() => setIsDescriptionVisible(true)}
           >
-            <div className="h-full overflow-y-auto bg-white p-6 dark:bg-zinc-950">
+            <div className="h-full overflow-y-auto bg-background p-6">
               <div className="prose prose-zinc dark:prose-invert max-w-none">
                 <h2 className="text-2xl font-bold mb-4">Problem Description</h2>
                 <div dangerouslySetInnerHTML={{ __html: getDescription() }} />

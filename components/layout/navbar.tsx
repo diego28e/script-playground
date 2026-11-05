@@ -9,6 +9,7 @@ import { UserDropdown } from "@/components/auth/user-dropdown";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { cn } from "@/lib/utils";
 
 const LAB_URL = "https://lab.academiadelcodigo.com";
@@ -19,7 +20,7 @@ const COPY = {
 };
 
 const NAV_LINK =
-    "rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function Navbar() {
     const { data: session, isPending, error } = authClient.useSession();
@@ -34,7 +35,10 @@ export function Navbar() {
                 <div className="flex items-center gap-6">
                     <Link href="/" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <BrandMark />
-                        <span className="text-[15px] font-semibold tracking-tight text-foreground">Academia del Código</span>
+                        {/* On phones the mark stands alone; the name needs the room the actions use. */}
+                        <span className="sr-only text-[15px] font-semibold tracking-tight whitespace-nowrap text-foreground sm:not-sr-only">
+                            Academia del Código
+                        </span>
                     </Link>
                     {signedIn && (
                         <nav className="hidden items-center gap-1 sm:flex" aria-label="Principal">
@@ -66,12 +70,9 @@ export function Navbar() {
                             <Link href="/login" className={NAV_LINK}>
                                 {t.signIn}
                             </Link>
-                            <Link
-                                href="/challenges"
-                                className="ml-1 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                            >
+                            <ShimmerButton href="/challenges" tone="ink" size="sm" onHover className="ml-1 whitespace-nowrap">
                                 {t.start}
-                            </Link>
+                            </ShimmerButton>
                         </>
                     )}
                 </div>

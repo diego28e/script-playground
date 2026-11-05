@@ -18,19 +18,26 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
   <style>
+    /* The platform's palette (app/globals.css): ink pill buttons (paper in dark), chartreuse signal. */
     :root, [data-bs-theme="light"] {
       --adc-bg: #f7f6f2; --adc-surface: #ffffff; --adc-ink: #121826; --adc-muted: #5a6372;
-      --adc-border: #e3e1da; --adc-accent: #2d5be3; --adc-accent-hover: #2349c0; --adc-on-accent: #ffffff;
-      --adc-danger: #b42318; --adc-spark: #d98a1e;
+      --adc-border: #e3e1da; --adc-accent: #121826; --adc-accent-hover: #262f40; --adc-on-accent: #f7f6f2;
+      --adc-danger: #b42318; --adc-spark: #d98a1e; --adc-signal: #c8f24e; --adc-ring: #121826;
+      --adc-progress: #121826; --adc-sheen: rgba(255, 255, 255, .35);
+      --adc-float: 0 1px 2px rgba(18, 24, 38, .12), 0 12px 28px -10px rgba(18, 24, 38, .45);
+      --adc-tile: 0 1px 2px rgba(18, 24, 38, .08), 0 6px 16px -8px rgba(18, 24, 38, .22);
     }
     [data-bs-theme="dark"] {
       --adc-bg: #0c1118; --adc-surface: #141b26; --adc-ink: #e8ecf2; --adc-muted: #98a2b3;
-      --adc-border: #263142; --adc-accent: #7d9bff; --adc-accent-hover: #9db4ff; --adc-on-accent: #0c1118;
-      --adc-danger: #f97066; --adc-spark: #f2b155;
+      --adc-border: #263142; --adc-accent: #f2f1ec; --adc-accent-hover: #ffffff; --adc-on-accent: #0c1118;
+      --adc-danger: #f97066; --adc-spark: #f2b155; --adc-signal: #c8f24e; --adc-ring: #c8f24e;
+      --adc-progress: #c8f24e; --adc-sheen: rgba(0, 0, 0, .2);
+      --adc-float: 0 1px 2px rgba(0, 0, 0, .45), 0 12px 32px -10px rgba(200, 242, 78, .18);
+      --adc-tile: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 16px -8px rgba(0, 0, 0, .6);
     }
     body {
       --bs-body-bg: var(--adc-bg); --bs-body-color: var(--adc-ink); --bs-secondary-color: var(--adc-muted);
-      --bs-border-color: var(--adc-border); --bs-link-color-rgb: 45, 91, 227;
+      --bs-border-color: var(--adc-border); --bs-link-color-rgb: 90, 99, 114;
       font-family: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
       background: var(--adc-bg); color: var(--adc-ink);
     }
@@ -38,7 +45,7 @@
     .navbar.bg-body-tertiary { background: var(--adc-surface) !important; border-bottom: 1px solid var(--adc-border); }
     .adc-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--adc-ink); }
     .adc-brand:hover { color: var(--adc-ink); }
-    .adc-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--adc-ink); color: var(--adc-bg);
+    .adc-mark { width: 30px; height: 30px; border-radius: 10px; background: var(--adc-ink); color: var(--adc-bg);
       display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; }
     .adc-name { font-weight: 600; font-size: 15px; line-height: 1.1; }
     .adc-sub { display: block; font-size: 12px; font-weight: 400; color: var(--adc-muted); }
@@ -49,15 +56,57 @@
       --bs-btn-active-border-color: var(--adc-accent-hover); --bs-btn-active-color: var(--adc-on-accent);
     }
     .btn { border-radius: 10px; font-weight: 500; }
-    .progress { height: 8px; border-radius: 999px; background: var(--adc-border); }
-    .progress-bar { background: var(--adc-accent); }
-    .adc-card { max-width: 520px; margin: 4rem auto; padding: 2rem 2.25rem; background: var(--adc-surface);
-      border: 1px solid var(--adc-border); border-radius: 16px; }
-    .adc-card h1 { font-size: 1.35rem; font-weight: 600; margin-bottom: .5rem; }
-    .adc-card p { color: var(--adc-muted); }
-    .adc-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
-    #progress-details summary, #progress-log { color: var(--adc-muted); font-size: .875rem; }
     .btn-outline-contrast { border-color: var(--adc-border); }
+    /* Graph-paper backdrop, the same motif as the platform's hero. */
+    body { background-image: linear-gradient(to right, var(--adc-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--adc-grid) 1px, transparent 1px); background-size: 60px 60px; }
+    :root, [data-bs-theme="light"] { --adc-grid: rgba(18, 24, 38, .045); --adc-strip: #f4f3ee; --adc-shadow: rgba(45, 91, 227, .06); }
+    [data-bs-theme="dark"] { --adc-grid: rgba(232, 236, 242, .04); --adc-strip: #111824; --adc-shadow: rgba(0, 0, 0, .35); }
+
+    /* Cards share the platform's sign-in card: mark and eyebrow, heading, one full-width action, a footer strip. */
+    .adc-page { min-height: calc(100vh - 140px); display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
+    .adc-card { width: 100%; max-width: 420px; overflow: hidden; background: var(--adc-surface); color: var(--adc-ink);
+      border: 1px solid var(--adc-border); border-radius: 24px; box-shadow: 0 20px 40px -12px var(--adc-shadow); }
+    .adc-card-head { padding: 24px 28px 0; }
+    .adc-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .adc-card-top .adc-mark { border-radius: 12px; width: 32px; height: 32px; }
+    .adc-eyebrow { display: inline-flex; align-items: center; gap: 6px; font: 500 10px "Geist Mono", ui-monospace, monospace;
+      text-transform: uppercase; letter-spacing: .18em; color: var(--adc-muted); }
+    .adc-card h1 { font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+    .adc-card-head p { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--adc-muted); }
+    .adc-card-body { padding: 20px 28px 20px; display: flex; flex-direction: column; gap: 10px; }
+    .adc-card-foot { border-top: 1px solid var(--adc-border); background: var(--adc-strip); padding: 10px 28px;
+      text-align: center; font-size: 11px; color: var(--adc-muted); }
+    .adc-card-foot a { color: inherit; text-underline-offset: 4px; }
+    .adc-card-foot a:hover { color: var(--adc-ink); }
+    /* Pill buttons, as the platform's ShimmerButton: ink with a lifted shadow and a sheen that crosses on hover. */
+    .adc-btn { position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: center;
+      justify-content: center; gap: 10px; width: 100%; height: 48px; padding: 0 20px; border-radius: 999px;
+      font-size: 14px; font-weight: 600; text-decoration: none; border: 1px solid transparent; cursor: pointer;
+      transition: background-color .15s ease; }
+    .adc-btn:focus-visible { outline: 2px solid var(--adc-ring); outline-offset: 2px; }
+    .adc-btn-primary { background: var(--adc-accent); color: var(--adc-on-accent); box-shadow: var(--adc-float); }
+    .adc-btn-primary:hover { background: var(--adc-accent-hover); color: var(--adc-on-accent); }
+    .adc-btn-primary::before { content: ""; position: absolute; inset: 0 auto 0 0; z-index: -1; width: 33%;
+      background: var(--adc-sheen); filter: blur(6px); transform: translateX(-160%); }
+    .adc-btn-primary:hover::before, .adc-btn-primary:focus-visible::before { animation: adc-sheen 3s ease-in-out infinite; }
+    @keyframes adc-sheen { 0% { transform: translateX(-160%); } 60%, 100% { transform: translateX(360%); } }
+    .adc-btn-primary .adc-arrow { position: absolute; right: 18px; }
+    .adc-btn-quiet { height: 40px; background: var(--adc-surface); border-color: var(--adc-border); color: var(--adc-muted);
+      font-size: 13px; box-shadow: var(--adc-tile); }
+    .adc-btn-quiet:hover { background: var(--adc-strip); color: var(--adc-ink); }
+    .adc-btn-danger:hover { color: var(--adc-danger); border-color: var(--adc-danger); }
+    .adc-btn[disabled], .adc-btn[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+    .progress { height: 6px; border-radius: 999px; background: var(--adc-border); }
+    .progress-bar { background: var(--adc-progress); }
+    #progress-message { margin: 0; font: 400 11px "Geist Mono", ui-monospace, monospace; color: var(--adc-muted); min-height: 16px; }
+    #progress-details summary { font-size: 12px; color: var(--adc-muted); cursor: pointer; }
+    #progress-log { font: 400 11px "Geist Mono", ui-monospace, monospace; color: var(--adc-muted); padding-top: 6px; }
+    #stop-server-status { font-size: 12px; margin: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .progress-bar, .adc-btn { transition: none; }
+      .adc-btn-primary::before { display: none; }
+    }
   </style>
 {% endblock stylesheet %}
 

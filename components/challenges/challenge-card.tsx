@@ -45,7 +45,7 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
     };
 
     return (
-        <Card className="flex h-full flex-col transition-all hover:border-zinc-400 dark:hover:border-zinc-700">
+        <Card className="flex h-full flex-col transition-all hover:border-foreground/25">
             <CardHeader>
                 <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
@@ -83,7 +83,7 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
                     {challenge.labels.map((label) => (
                         <span
                             key={label.name}
-                            className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 break-all"
+                            className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground break-all"
                         >
                             {label.name}
                         </span>
@@ -92,7 +92,7 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
             </CardContent>
             <CardFooter>
                 <Link href={`/challenges/${challenge.slug}`} className="w-full">
-                    <div className="inline-flex h-9 w-full items-center justify-center whitespace-nowrap rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 shadow transition-colors hover:bg-zinc-900/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 disabled:pointer-events-none disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-50/90 dark:focus-visible:ring-zinc-300">
+                    <div className="inline-flex h-9 w-full items-center justify-center whitespace-nowrap rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-tile)] transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50">
                         Solve Challenge
                     </div>
                 </Link>

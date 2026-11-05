@@ -235,7 +235,7 @@ export function ChallengeForm({
                 onClick={() => setActiveTab("en")}
                 className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 ${
                   activeTab === "en"
-                    ? "bg-gradient-to-b from-slate-700 to-slate-800 text-white shadow-lg shadow-slate-900/20"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-tile)]"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
                 }`}
               >
@@ -246,7 +246,7 @@ export function ChallengeForm({
                 onClick={() => setActiveTab("es")}
                 className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 ${
                   activeTab === "es"
-                    ? "bg-gradient-to-b from-slate-700 to-slate-800 text-white shadow-lg shadow-slate-900/20"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-tile)]"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
                 }`}
               >
@@ -323,7 +323,7 @@ export function ChallengeForm({
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Add existing label..." />
               </SelectTrigger>
-              <SelectContent className="bg-white dark:bg-zinc-950">
+              <SelectContent>
                 <div
                   className="px-2 pb-1"
                   onKeyDown={(e) => e.stopPropagation()}

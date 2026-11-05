@@ -1,27 +1,32 @@
 {#- "Your server is starting" page. Keeps every id the hub's script uses (progress bar, log, stop button). -#}
 {% extends "templates/spawn_pending.html" %}
+{% from "adc_macros.html" import card_top %}
 
 {% block main %}
-  <div class="container">
+  <div class="adc-page">
     <div class="adc-card">
-      <h1>Preparando tu laboratorio</h1>
-      <p>Estamos encendiendo tu entorno con Python, JupyterLab y el material del curso. La primera vez tarda
-        alrededor de un minuto; te llevaremos ahí en cuanto esté listo.</p>
-      <div class="progress mt-4">
-        <div id="progress-bar" class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
-             aria-valuemax="100">
-          <span class="visually-hidden"><span id="sr-progress">0%</span> completado</span>
+      <div class="adc-card-head">
+        {{ card_top() }}
+        <h1>Preparando tu laboratorio</h1>
+        <p>Encendemos tu entorno con Python, JupyterLab y el material del curso. La primera vez tarda alrededor de un
+          minuto; te llevamos ahí en cuanto esté listo.</p>
+      </div>
+      <div class="adc-card-body">
+        <div class="progress">
+          <div id="progress-bar" class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
+               aria-valuemax="100">
+            <span class="visually-hidden"><span id="sr-progress">0%</span> completado</span>
+          </div>
         </div>
+        <p id="progress-message"></p>
+        <details id="progress-details">
+          <summary>Detalles técnicos</summary>
+          <div id="progress-log"></div>
+        </details>
+        <button type="button" id="stop-server-btn" class="adc-btn adc-btn-quiet adc-btn-danger">Cancelar</button>
+        <div id="stop-server-status" style="display: none;"></div>
       </div>
-      <p id="progress-message" class="mt-3 mb-0"></p>
-      <details id="progress-details" class="mt-3">
-        <summary>Detalles técnicos</summary>
-        <div id="progress-log"></div>
-      </details>
-      <div class="adc-actions">
-        <button type="button" id="stop-server-btn" class="btn btn-outline-danger btn-sm">Cancelar</button>
-        <div id="stop-server-status" class="mt-2" style="display: none;"></div>
-      </div>
+      <div class="adc-card-foot">Tus archivos se conservan entre sesiones</div>
     </div>
   </div>
 {% endblock main %}

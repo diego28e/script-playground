@@ -72,8 +72,8 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
   };
 
   return (
-    <div className="border rounded-lg overflow-hidden bg-white dark:bg-zinc-950">
-      <div className="flex flex-wrap gap-1 p-2 border-b bg-zinc-50 dark:bg-zinc-900">
+    <div className="border rounded-lg overflow-hidden bg-card">
+      <div className="flex flex-wrap gap-1 p-2 border-b bg-muted/40">
         <Button
           type="button"
           size="sm"
@@ -140,7 +140,7 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
             <Palette className="h-4 w-4" />
           </Button>
           {showColorPicker && (
-            <div className="absolute top-full mt-1 p-2 bg-white dark:bg-zinc-900 border rounded-md shadow-lg z-50 flex gap-1">
+            <div className="absolute top-full mt-1 p-2 bg-popover border rounded-md shadow-lg z-50 flex gap-1">
               {colors.map((color) => (
                 <button
                   key={color}
@@ -149,7 +149,7 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
                     editor.chain().focus().setColor(color).run();
                     setShowColorPicker(false);
                   }}
-                  className="w-6 h-6 rounded border-2 border-zinc-300 dark:border-zinc-700 hover:scale-110 transition-transform"
+                  className="w-6 h-6 rounded border-2 border-border hover:scale-110 transition-transform"
                   style={{ backgroundColor: color }}
                 />
               ))}
