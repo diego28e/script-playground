@@ -3,9 +3,10 @@ import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { PendingFace } from "@/components/ui/pending"
 
 const buttonVariants = cva(
-    "inline-flex items-center justify-center whitespace-nowrap rounded-full text-sm font-semibold ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+    "relative inline-flex items-center justify-center whitespace-nowrap rounded-full text-sm font-semibold ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
     {
         variants: {
             variant: {
@@ -38,17 +39,34 @@ export interface ButtonProps
     extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
     asChild?: boolean
+    /** Busy: the label gives way to the DotLoader, the button keeps its size and ignores further clicks. */
+    loading?: boolean
+    /** Shown next to the loader while busy, e.g. "Saving…". */
+    loadingLabel?: React.ReactNode
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ className, variant, size, asChild = false, ...props }, ref) => {
+    ({ className, variant, size, asChild = false, loading, loadingLabel, disabled, children, ...props }, ref) => {
         const Comp = asChild ? Slot : "button"
+        // Only buttons that can be busy get the pending wrapper, so every other button renders as before.
+        const canBeBusy = loading !== undefined && !asChild
         return (
             <Comp
-                className={cn(buttonVariants({ variant, size, className }))}
+                // Busy is not "unavailable": keep full opacity while the native disabled blocks repeat clicks.
+                className={cn(buttonVariants({ variant, size, className }), loading && "disabled:opacity-100")}
                 ref={ref}
+                disabled={disabled || loading}
+                aria-busy={loading || undefined}
                 {...props}
-            />
+            >
+                {canBeBusy ? (
+                    <PendingFace pending={loading} label={loadingLabel}>
+                        {children}
+                    </PendingFace>
+                ) : (
+                    children
+                )}
+            </Comp>
         )
     }
 )

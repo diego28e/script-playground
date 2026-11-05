@@ -160,6 +160,11 @@
   0% { transform: translateX(-160%); }
   60%, 100% { transform: translateX(360%); }
 }
+/* The DotLoader's snake: a dot lights up as the head passes, then fades with the tail (8 of 25 dots). */
+@keyframes dot-snake {
+  0% { opacity: 1; }
+  32%, 100% { opacity: 0.12; }
+}
 @keyframes hero-float {
   0%, 100% { transform: translate(0, 0); opacity: 0.2; }
   25% { transform: translate(5px, -10px); opacity: 0.6; }
@@ -205,6 +210,19 @@
     opacity: 0;
     animation: hero-float 4s ease-in-out infinite;
   }
+  .dot-loader-dot {
+    opacity: 0.12;
+    animation: dot-snake var(--dot-cycle, 1.4s) linear var(--dot-delay, 0s) infinite;
+  }
+
+  /* Pending feedback for buttons and links (ShimmerButton, Button): the label fades out and a DotLoader takes
+     its place, so the control keeps its size. Links wait 100ms first (--pending-delay), so a prefetched,
+     instant navigation never flickers; actions started by a click show it at once. */
+  .pending-label { transition: opacity 120ms ease; }
+  .pending-overlay { opacity: 0; transition: opacity 120ms ease; }
+  [data-pending="true"] .pending-label { opacity: 0; transition-delay: var(--pending-delay, 0ms); }
+  [data-pending="true"] .pending-overlay { opacity: 1; transition-delay: var(--pending-delay, 0ms); }
+
   .hero-spot {
     background-image: radial-gradient(circle, var(--hero-spot), transparent 70%);
     transition: opacity 300ms ease-out;
@@ -217,12 +235,39 @@
     .hero-dot, .hero-particle { animation: none; opacity: 0.25; }
     .hero-underline::after { animation: none; width: 100%; }
     .hero-spot { display: none; }
+    .dot-loader-dot { animation: none; opacity: var(--dot-still, 0.12); }
   }
 }
 
 @layer base {
   * {
     border-color: var(--border);
+  }
+
+  /* Tailwind 4 leaves buttons with the default arrow cursor. Everything clickable gets the hand,
+     and disabled controls say so. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([data-disabled]),
+  [role="menuitemcheckbox"]:not([data-disabled]),
+  [role="menuitemradio"]:not([data-disabled]),
+  [role="option"]:not([data-disabled]),
+  [role="tab"]:not([data-disabled]),
+  summary,
+  select:not(:disabled),
+  label[for],
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="file"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"],
+  [data-disabled],
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
   }
 
   body {

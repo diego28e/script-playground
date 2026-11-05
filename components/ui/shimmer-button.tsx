@@ -3,6 +3,7 @@
 import { useRef, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type PointerEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { LinkPendingFace, PendingFace } from "@/components/ui/pending";
 
 // Adapted from Klyv's ShimmerButton (MIT, Klyv contributors) to the Academia del Código tokens.
 // A pill with a sheen that sweeps across it and a soft light that follows the pointer. Both are one span each,
@@ -50,6 +51,11 @@ type CommonProps = {
   glow?: boolean;
   fullWidth?: boolean;
   className?: string;
+  /** Busy after a click: the label gives way to the DotLoader and further clicks are ignored.
+   *  Internal links (`href` without `external`) show this on their own while the next page loads. */
+  pending?: boolean;
+  /** Shown next to the loader while busy, e.g. "Enrolling…". */
+  pendingLabel?: ReactNode;
 };
 
 type ButtonRest = { href?: undefined } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyof CommonProps>;
@@ -79,6 +85,8 @@ export function ShimmerButton({
   glow = true,
   fullWidth = false,
   className,
+  pending = false,
+  pendingLabel,
   ...rest
 }: ShimmerButtonProps) {
   const ref = useRef<HTMLElement>(null);
@@ -114,10 +122,11 @@ export function ShimmerButton({
         )}
         style={{ animation: `shimmer-sweep ${duration}s ease-in-out infinite` }}
       />
-      <span className="relative inline-flex items-center gap-2">{children}</span>
     </>
   );
-  const shell = shimmerShell({ tone, size, fullWidth, className });
+  const label = <span className="relative inline-flex items-center gap-2">{children}</span>;
+  // Busy is not "unavailable": full opacity while the native disabled blocks repeat clicks.
+  const shell = shimmerShell({ tone, size, fullWidth, className: cn(className, pending && "disabled:opacity-100") });
 
   if (rest.href !== undefined) {
     const { href, external, onPointerMove, onPointerLeave, ...anchor } = rest as AnchorRest;
@@ -133,22 +142,27 @@ export function ShimmerButton({
     };
     const anchorRef = ref as React.Ref<HTMLAnchorElement>;
     return external ? (
+      // A new tab opens at once: the page itself has nothing to wait for.
       <a ref={anchorRef} href={href} target="_blank" rel="noopener noreferrer" className={shell} {...handlers} {...anchor}>
         {effects}
+        {label}
       </a>
     ) : (
       <Link ref={anchorRef} href={href} className={shell} {...handlers} {...anchor}>
         {effects}
+        <LinkPendingFace label={pendingLabel}>{label}</LinkPendingFace>
       </Link>
     );
   }
 
-  const { onPointerMove, onPointerLeave, type = "button", ...button } = rest as ButtonRest;
+  const { onPointerMove, onPointerLeave, type = "button", disabled, ...button } = rest as ButtonRest;
   return (
     <button
       ref={ref as React.Ref<HTMLButtonElement>}
       type={type}
       className={shell}
+      disabled={disabled || pending}
+      aria-busy={pending || undefined}
       onPointerMove={(event) => {
         onPointerMove?.(event);
         moveGlow(event);
@@ -160,6 +174,9 @@ export function ShimmerButton({
       {...button}
     >
       {effects}
+      <PendingFace pending={pending} label={pendingLabel}>
+        {label}
+      </PendingFace>
     </button>
   );
 }
