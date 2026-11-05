@@ -38,7 +38,8 @@ c.GenericOAuthenticator.manage_groups = True
 c.GenericOAuthenticator.auth_state_groups_key = "oauth_user.groups"
 c.GenericOAuthenticator.allowed_groups = {"lab"}
 c.GenericOAuthenticator.admin_groups = {"lab-admin"}
-# Optional extra accounts by email, e.g. a break-glass admin while the platform is down for maintenance.
+# Optional extra accounts by email, admitted even without the "lab" group (the platform still signs them in:
+# every login goes through it, so these lists don't help while it's down). Normally leave both empty.
 c.Authenticator.allowed_users = env_set("LAB_ALLOWED_USERS")
 c.Authenticator.admin_users = env_set("LAB_ADMIN_USERS")
 
