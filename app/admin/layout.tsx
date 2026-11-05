@@ -51,6 +51,12 @@ export default async function AdminLayout({
                 >
                   Challenges
                 </Link>
+                <Link
+                  href="/admin/lab-access"
+                  className="block rounded-md px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                >
+                  Lab access
+                </Link>
               </div>
             </div>
           </nav>

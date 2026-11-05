@@ -50,6 +50,17 @@ export function AdminNav() {
                             Challenges
                         </Link>
                         <Link
+                            href="/admin/lab-access"
+                            className={cn(
+                                "transition-colors hover:text-foreground/80",
+                                pathname?.startsWith("/admin/lab-access")
+                                    ? "text-foreground"
+                                    : "text-foreground/60"
+                            )}
+                        >
+                            Lab access
+                        </Link>
+                        <Link
                             href="/"
                             className="text-foreground/60 transition-colors hover:text-foreground/80"
                         >

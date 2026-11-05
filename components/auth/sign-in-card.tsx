@@ -16,6 +16,8 @@ const COPY = {
     eyebrow: "Tu academia",
     heading: "Entra a Academia del Código",
     description: "Aprende con notebooks, videos y práctica guiada. Continúa con tu cuenta de Google.",
+    labHeading: "Entra para abrir tu laboratorio",
+    labDescription: "Tu laboratorio usa tu cuenta de Academia del Código. Entra una vez y vuelves directo a tus notebooks.",
     cta: "Continuar con Google",
     opening: "Abriendo Google…",
     hint: "Solo usamos tu nombre, tu correo y tu foto de perfil",
@@ -29,6 +31,8 @@ const COPY = {
     eyebrow: "Your academy",
     heading: "Sign in to Academia del Código",
     description: "Learn with notebooks, videos and guided practice. Continue with your Google account.",
+    labHeading: "Sign in to open your lab",
+    labDescription: "Your lab uses your Academia del Código account. Sign in once and you go straight back to your notebooks.",
     cta: "Continue with Google",
     opening: "Opening Google…",
     hint: "We only use your name, email and profile photo",
@@ -64,6 +68,9 @@ export function SignInCard() {
   const returnedError = searchParams.get("error");
   // Pages that ask for sign-in pass ?next=/their/path so the student lands back where they were.
   const next = safeNextPath(searchParams.get("next"));
+  // The lab sends students here with a signed sign-in request (the OpenID Connect provider in lib/auth.ts);
+  // after Google, they go back to the lab instead of to `next`.
+  const fromLab = searchParams.has("sig") && searchParams.has("client_id");
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -106,8 +113,8 @@ export function SignInCard() {
             {t.eyebrow}
           </span>
         </div>
-        <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-balance">{t.heading}</h1>
-        <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{t.description}</p>
+        <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-balance">{fromLab ? t.labHeading : t.heading}</h1>
+        <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{fromLab ? t.labDescription : t.description}</p>
       </div>
 
       <div className="px-7 pb-5 pt-5">
