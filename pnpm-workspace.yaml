@@ -1,6 +1,14 @@
-# pnpm 11 fails an install when a dependency has an install script that is neither allowed nor denied here.
-# pnpm 10 skipped these three scripts, and the app has always built and run without them.
+# pnpm 11+ fails an install when a dependency has an install script that is neither allowed nor denied here.
+# pnpm 10 skipped these scripts, and the app has always built and run without them
+# (esbuild, through tsx, ships its binary as a platform package and does not need its script).
 allowBuilds:
   "@prisma/engines": false
+  esbuild: false
   prisma: false
   unrs-resolver: false
+
+# A flat node_modules, like npm's. Next.js 16.4 links server packages such as pg and @prisma/client from
+# .next/node_modules into pnpm's private store; Amplify copies .next on its own, so those packages lost their
+# dependencies (pg-types, .prisma/client) and every database route returned 500. With a flat layout the
+# dependencies sit at node_modules/<name>, where the deployed function finds them.
+nodeLinker: hoisted
