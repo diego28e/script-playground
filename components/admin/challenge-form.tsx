@@ -205,16 +205,16 @@ export function ChallengeForm({
                   const result = await translateContent(
                     formData.description.en,
                     "Spanish"
-                  ).catch(() => ({ success: false as const, text: undefined, error: "We couldn't reach the AI service." }));
+                  ).catch(() => ({ success: false as const, error: "We couldn't reach the AI service.", traceId: "" }));
                   setIsTranslating(false);
-                  if (result.success && result.text) {
+                  if (result.success) {
                     setFormData((prev) => ({
                       ...prev,
                       description: { ...prev.description, es: result.text },
                     }));
                     toast.success("Translated successfully");
                   } else {
-                    toast.error(result.error || "Translation failed");
+                    toast.error(result.traceId ? `${result.error} (ref ${result.traceId.slice(0, 8)})` : result.error);
                   }
                 }}
                 disabled={isTranslating || !formData.description.en}

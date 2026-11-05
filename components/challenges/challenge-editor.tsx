@@ -308,8 +308,8 @@ export function ChallengeEditor({
         setAiError(null);
         try {
             const result = await generateAIResponse(code, challengeDescription, "explain");
-            if (result.success && result.text) setAiResponse(result.text);
-            else setAiError(result.error || "We couldn't generate an explanation.");
+            if (result.success) setAiResponse(result.text);
+            else setAiError(`${result.error} (ref ${result.traceId.slice(0, 8)})`);
         } catch {
             setAiError("We couldn't reach the AI service. Check your connection and try again.");
         } finally {
@@ -336,8 +336,8 @@ export function ChallengeEditor({
         setAiError(null);
         try {
             const result = await generateAIResponse(code, challengeDescription, "ask", userQuestion);
-            if (result.success && result.text) setAiResponse(result.text);
-            else setAiError(result.error || "We couldn't get an answer.");
+            if (result.success) setAiResponse(result.text);
+            else setAiError(`${result.error} (ref ${result.traceId.slice(0, 8)})`);
         } catch {
             setAiError("We couldn't reach the AI service. Check your connection and try again.");
         } finally {
