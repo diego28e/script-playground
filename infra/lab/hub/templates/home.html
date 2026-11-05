@@ -1,6 +1,6 @@
 {#- The hub's home page, for one server per student. Keeps the ids the hub's home.js binds (#start, #stop). -#}
 {% extends "templates/home.html" %}
-{% from "adc_macros.html" import card_top, arrow %}
+{% from "adc_macros.html" import card_top, arrow with context %}
 
 {% block main %}
   <div class="adc-page">

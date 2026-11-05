@@ -1,7 +1,7 @@
 {#- Shown after signing out. With auto_login on, the hub shows this page instead of sending you straight back
     to Google, so signing out sticks. -#}
 {% extends "templates/logout.html" %}
-{% from "adc_macros.html" import card_top, arrow %}
+{% from "adc_macros.html" import card_top, arrow with context %}
 
 {% block main %}
   <div id="logout-main" class="adc-page">

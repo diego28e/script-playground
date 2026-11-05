@@ -1,5 +1,5 @@
-{#- Shared pieces of the Academia del Código card pages. Import with
-    {% from "adc_macros.html" import card_top, arrow %} -#}
+{#- Shared pieces of the Academia del Código card pages. card_top uses static_url, so import with context:
+    {% from "adc_macros.html" import card_top, arrow with context %} -#}
 
 {% macro card_top() %}
   <div class="adc-card-top">
