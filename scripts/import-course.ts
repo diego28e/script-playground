@@ -247,7 +247,8 @@ async function main() {
   const course = parseCourse(repo, values.slug);
   printSummary(course);
   if (values["dry-run"]) {
-    console.log("  dry run: nothing written");
+    // Show the database a real run would write to, so a dry run also checks which env file is in effect.
+    console.log(`  dry run: nothing written (a real run writes to ${new URL(process.env.DATABASE_URL ?? "").host})`);
     return;
   }
   await save(course, values.publish);
