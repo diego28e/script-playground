@@ -19,9 +19,8 @@ export default async function ChallengePage({ params }: ChallengePageProps) {
     const { slug } = await params;
     const result = await getChallengeBySlug(slug, session?.user?.id);
 
-    if (!result.success || !result.data) {
-        notFound();
-    }
+    if (!result.success) throw new Error(result.error);
+    if (!result.data) notFound();
 
     const challenge = result.data;
 

@@ -19,7 +19,9 @@ export default async function ChallengesPage() {
     });
 
     const challengesResult = await getChallenges(session?.user?.id);
-    const challenges = challengesResult.success ? challengesResult.data : [];
+    // A failed query is an error (error.tsx), not an empty list.
+    if (!challengesResult.success) throw new Error(challengesResult.error);
+    const challenges = challengesResult.data;
 
     const isAdmin = session?.user?.role === "ADMIN";
 

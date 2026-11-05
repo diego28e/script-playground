@@ -10,7 +10,9 @@ interface PageProps {
 
 export default async function EditChallengePage({ params }: PageProps) {
     const { id } = await params;
-    const { data: challenge } = await getChallenge(id);
+    const result = await getChallenge(id);
+    if (!result.success) throw new Error(result.error);
+    const challenge = result.data;
 
     if (!challenge) {
         notFound();

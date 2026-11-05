@@ -19,6 +19,7 @@ export default async function CoursePage({ params }: Props) {
     const { slug } = await params;
     const session = await auth.api.getSession({ headers: await headers() });
     const result = await getCourseBySlug(slug, session?.user?.id);
-    if (!result.success || !result.data) notFound();
+    if (!result.success) throw new Error(result.error);
+    if (!result.data) notFound();
     return <CourseOverview course={result.data} signedIn={Boolean(session)} />;
 }

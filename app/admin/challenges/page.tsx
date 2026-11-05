@@ -7,7 +7,9 @@ import Link from "next/link";
 export const runtime = 'nodejs';
 
 export default async function AdminChallengesPage() {
-    const { data: challenges } = await getChallenges();
+    const result = await getChallenges();
+    if (!result.success) throw new Error(result.error);
+    const challenges = result.data;
 
     return (
         <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
@@ -19,12 +21,12 @@ export default async function AdminChallengesPage() {
                     </p>
                 </div>
                 <div className="flex items-center space-x-2">
-                    <Link href="/admin/challenges/new">
-                        <Button>
+                    <Button asChild>
+                        <Link href="/admin/challenges/new">
                             <Plus className="mr-2 h-4 w-4" />
                             New Challenge
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </div>
             </div>
             <div className="space-y-4">

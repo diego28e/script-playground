@@ -14,5 +14,7 @@ export const metadata: Metadata = {
 export default async function CoursesPage() {
     const session = await auth.api.getSession({ headers: await headers() });
     const result = await getPublishedCourses(session?.user?.id);
-    return <CourseCatalog courses={result.success ? result.data ?? [] : []} />;
+    // A failed query is an error (error.tsx), not an empty catalog.
+    if (!result.success) throw new Error(result.error);
+    return <CourseCatalog courses={result.data ?? []} />;
 }
