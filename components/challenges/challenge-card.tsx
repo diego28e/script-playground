@@ -6,6 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Difficulty } from "@prisma/client";
 import { CheckCircle2 } from "lucide-react";
 import { useLanguage } from "@/components/providers/language-provider";
+import { LinkPendingFace } from "@/components/ui/pending";
 
 interface ChallengeCardProps {
     challenge: {
@@ -91,10 +92,11 @@ export function ChallengeCard({ challenge }: ChallengeCardProps) {
                 </div>
             </CardContent>
             <CardFooter>
-                <Link href={`/challenges/${challenge.slug}`} className="w-full">
-                    <div className="inline-flex h-9 w-full items-center justify-center whitespace-nowrap rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-tile)] transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50">
-                        Solve Challenge
-                    </div>
+                <Link
+                    href={`/challenges/${challenge.slug}`}
+                    className="relative inline-flex h-9 w-full items-center justify-center whitespace-nowrap rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-tile)] transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                    <LinkPendingFace>Solve Challenge</LinkPendingFace>
                 </Link>
             </CardFooter>
         </Card>

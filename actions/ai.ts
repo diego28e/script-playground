@@ -11,7 +11,8 @@ export async function generateAIResponse(
   userLanguage: string = "Spanish"
 ) {
   if (!process.env.GEMINI_API_KEY) {
-    return { success: false, error: "GEMINI_API_KEY is not set" };
+    console.error("AI Error: GEMINI_API_KEY is not set");
+    return { success: false, error: "The AI assistant isn't available right now. Try again in a few minutes." };
   }
 
   const ai = new GoogleGenAI({
@@ -85,10 +86,11 @@ export async function generateAIResponse(
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text || "";
     return { success: true, text };
   } catch (error: any) {
+    // The provider's raw error (status codes, JSON) goes to the server log; the student gets a plain sentence.
     console.error("AI Error:", error);
     return {
       success: false,
-      error: error.message || "Failed to generate response",
+      error: "The AI assistant isn't available right now. Try again in a few minutes.",
     };
   }
 }
@@ -122,7 +124,7 @@ export async function translateContent(text: string, targetLanguage: string) {
     console.error("Translation Error:", error);
     return {
       success: false,
-      error: error.message || "Failed to translate content",
+      error: "The AI translation isn't available right now. Check the server log for the provider's error.",
     };
   }
 }

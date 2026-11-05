@@ -27,12 +27,20 @@ import Link from "next/link";
 import { deleteChallenge, reorderChallenges } from "@/actions/challenges";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DotLoader } from "@/components/ui/dot-loader";
 
 interface ChallengeListProps {
     initialChallenges: (Challenge & { labels: LabelType[] })[];
 }
 
-function SortableChallengeItem({ challenge }: { challenge: Challenge & { labels: LabelType[] } }) {
+function SortableChallengeItem({
+    challenge,
+    onDeleted,
+}: {
+    challenge: Challenge & { labels: LabelType[] };
+    onDeleted: (id: string) => void;
+}) {
+    const [deleting, setDeleting] = useState(false);
     const {
         attributes,
         listeners,
@@ -52,13 +60,16 @@ function SortableChallengeItem({ challenge }: { challenge: Challenge & { labels:
     const handleDelete = async (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (confirm("Are you sure you want to delete this challenge?")) {
+        if (deleting || !confirm(`Delete "${challenge.title}"? This can't be undone.`)) return;
+        setDeleting(true);
+        try {
             const result = await deleteChallenge(challenge.id);
-            if (result.success) {
-                toast.success("Challenge deleted");
-            } else {
-                toast.error("Failed to delete challenge");
-            }
+            if (!result.success) throw new Error(result.error);
+            onDeleted(challenge.id);
+            toast.success("Challenge deleted");
+        } catch {
+            toast.error("Failed to delete challenge");
+            setDeleting(false);
         }
     };
 
@@ -94,12 +105,19 @@ function SortableChallengeItem({ challenge }: { challenge: Challenge & { labels:
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <Link href={`/admin/challenges/${challenge.id}`}>
-                            <Button variant="ghost" size="icon">
+                        <Button asChild variant="ghost" size="icon">
+                            <Link href={`/admin/challenges/${challenge.id}`} aria-label={`Edit ${challenge.title}`}>
                                 <Pencil className="h-4 w-4" />
-                            </Button>
-                        </Link>
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={handleDelete}>
+                            </Link>
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive"
+                            onClick={handleDelete}
+                            loading={deleting}
+                            aria-label={`Delete ${challenge.title}`}
+                        >
                             <Trash2 className="h-4 w-4" />
                         </Button>
                     </div>
@@ -111,7 +129,7 @@ function SortableChallengeItem({ challenge }: { challenge: Challenge & { labels:
 
 export function ChallengeList({ initialChallenges }: ChallengeListProps) {
     const [challenges, setChallenges] = useState(initialChallenges);
-    const [, setIsSaving] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         setChallenges(initialChallenges);
@@ -128,20 +146,18 @@ export function ChallengeList({ initialChallenges }: ChallengeListProps) {
         const { active, over } = event;
 
         if (over && active.id !== over.id) {
-            let reorderedItems: typeof challenges = [];
-            
-            setChallenges((items) => {
-                const oldIndex = items.findIndex((item) => item.id === active.id);
-                const newIndex = items.findIndex((item) => item.id === over.id);
-                reorderedItems = arrayMove(items, oldIndex, newIndex);
-                return reorderedItems;
-            });
-
-            saveOrder(reorderedItems);
+            // Compute the new order here, not inside a state updater: React may run the updater later,
+            // and the save below needs the list now.
+            const previous = challenges;
+            const oldIndex = previous.findIndex((item) => item.id === active.id);
+            const newIndex = previous.findIndex((item) => item.id === over.id);
+            const reordered = arrayMove(previous, oldIndex, newIndex);
+            setChallenges(reordered);
+            saveOrder(reordered, previous);
         }
     };
 
-    const saveOrder = async (items: typeof challenges) => {
+    const saveOrder = async (items: typeof challenges, previous: typeof challenges) => {
         setIsSaving(true);
         const orderData = items.map((item, index) => ({
             id: item.id,
@@ -149,9 +165,11 @@ export function ChallengeList({ initialChallenges }: ChallengeListProps) {
         }));
 
         try {
-            await reorderChallenges(orderData);
+            const result = await reorderChallenges(orderData);
+            if (!result.success) throw new Error(result.error);
             toast.success("Order updated");
         } catch {
+            setChallenges(previous);
             toast.error("Failed to update order");
         } finally {
             setIsSaving(false);
@@ -168,9 +186,19 @@ export function ChallengeList({ initialChallenges }: ChallengeListProps) {
                 items={challenges.map(c => c.id)}
                 strategy={verticalListSortingStrategy}
             >
-                <div className="space-y-2">
+                <div className="space-y-2" aria-busy={isSaving || undefined}>
+                    {isSaving && (
+                        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <DotLoader size={14} />
+                            Saving order…
+                        </p>
+                    )}
                     {challenges.map((challenge) => (
-                        <SortableChallengeItem key={challenge.id} challenge={challenge} />
+                        <SortableChallengeItem
+                            key={challenge.id}
+                            challenge={challenge}
+                            onDeleted={(id) => setChallenges((items) => items.filter((item) => item.id !== id))}
+                        />
                     ))}
                 </div>
             </SortableContext>

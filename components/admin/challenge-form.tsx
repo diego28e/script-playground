@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Challenge, Difficulty, Label as LabelType } from "@prisma/client";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,8 @@ import {
 } from "@/actions/challenges";
 import { translateContent } from "@/actions/ai";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus, Sparkles, Loader2 } from "lucide-react";
+import { X, Plus, Sparkles } from "lucide-react";
+import { DotLoader } from "@/components/ui/dot-loader";
 
 interface ChallengeFormProps {
   initialData?: Challenge & { labels: LabelType[] };
@@ -37,6 +38,9 @@ export function ChallengeForm({
 }: ChallengeFormProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [creatingLabel, setCreatingLabel] = useState(false);
+  const [navigating, startNavigation] = useTransition();
+  const busy = loading || navigating;
   const [availableLabels, setAvailableLabels] = useState<LabelType[]>([]);
 
   const [activeTab, setActiveTab] = useState<"en" | "es">("en");
@@ -86,7 +90,8 @@ export function ChallengeForm({
   };
 
   const handleCreateLabel = async () => {
-    if (!newLabelName.trim()) return;
+    if (!newLabelName.trim() || creatingLabel) return;
+    setCreatingLabel(true);
 
     // Simple random color generator for now
     const colors = [
@@ -100,7 +105,8 @@ export function ChallengeForm({
     ];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
 
-    const result = await createLabel(newLabelName, randomColor);
+    const result = await createLabel(newLabelName, randomColor).catch(() => ({ success: false as const, data: undefined }));
+    setCreatingLabel(false);
     if (result.success && result.data) {
       setAvailableLabels([...availableLabels, result.data]);
       setFormData((prev) => ({
@@ -116,28 +122,22 @@ export function ChallengeForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setLoading(true);
 
     try {
-      if (isEditing && initialData) {
-        const result = await updateChallenge(initialData.id, formData);
-        if (result.success) {
-          toast.success("Challenge updated successfully");
-          router.push("/admin/challenges");
-        } else {
-          toast.error(result.error as string);
-        }
+      const result = isEditing && initialData
+        ? await updateChallenge(initialData.id, formData)
+        : await createChallenge(formData);
+      if (result.success) {
+        toast.success(isEditing ? "Challenge updated successfully" : "Challenge created successfully");
+        // Stay busy until the list is on screen, so the form can't be sent twice.
+        startNavigation(() => router.push("/admin/challenges"));
       } else {
-        const result = await createChallenge(formData);
-        if (result.success) {
-          toast.success("Challenge created successfully");
-          router.push("/admin/challenges");
-        } else {
-          toast.error(result.error as string);
-        }
+        toast.error(result.error as string);
       }
     } catch {
-      toast.error("Something went wrong");
+      toast.error("Something went wrong. Your changes were not saved.");
     } finally {
       setLoading(false);
     }
@@ -205,7 +205,7 @@ export function ChallengeForm({
                   const result = await translateContent(
                     formData.description.en,
                     "Spanish"
-                  );
+                  ).catch(() => ({ success: false as const, text: undefined, error: "We couldn't reach the AI service." }));
                   setIsTranslating(false);
                   if (result.success && result.text) {
                     setFormData((prev) => ({
@@ -221,7 +221,7 @@ export function ChallengeForm({
                 className="h-7 gap-1.5 text-xs"
               >
                 {isTranslating ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <DotLoader size={12} />
                 ) : (
                   <Sparkles className="h-3 w-3" />
                 )}
@@ -310,10 +310,14 @@ export function ChallengeForm({
               return (
                 <Badge key={label.id} variant="secondary" className="gap-1">
                   {label.name}
-                  <X
-                    className="h-3 w-3 cursor-pointer hover:text-destructive"
+                  <button
+                    type="button"
                     onClick={() => toggleLabel(label.id)}
-                  />
+                    aria-label={`Remove ${label.name}`}
+                    className="rounded-full hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 </Badge>
               );
             })}
@@ -363,12 +367,20 @@ export function ChallengeForm({
                 placeholder="New label..."
                 value={newLabelName}
                 onChange={(e) => setNewLabelName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateLabel();
+                  }
+                }}
               />
               <Button
                 type="button"
                 size="icon"
                 onClick={handleCreateLabel}
-                disabled={!newLabelName}
+                disabled={!newLabelName.trim()}
+                loading={creatingLabel}
+                aria-label="Create label"
               >
                 <Plus className="h-4 w-4" />
               </Button>
@@ -384,6 +396,7 @@ export function ChallengeForm({
             height="100%"
             defaultLanguage="javascript"
             theme="vs-dark"
+            loading={<DotLoader size={28} label="Loading editor" />}
             value={formData.starterCode}
             onChange={(value) =>
               setFormData({ ...formData, starterCode: value || "" })
@@ -400,6 +413,7 @@ export function ChallengeForm({
             height="100%"
             defaultLanguage="javascript"
             theme="vs-dark"
+            loading={<DotLoader size={28} label="Loading editor" />}
             value={formData.solutionCode}
             onChange={(value) =>
               setFormData({ ...formData, solutionCode: value || "" })
@@ -410,15 +424,11 @@ export function ChallengeForm({
       </div>
 
       <div className="flex justify-end gap-4">
-        <Button type="button" variant="outline" onClick={() => router.back()}>
+        <Button type="button" variant="outline" onClick={() => router.back()} disabled={busy}>
           Cancel
         </Button>
-        <Button type="submit" disabled={loading}>
-          {loading
-            ? "Saving..."
-            : isEditing
-              ? "Update Challenge"
-              : "Create Challenge"}
+        <Button type="submit" loading={busy} loadingLabel="Saving…">
+          {isEditing ? "Update Challenge" : "Create Challenge"}
         </Button>
       </div>
     </form>

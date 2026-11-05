@@ -35,6 +35,7 @@ const COPY = {
         openInLab: "Abrir en el laboratorio",
         readGuide: "Leer la guía",
         enrollError: "No pudimos inscribirte. Inténtalo de nuevo.",
+        enrolled: "¡Listo! Ya estás inscrito.",
         kinds: { NOTEBOOK: "Notebook", READING: "Lectura", PROJECT: "Proyecto", VIDEO: "Video", PRACTICE: "Práctica" },
         status: { COMPLETED: "Completada", IN_PROGRESS: "En curso" },
     },
@@ -57,6 +58,7 @@ const COPY = {
         openInLab: "Open in the lab",
         readGuide: "Read the guide",
         enrollError: "We couldn't enroll you. Try again.",
+        enrolled: "You're enrolled.",
         kinds: { NOTEBOOK: "Notebook", READING: "Reading", PROJECT: "Project", VIDEO: "Video", PRACTICE: "Practice" },
         status: { COMPLETED: "Completed", IN_PROGRESS: "In progress" },
     },
@@ -93,9 +95,18 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
 
     const enroll = () =>
         startEnrolling(async () => {
-            const result = await enrollInCourse(course.id);
-            if (result.success) router.refresh();
-            else toast.error(t.enrollError);
+            try {
+                const result = await enrollInCourse(course.id);
+                if (!result.success) {
+                    toast.error(t.enrollError);
+                    return;
+                }
+                // Updates after an await need their own transition to keep the button busy until the page refreshes.
+                startEnrolling(() => router.refresh());
+                toast.success(t.enrolled);
+            } catch {
+                toast.error(t.enrollError);
+            }
         });
 
     return (
@@ -137,8 +148,8 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
                                 <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
                             </ShimmerButton>
                         ) : !course.enrolled ? (
-                            <ShimmerButton tone="signal" size="lg" onClick={enroll} disabled={enrolling}>
-                                {enrolling ? t.enrolling : t.enroll}
+                            <ShimmerButton tone="signal" size="lg" onClick={enroll} pending={enrolling} pendingLabel={t.enrolling}>
+                                {t.enroll}
                                 <ArrowRight className="size-4" strokeWidth={2.5} aria-hidden="true" />
                             </ShimmerButton>
                         ) : nextHref && next ? (

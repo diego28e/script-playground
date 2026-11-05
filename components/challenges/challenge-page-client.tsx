@@ -86,22 +86,20 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Link
-                    href={
-                      challenge.prevSlug
-                        ? `/challenges/${challenge.prevSlug}`
-                        : "#"
-                    }
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      disabled={!challenge.prevSlug}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
+                  {challenge.prevSlug ? (
+                    <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+                      <Link href={`/challenges/${challenge.prevSlug}`} aria-label="Previous challenge">
+                        <ChevronLeft className="h-4 w-4" />
+                      </Link>
                     </Button>
-                  </Link>
+                  ) : (
+                    // A disabled button gets no pointer events, so the span keeps the tooltip working.
+                    <span tabIndex={0}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled aria-label="Previous challenge">
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    </span>
+                  )}
                 </TooltipTrigger>
                 <TooltipContent>Previous challenge</TooltipContent>
               </Tooltip>
@@ -110,22 +108,20 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Link
-                    href={
-                      challenge.nextSlug
-                        ? `/challenges/${challenge.nextSlug}`
-                        : "#"
-                    }
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      disabled={!challenge.nextSlug}
-                    >
-                      <ChevronRight className="h-4 w-4" />
+                  {challenge.nextSlug ? (
+                    <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+                      <Link href={`/challenges/${challenge.nextSlug}`} aria-label="Next challenge">
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
                     </Button>
-                  </Link>
+                  ) : (
+                    // A disabled button gets no pointer events, so the span keeps the tooltip working.
+                    <span tabIndex={0}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled aria-label="Next challenge">
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </span>
+                  )}
                 </TooltipTrigger>
                 <TooltipContent>Next challenge</TooltipContent>
               </Tooltip>
@@ -164,6 +160,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
       {/* Mobile Tab Navigation */}
       <div className="flex border-b bg-muted/40 md:hidden">
         <button
+          type="button"
           onClick={() => setMobileView("description")}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
             mobileView === "description"
@@ -175,6 +172,7 @@ export function ChallengePageClient({ challenge }: ChallengePageClientProps) {
           Description
         </button>
         <button
+          type="button"
           onClick={() => setMobileView("code")}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
             mobileView === "code"

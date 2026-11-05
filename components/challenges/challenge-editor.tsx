@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
+import { DotLoader } from "@/components/ui/dot-loader";
 
 interface ChallengeEditorProps {
     initialCode: string;
@@ -68,7 +69,9 @@ export function ChallengeEditor({
     const [aiMode, setAiMode] = useState<"explain" | "ask">("explain");
     const [aiResponse, setAiResponse] = useState("");
     const [isAiLoading, setIsAiLoading] = useState(false);
+    const [aiError, setAiError] = useState<string | null>(null);
     const [userQuestion, setUserQuestion] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
         const loadLastAttempt = async () => {
@@ -182,7 +185,9 @@ export function ChallengeEditor({
         }
     };
 
-    const handleRun = (isAutoRun = false, codeOverride?: string) => {
+    // Runs synchronously and also returns what it showed, so Submit saves this run's result
+    // rather than state that has not re-rendered yet.
+    const handleRun = (isAutoRun = false, codeOverride?: string): { output: string[]; error: string | null } => {
         setIsRunning(true);
         setOutput([]);
         setError(null);
@@ -219,13 +224,16 @@ export function ChallengeEditor({
             originalConsole.warn(...args);
         };
 
+        let result: { output: string[]; error: string | null };
         try {
             const func = new Function(codeToRun);
             func();
-            setOutput(logs.length > 0 ? logs : ["Code executed successfully"]);
+            result = { output: logs.length > 0 ? logs : ["Code executed successfully"], error: null };
+            setOutput(result.output);
             setLastRunSuccess(true);
         } catch (err: any) {
-            setError(err.message || "An error occurred");
+            result = { output: logs, error: err.message || "An error occurred" };
+            setError(result.error);
             setLastRunSuccess(false);
         } finally {
             console.log = originalConsole.log;
@@ -233,48 +241,54 @@ export function ChallengeEditor({
             console.warn = originalConsole.warn;
             setIsRunning(false);
         }
+        return result;
     };
 
     const handleSubmit = async () => {
-        // Format code before submitting
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        // Format, run and save the same code, and save the result of that run.
         const formatted = formatCode(code);
         if (formatted !== code) {
             setCode(formatted);
         }
-
-        handleRun(false, formatted);
+        const run = handleRun(false, formatted);
         setHasSubmittedCurrentRun(true);
+        const status = run.error ? "FAILED" : "PASSED";
 
-        setTimeout(async () => {
-            const status = error ? "FAILED" : "PASSED";
+        try {
             const result = await createSubmission({
                 challengeId,
-                code,
+                code: formatted,
                 status,
-                output: output.join("\n"),
-                error: error || undefined,
+                output: run.output.join("\n"),
+                error: run.error || undefined,
             });
 
-            if (result.success) {
-                if (status === "PASSED") {
-                    const audio = new Audio("/sounds/success.mp3");
-                    audio.volume = 0.5;
-                    audio.play().catch(() => { });
+            if (!result.success) {
+                toast.error(result.error === "Unauthorized" ? "Sign in to submit your solution" : "We couldn't save your solution. Try again.");
+                setHasSubmittedCurrentRun(false);
+            } else if (status === "PASSED") {
+                const audio = new Audio("/sounds/success.mp3");
+                audio.volume = 0.5;
+                audio.play().catch(() => { });
 
-                    confetti({
-                        particleCount: 100,
-                        spread: 70,
-                        origin: { y: 0.6 },
-                    });
+                confetti({
+                    particleCount: 100,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                });
 
-                    toast.success("🎉 Challenge Passed! Solution submitted!");
-                } else {
-                    toast.info("Submission saved");
-                }
+                toast.success("🎉 Challenge Passed! Solution submitted!");
             } else {
-                toast.error("Failed to submit solution");
+                toast.info("Submission saved. Fix the error and submit again.");
             }
-        }, 100);
+        } catch {
+            toast.error("We couldn't reach the server. Check your connection and try again.");
+            setHasSubmittedCurrentRun(false);
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleReset = () => {
@@ -289,25 +303,27 @@ export function ChallengeEditor({
         }
     };
 
-    const handleAIRequest = async (mode: "explain" | "ask") => {
+    const requestExplanation = async () => {
+        setIsAiLoading(true);
+        setAiError(null);
+        try {
+            const result = await generateAIResponse(code, challengeDescription, "explain");
+            if (result.success && result.text) setAiResponse(result.text);
+            else setAiError(result.error || "We couldn't generate an explanation.");
+        } catch {
+            setAiError("We couldn't reach the AI service. Check your connection and try again.");
+        } finally {
+            setIsAiLoading(false);
+        }
+    };
+
+    const handleAIRequest = (mode: "explain" | "ask") => {
         setAiMode(mode);
         setIsAIDialogOpen(true);
         setAiResponse("");
-
+        setAiError(null);
         if (mode === "explain") {
-            setIsAiLoading(true);
-            const result = await generateAIResponse(
-                code,
-                challengeDescription,
-                "explain"
-            );
-            setIsAiLoading(false);
-            if (result.success && result.text) {
-                setAiResponse(result.text);
-            } else {
-                toast.error(result.error || "Failed to generate explanation");
-                setIsAIDialogOpen(false);
-            }
+            void requestExplanation();
         } else {
             // For "ask", we wait for user input in the dialog
             setUserQuestion("");
@@ -315,19 +331,17 @@ export function ChallengeEditor({
     };
 
     const handleAskSubmit = async () => {
-        if (!userQuestion.trim()) return;
+        if (!userQuestion.trim() || isAiLoading) return;
         setIsAiLoading(true);
-        const result = await generateAIResponse(
-            code,
-            challengeDescription,
-            "ask",
-            userQuestion
-        );
-        setIsAiLoading(false);
-        if (result.success && result.text) {
-            setAiResponse(result.text);
-        } else {
-            toast.error(result.error || "Failed to get answer");
+        setAiError(null);
+        try {
+            const result = await generateAIResponse(code, challengeDescription, "ask", userQuestion);
+            if (result.success && result.text) setAiResponse(result.text);
+            else setAiError(result.error || "We couldn't get an answer.");
+        } catch {
+            setAiError("We couldn't reach the AI service. Check your connection and try again.");
+        } finally {
+            setIsAiLoading(false);
         }
     };
 
@@ -343,8 +357,9 @@ export function ChallengeEditor({
 
     if (isLoadingSubmission) {
         return (
-            <div className="flex h-full items-center justify-center bg-code-panel">
-                <div className="text-code-muted">Loading...</div>
+            <div role="status" className="flex h-full flex-col items-center justify-center gap-3 bg-code-panel text-code-muted">
+                <DotLoader size={28} className="text-code-foreground" />
+                <span className="font-mono text-[11px] uppercase tracking-[0.2em]">Loading your code…</span>
             </div>
         );
     }
@@ -468,6 +483,7 @@ export function ChallengeEditor({
                         size="sm"
                         onClick={handleSubmit}
                         disabled={!hasRun}
+                        loading={isSubmitting}
                         className={`
                             transition-all duration-300
                             ${isSubmitReady
@@ -500,6 +516,7 @@ export function ChallengeEditor({
                     defaultLanguage="javascript"
                     beforeMount={defineAcademiaTheme}
                     theme="academia-dark"
+                    loading={<DotLoader size={28} className="text-code-foreground" label="Loading editor" />}
                     value={code}
                     onChange={(value) => setCode(value || "")}
                     options={{
@@ -587,22 +604,39 @@ export function ChallengeEditor({
                                     placeholder="What does this function do?"
                                     value={userQuestion}
                                     onChange={(e) => setUserQuestion(e.target.value)}
+                                    disabled={isAiLoading}
                                     className="min-h-[100px]"
                                 />
                                 <Button
                                     onClick={handleAskSubmit}
-                                    disabled={isAiLoading || !userQuestion.trim()}
+                                    disabled={!userQuestion.trim()}
+                                    loading={isAiLoading}
+                                    loadingLabel="Thinking…"
                                     className="w-full"
                                 >
-                                    {isAiLoading ? "Thinking..." : "Ask Question"}
+                                    Ask Question
                                 </Button>
                             </div>
                         )}
 
                         {isAiLoading && aiMode === "explain" && (
-                            <div className="flex items-center justify-center py-8 text-muted-foreground">
-                                <Sparkles className="h-6 w-6 animate-spin mr-2" />
-                                Analyzing code...
+                            <div role="status" className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
+                                <DotLoader size={28} className="text-spark" />
+                                <span className="text-sm">Analyzing your code…</span>
+                            </div>
+                        )}
+
+                        {aiError && !isAiLoading && (
+                            <div role="alert" className="flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                                <p className="text-destructive">{aiError}</p>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="self-start"
+                                    onClick={() => (aiMode === "explain" ? requestExplanation() : handleAskSubmit())}
+                                >
+                                    Try again
+                                </Button>
                             </div>
                         )}
 
