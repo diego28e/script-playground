@@ -84,6 +84,14 @@ c.JupyterHub.hub_connect_ip = os.environ.get("LAB_HUB_HOST", "jupyterhub")
 c.JupyterHub.db_url = "sqlite:////srv/jupyterhub/data/jupyterhub.sqlite"
 c.JupyterHub.cookie_secret_file = "/srv/jupyterhub/data/jupyterhub_cookie_secret"
 
+# --- Inside the platform's lesson page (docs/notebook-embed.md) -----------------------------------------
+# The hub and each student's server send `frame-ancestors 'none'` by default (JupyterHub 4.1 and later), so no site
+# may show them in a frame; both keep a value set here. The platform may: its lesson page embeds the lesson's notebook. Nothing else may. The student's server gets
+# the same list through its environment (jupyter_server_config.py reads it).
+frame_ancestors = " ".join(["'self'", platform, *sorted(env_set("LAB_EXTRA_FRAME_ANCESTORS"))])
+c.JupyterHub.tornado_settings = {"headers": {"Content-Security-Policy": f"frame-ancestors {frame_ancestors}"}}
+c.Spawner.environment = {"LAB_FRAME_ANCESTORS": frame_ancestors}
+
 # Academia del Código branding: templates/ extends the hub's own pages (see templates/page.html).
 c.JupyterHub.template_paths = ["/srv/jupyterhub/templates"]
 # The platform's address, for links in the pages (e.g. "Ver los cursos" on the no-access page).

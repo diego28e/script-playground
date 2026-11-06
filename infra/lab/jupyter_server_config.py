@@ -1,7 +1,16 @@
 # Jupyter Server config for a student's container. Read from /opt/jupyter/etc/jupyter/ on startup.
 # JupyterHub handles login and tells jupyterhub-singleuser where to listen, so neither is set here.
 
+import os
+
 c = get_config()  # noqa: F821
+
+# The platform's lesson page shows the lesson's notebook in a frame (docs/notebook-embed.md). The hub passes the
+# sites allowed to frame this server ('self' and the platform); without it, only 'self'. jupyterhub-singleuser keeps
+# a value set here (its own default is 'none').
+c.ServerApp.tornado_settings = {
+    "headers": {"Content-Security-Policy": f"frame-ancestors {os.environ.get('LAB_FRAME_ANCESTORS', chr(39) + 'self' + chr(39))}"},
+}
 
 c.ServerApp.root_dir = "/home/learner/work"
 

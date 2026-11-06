@@ -1,4 +1,5 @@
-// The panel's words, in the learner's browser language (Spanish or English). The tutor itself answers in the language
+import { platformLanguage } from './language';
+// The panel's words, in the learner's language on the platform (Spanish or English). The tutor itself answers in the language
 // the learner writes in.
 
 const ES = {
@@ -71,5 +72,6 @@ const EN: typeof ES = {
   insteadOf: (label: string) => `instead of ${label}`,
 };
 
-export const language: 'es' | 'en' = (navigator.language || '').toLowerCase().startsWith('es') ? 'es' : 'en';
+// The platform's language (the adc_lang cookie, language.ts), so the panel matches the rest of the lab.
+export const language: 'es' | 'en' = platformLanguage();
 export const t = language === 'es' ? ES : EN;

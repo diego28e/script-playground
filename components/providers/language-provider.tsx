@@ -21,6 +21,13 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    // The lab (lab.academiadelcodigo.com) follows the language picked here (docs/notebook-embed.md): it can't read this
+    // site's localStorage, so the choice also goes in a cookie for the whole domain.
+    useEffect(() => {
+        const shared = window.location.hostname.endsWith("academiadelcodigo.com") ? "; Domain=.academiadelcodigo.com; Secure" : "";
+        document.cookie = `adc_lang=${language}; Path=/; Max-Age=31536000; SameSite=Lax${shared}`;
+    }, [language]);
+
     const handleSetLanguage = (lang: Language) => {
         setLanguage(lang);
         localStorage.setItem("language", lang);

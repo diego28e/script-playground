@@ -6,6 +6,21 @@
 
 {% block meta %}
   <meta name="description" content="Laboratorio de notebooks de Academia del Código">
+  {#- The language the learner picked on the platform (its adc_lang cookie, docs/notebook-embed.md), Spanish when
+      there's none. Every text below comes in both languages (class adc-es / adc-en); this picks one before the page
+      draws. -#}
+  <script>
+    (function () {
+      var match = /(?:^|;\s*)adc_lang=(es|en)\b/.exec(document.cookie);
+      var lang = match ? match[1] : "es";
+      document.documentElement.setAttribute("data-adc-lang", lang);
+      document.documentElement.setAttribute("lang", lang);
+      if (lang === "en") document.title = "Lab · Academia del Código";
+    })();
+  </script>
+  <style>
+    html:not([data-adc-lang="en"]) .adc-en, html[data-adc-lang="en"] .adc-es { display: none !important; }
+  </style>
 {% endblock meta %}
 
 {% block favicon %}
@@ -110,19 +125,19 @@
 {% endblock stylesheet %}
 
 {% block logo %}
-  <a class="navbar-brand adc-brand" href="{{ logo_url or base_url }}" title="Inicio">
+  <a class="navbar-brand adc-brand" href="{{ logo_url or base_url }}">
     <img class="adc-mark" src="{{ static_url('images/academia-logo.png') }}" alt="" width="54" height="30">
-    <span class="adc-name">Academia del Código<span class="adc-sub">Laboratorio</span></span>
+    <span class="adc-name">Academia del Código<span class="adc-sub"><span class="adc-es" lang="es">Laboratorio</span><span class="adc-en" lang="en">Lab</span></span></span>
   </a>
 {% endblock logo %}
 
 {% block nav_bar_left_items %}
   <li class="nav-item">
-    <a class="nav-link" href="{{ base_url }}home">Mi laboratorio</a>
+    <a class="nav-link" href="{{ base_url }}home"><span class="adc-es" lang="es">Mi laboratorio</span><span class="adc-en" lang="en">My lab</span></a>
   </li>
   {% if "admin-ui" in parsed_scopes %}
     <li class="nav-item">
-      <a class="nav-link" href="{{ base_url }}admin">Administración</a>
+      <a class="nav-link" href="{{ base_url }}admin"><span class="adc-es" lang="es">Administración</span><span class="adc-en" lang="en">Admin</span></a>
     </li>
   {% endif %}
 {% endblock nav_bar_left_items %}
@@ -131,9 +146,9 @@
   <span id="login_widget">
     {% if user %}
       <span class="me-2 text-body-secondary">{{ user.name }}</span>
-      <a id="logout" role="button" class="btn btn-sm btn-outline-contrast" href="{{ logout_url }}">Salir</a>
+      <a id="logout" role="button" class="btn btn-sm btn-outline-contrast" href="{{ logout_url }}"><span class="adc-es" lang="es">Salir</span><span class="adc-en" lang="en">Sign out</span></a>
     {% else %}
-      <a id="login" role="button" class="btn btn-sm btn-outline-contrast" href="{{ login_url }}">Entrar</a>
+      <a id="login" role="button" class="btn btn-sm btn-outline-contrast" href="{{ login_url }}"><span class="adc-es" lang="es">Entrar</span><span class="adc-en" lang="en">Sign in</span></a>
     {% endif %}
   </span>
 {% endblock login_widget %}

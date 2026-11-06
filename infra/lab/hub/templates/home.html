@@ -8,25 +8,23 @@
       <div class="adc-card-head">
         {{ card_top() }}
         {% if default_server.active %}
-          <h1>Tu laboratorio está encendido</h1>
-          <p>Vuelve a tus notebooks donde los dejaste. Se apaga solo tras una hora sin actividad y tus archivos se
-            conservan.</p>
+          <h1><span class="adc-es" lang="es">Tu laboratorio está encendido</span><span class="adc-en" lang="en">Your lab is running</span></h1>
+          <p><span class="adc-es" lang="es">Vuelve a tus notebooks donde los dejaste. Se apaga solo tras una hora sin actividad y tus archivos se conservan.</span><span class="adc-en" lang="en">Pick up your notebooks where you left them. It stops on its own after an hour without activity, and your files are kept.</span></p>
         {% else %}
-          <h1>Tu laboratorio está apagado</h1>
-          <p>Enciéndelo para seguir con el curso. Tus notebooks y tu archivo <code>.env</code> te esperan donde los
-            dejaste.</p>
+          <h1><span class="adc-es" lang="es">Tu laboratorio está apagado</span><span class="adc-en" lang="en">Your lab is stopped</span></h1>
+          <p><span class="adc-es" lang="es">Enciéndelo para seguir con el curso. Tus notebooks y tu archivo <code>.env</code> te esperan donde los dejaste.</span><span class="adc-en" lang="en">Start it to carry on with the course. Your notebooks and your <code>.env</code> file are where you left them.</span></p>
         {% endif %}
       </div>
       <div class="adc-card-body">
         <a id="start" role="button" class="adc-btn adc-btn-primary" href="{{ url }}">
-          {% if default_server.active %}Abrir mi laboratorio{% else %}Encender mi laboratorio{% endif %}{{ arrow() }}
+          {% if default_server.active %}<span class="adc-es" lang="es">Abrir mi laboratorio</span><span class="adc-en" lang="en">Open my lab</span>{% else %}<span class="adc-es" lang="es">Encender mi laboratorio</span><span class="adc-en" lang="en">Start my lab</span>{% endif %}{{ arrow() }}
         </a>
         {% if default_server.active %}
-          <a id="stop" role="button" class="adc-btn adc-btn-quiet adc-btn-danger">Apagar el laboratorio</a>
+          <a id="stop" role="button" class="adc-btn adc-btn-quiet adc-btn-danger"><span class="adc-es" lang="es">Apagar el laboratorio</span><span class="adc-en" lang="en">Stop the lab</span></a>
         {% endif %}
       </div>
       <div class="adc-card-foot">
-        Tus notebooks viven en tu propio espacio · <a href="https://academiadelcodigo.com">academiadelcodigo.com</a>
+        <span class="adc-es" lang="es">Tus notebooks viven en tu propio espacio</span><span class="adc-en" lang="en">Your notebooks live in your own space</span> · <a href="https://academiadelcodigo.com">academiadelcodigo.com</a>
       </div>
     </div>
   </div>
@@ -35,17 +33,19 @@
 {% block script %}
   {{ super() }}
   <script>
-    // home.js relabels #start in English after a stop; keep the Spanish label (and the arrow).
+    // home.js relabels #start in its own English after a stop: put back our label in the page's language (and the
+    // arrow), and drop the title it sets, which the browser would show as a native tooltip.
     (function () {
       var start = document.getElementById("start");
       if (!start) return;
       var arrow = start.querySelector(".adc-arrow");
+      var english = document.documentElement.getAttribute("data-adc-lang") === "en";
       new MutationObserver(function () {
         if (start.textContent.trim() === "Start My Server") {
-          start.textContent = "Encender mi laboratorio";
+          start.textContent = english ? "Start my lab" : "Encender mi laboratorio";
           if (arrow) start.appendChild(arrow);
         }
-        if (start.getAttribute("title") === "Your server is stopping") start.setAttribute("title", "Apagando…");
+        if (start.hasAttribute("title")) start.removeAttribute("title");
       }).observe(start, { childList: true, characterData: true, subtree: true, attributes: true });
     })();
   </script>

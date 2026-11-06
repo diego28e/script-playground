@@ -21,6 +21,9 @@ ARG CONSTRAINTS=constraints/constraints-2026-10-19.txt
 ARG COURSE_EXTRAS=ci,embeddings
 ARG JUPYTERLAB_VERSION=4.6.5
 ARG JUPYTERHUB_VERSION=6.1.1
+# JupyterLab's Spanish (docs/notebook-embed.md). Packs follow JupyterLab's minor version; 4.5 is the newest published,
+# and it works with 4.6 (a few labels new in 4.6, like the Run and Tabs menus, stay in English until a 4.6 pack).
+ARG LANGUAGE_PACK_ES_VERSION=4.5.post3
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -47,7 +50,8 @@ RUN python -m venv /opt/course \
 
 # jupyterhub-singleuser must match the hub's major version (hub/Dockerfile).
 RUN python -m venv /opt/jupyter \
- && /opt/jupyter/bin/pip install "jupyterlab==${JUPYTERLAB_VERSION}" "jupyterhub==${JUPYTERHUB_VERSION}"
+ && /opt/jupyter/bin/pip install "jupyterlab==${JUPYTERLAB_VERSION}" "jupyterhub==${JUPYTERHUB_VERSION}" \
+      "jupyterlab-language-pack-es-ES==${LANGUAGE_PACK_ES_VERSION}"
 
 # The AI tutor (tutor/, docs/ai-tutor.md): its JupyterLab panel is built here, with Node taken from the official
 # image (same Debian, and this machine's architecture), then installed with its server side, which forwards the

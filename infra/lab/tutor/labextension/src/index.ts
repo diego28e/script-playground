@@ -3,6 +3,7 @@ import { ICommandPalette } from '@jupyterlab/apputils';
 import { INotebookTracker } from '@jupyterlab/notebook';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { LabIcon } from '@jupyterlab/ui-components';
+import { languagePlugin } from './language';
 import { TutorPanel } from './panel';
 import { t } from './strings';
 
@@ -59,4 +60,5 @@ const plugin: JupyterFrontEndPlugin<void> = {
   },
 };
 
-export default plugin;
+// The tutor, and the lab kept in the platform's language (language.ts).
+export default [plugin, languagePlugin];
