@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRight, Check, CheckCheck, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
+import { ArrowRight, Check, CheckCheck, ListChecks, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
 import {
   addSkill,
   approveAllLessons,
@@ -13,11 +13,13 @@ import {
   setLessonApproval,
   setPrerequisite,
   updateSkill,
+  writeSkillTask,
   type PracticeGraphData,
   type SkillInput,
 } from "@/actions/practice";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { SkillTasks } from "@/components/admin/practice-tasks";
 import { Input } from "@/components/ui/input";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { cn } from "@/lib/utils";
@@ -178,6 +180,28 @@ function CourseReview({
     setRunning(null);
   };
 
+  // Practice tasks: the published skills' stages that have no proven task yet.
+  const missing = useMemo(
+    () => Object.entries(course.stages).flatMap(([skillKey, stages]) => stages.filter((stage) => !(course.tasks[skillKey]?.[stage] ?? 0)).map((stage) => ({ skillKey, stage }))),
+    [course.stages, course.tasks],
+  );
+  const writeMissing = async () => {
+    stop.current = false;
+    let written = 0;
+    for (const [index, { skillKey, stage }] of missing.entries()) {
+      if (stop.current) break;
+      setRunning(`Writing a ${stage} task for ${skillKey}, ${index + 1} of ${missing.length}`);
+      const result = await writeSkillTask(course.id, skillKey, stage);
+      if (result.success) written += 1;
+      else if (/allowance|Publish/.test(result.error)) {
+        toast.error(result.error);
+        break;
+      }
+    }
+    setRunning(null);
+    toast.success(`${written} tasks written and proven. Rejected candidates are kept under each skill; run again to fill what's left.`);
+  };
+
   const publish = () =>
     startPublish(async () => {
       const result = await publishPracticeGraph(course.id);
@@ -204,7 +228,7 @@ function CourseReview({
       {dialog}
       {/* The course at a glance, and what applies to all of it. */}
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 rounded-2xl bg-muted/60 px-5 py-4">
-        <div className="min-w-0 flex-1 space-y-2.5">
+        <div className="min-w-0 flex-1 basis-[26rem] space-y-2.5">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             {courses ? (
               <select value={course.id} onChange={(event) => onCourse(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-base font-semibold">
@@ -260,6 +284,11 @@ function CourseReview({
               <Sparkles className="mr-2 h-4 w-4" /> Draft {counts.todo} remaining
             </Button>
           )}
+          {!running && course.latest && (
+            <Button variant="outline" size="sm" onClick={writeMissing} disabled={missing.length === 0} title="One proven task for every stage of every published skill that has none yet">
+              <ListChecks className="mr-2 h-4 w-4" /> Write {missing.length} missing tasks
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={approveAll} disabled={approvingAll || reviewable === 0 || Boolean(running)}>
             <CheckCheck className="mr-2 h-4 w-4" /> {approvingAll ? "Approving…" : `Approve all ${reviewable}`}
           </Button>
@@ -294,6 +323,9 @@ function CourseReview({
             lang={lang}
             onLang={setLang}
             skillRefs={skillRefs}
+            courseId={course.id}
+            stages={course.stages}
+            tasks={course.tasks}
             busy={Boolean(running)}
             onApproved={() => {
               const next = nextToReview(selected.id);
@@ -429,6 +461,9 @@ function LessonDetail({
   lang,
   onLang,
   skillRefs,
+  courseId,
+  stages,
+  tasks,
   busy,
   onApproved,
 }: {
@@ -437,6 +472,9 @@ function LessonDetail({
   lang: Lang;
   onLang: (lang: Lang) => void;
   skillRefs: Map<string, SkillRef>;
+  courseId: string;
+  stages: Course["stages"];
+  tasks: Course["tasks"];
   busy: boolean;
   onApproved: () => void;
 }) {
@@ -559,7 +597,7 @@ function LessonDetail({
               editing === skill.id ? (
                 <SkillEditor key={skill.id} skill={skill} onClose={() => setEditing(null)} />
               ) : (
-                <SkillView key={skill.id} skill={skill} lang={lang} skillRefs={skillRefs} onEdit={() => setEditing(skill.id)} />
+                <SkillView key={skill.id} skill={skill} lang={lang} skillRefs={skillRefs} onEdit={() => setEditing(skill.id)} courseId={courseId} stages={stages[skill.key]} taskCounts={tasks[skill.key] ?? {}} />
               ),
             )}
           </ol>
@@ -569,7 +607,23 @@ function LessonDetail({
   );
 }
 
-function SkillView({ skill, lang, skillRefs, onEdit }: { skill: Skill; lang: Lang; skillRefs: Map<string, SkillRef>; onEdit: () => void }) {
+function SkillView({
+  skill,
+  lang,
+  skillRefs,
+  onEdit,
+  courseId,
+  stages,
+  taskCounts,
+}: {
+  skill: Skill;
+  lang: Lang;
+  skillRefs: Map<string, SkillRef>;
+  onEdit: () => void;
+  courseId: string;
+  stages: string[] | undefined;
+  taskCounts: Record<string, number>;
+}) {
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const run = (action: () => Promise<{ success: boolean; error?: string }>) =>
@@ -660,6 +714,7 @@ function SkillView({ skill, lang, skillRefs, onEdit }: { skill: Skill; lang: Lan
             </button>
           ))}
       </div>
+      <SkillTasks courseId={courseId} skillKey={skill.key} stages={stages} counts={taskCounts} lang={lang} />
     </li>
   );
 }

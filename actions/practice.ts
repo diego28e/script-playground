@@ -7,7 +7,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
-import { publishGraph } from "@/lib/practice/graph";
+import { publishGraph, type PublishedGraph } from "@/lib/practice/graph";
+import { generateTask, type TaskContent, type TaskForm } from "@/lib/practice/tasks";
 
 // The practice skill graph's admin page (/admin/practice, docs/practice.md): draft each lesson's skills with a model,
 // edit and approve them, then publish a version for learners.
@@ -32,7 +33,7 @@ export async function getPracticeGraph() {
       title: true,
       slug: true,
       status: true,
-      skillGraphs: { orderBy: { version: "desc" }, take: 1, select: { version: true, skillCount: true, edgeCount: true, publishedAt: true } },
+      skillGraphs: { orderBy: { version: "desc" }, take: 1, select: { version: true, skillCount: true, edgeCount: true, publishedAt: true, graph: true } },
       modules: {
         orderBy: { position: "asc" },
         select: {
@@ -69,9 +70,23 @@ export async function getPracticeGraph() {
       },
     },
   });
+  // Practice tasks: each published skill's stages, and how many proven tasks each stage has.
+  const counts = await prisma.practiceTask.groupBy({ by: ["courseId", "skillKey", "stage"], where: { status: "PROVEN" }, _count: { _all: true } });
   return {
     models: AUTHORING_CHAIN.map(({ model, label }) => ({ id: model, label })),
-    courses: courses.map(({ skillGraphs, ...course }) => ({ ...course, latest: skillGraphs[0] ?? null })),
+    courses: courses.map(({ skillGraphs, ...course }) => {
+      const latest = skillGraphs[0] ?? null;
+      const graph = latest ? (latest.graph as unknown as PublishedGraph).graph : null;
+      const stages: Record<string, string[]> = Object.fromEntries((graph?.skills ?? []).map((skill) => [skill.id, ladderOrder(Object.keys(skill.forms ?? {}))]));
+      const tasks: Record<string, Record<string, number>> = {};
+      for (const row of counts.filter((entry) => entry.courseId === course.id)) (tasks[row.skillKey] ??= {})[row.stage] = row._count._all;
+      return {
+        ...course,
+        latest: latest && { version: latest.version, skillCount: latest.skillCount, edgeCount: latest.edgeCount, publishedAt: latest.publishedAt },
+        stages,
+        tasks,
+      };
+    }),
   };
 }
 export type PracticeGraphData = Awaited<ReturnType<typeof getPracticeGraph>>;
@@ -203,4 +218,48 @@ export async function publishPracticeGraph(courseId: string): Promise<Result<{ v
   if (!result.ok) return { success: false, error: [result.error, ...(result.issues ?? [])].join("\n") };
   refresh();
   return { success: true, version: result.version, skills: result.skills, edges: result.edges, warnings: result.warnings };
+}
+
+// lk-practice's two default ladders, in order: a stored graph doesn't keep the order of its stage names.
+const LADDER = ["recognise", "recall", "produce", "apply", "example", "complete", "write", "transfer"];
+function ladderOrder(stages: string[]): string[] {
+  return [...stages].sort((a, b) => (LADDER.indexOf(a) === -1 ? 99 : LADDER.indexOf(a)) - (LADDER.indexOf(b) === -1 ? 99 : LADDER.indexOf(b)));
+}
+
+// --- Practice tasks (docs/practice.md, "Tasks") ----------------------------------------------------------------------
+
+/** A skill's tasks, newest first, rejected ones included (with why), for the admin to read. */
+export async function getSkillTasks(courseId: string, skillKey: string) {
+  if (!(await requireAdmin())) throw new Error("Only admins can see practice tasks.");
+  const tasks = await prisma.practiceTask.findMany({
+    where: { courseId, skillKey, status: { not: "RETIRED" } },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+    select: { id: true, stage: true, form: true, difficulty: true, expectedSeconds: true, content: true, status: true, rejectReason: true, model: true, item: true, createdAt: true },
+  });
+  return tasks.map(({ content, item, ...task }) => ({
+    ...task,
+    content: content as unknown as TaskContent,
+    proof: (item as { proof?: { kind: string; model?: string; wrongSolutionsFailed?: number } } | null)?.proof ?? null,
+  }));
+}
+export type SkillTask = Awaited<ReturnType<typeof getSkillTasks>>[number];
+
+/** Writes and proves one task for a skill's stage: one model call and its proof, inside one request. */
+export async function writeSkillTask(courseId: string, skillKey: string, stage: string, form?: TaskForm): Promise<Result<{ form: string; model: string; note: string }>> {
+  const session = await requireAdmin();
+  if (!session) return denied;
+  // An Amplify request is reported to stop at about 30 s: the writing and the proof end by 27 s.
+  const result = await generateTask({ courseId, skillKey, stage, form, userId: session.user.id, deadline: Date.now() + 27_000 });
+  refresh();
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, form: result.form, model: result.model, note: result.note };
+}
+
+/** Takes a task out of the pool (it stays in the table, marked RETIRED). */
+export async function retireTask(taskId: string): Promise<Result> {
+  if (!(await requireAdmin())) return denied;
+  await prisma.practiceTask.update({ where: { id: taskId }, data: { status: "RETIRED" } });
+  refresh();
+  return { success: true };
 }

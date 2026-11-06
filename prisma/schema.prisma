@@ -142,6 +142,7 @@ model Course {
   // The practice engine's skill graph (docs/practice.md).
   practiceSkills PracticeSkill[]
   skillGraphs    SkillGraphVersion[]
+  practiceTasks  PracticeTask[]
 
   @@map("course")
 }
@@ -734,4 +735,43 @@ model SkillGraphVersion {
 
   @@unique([courseId, version])
   @@map("skill_graph_version")
+}
+
+// A practice task in a skill's pool (docs/practice.md, "Tasks"): written by a model for one skill and stage, then
+// proven before any learner sees it (code: the reference passes on the grader and wrong code fails; questions: a
+// second model answers it blind and agrees with the key). Rejected candidates are kept with their reason, to tune the
+// prompt. Tasks follow the skill's key, so they survive new graph versions.
+enum PracticeTaskStatus {
+  PROVEN
+  REJECTED
+  RETIRED
+}
+
+model PracticeTask {
+  id              String             @id @default(cuid())
+  courseId        String
+  skillKey        String
+  // A stage of the skill's ladder (recognise, recall, produce, apply; example, complete, write, transfer).
+  stage           String
+  // choice, fill, predict, code or debug.
+  form            String
+  // lk-practice's difficulty, in logits relative to the stage (about -1 easy to +1 hard).
+  difficulty      Float              @default(0)
+  expectedSeconds Int
+  // What the learner sees and the key (lib/practice/tasks.ts TaskContent), in Spanish and English.
+  content         Json
+  // The lk-practice item once proven (status "proven", with its proof); null while rejected.
+  item            Json?
+  status          PracticeTaskStatus
+  rejectReason    String?
+  // The model that wrote it, and the call's trace in the logs.
+  model           String
+  traceId         String?
+  contentHash     String
+  createdAt       DateTime           @default(now())
+  course          Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, contentHash])
+  @@index([courseId, skillKey, stage, status])
+  @@map("practice_task")
 }

@@ -99,6 +99,7 @@ end of the phases that need them.
 | Publishing a version, checked by lk-practice | `lib/practice/graph.ts` | Built and tried (below) |
 | Admin page: draft, edit, prerequisites, approve, publish | `/admin/practice` (`actions/practice.ts`, `components/admin/practice-graph.tsx`) | Deployed (Amplify job 58) |
 | The grader on the lab server, and the platform's client for it | `infra/lab/grader` (`server.mjs`, `harness.py`), `lib/practice/grader.ts`, `pnpm grader:check` | Built and tried locally (below) |
+| Practice tasks: writing, the proof gate, the pool, and the admin view | `lib/practice/tasks.ts`, `lib/practice/config.ts`, migration `add_practice_tasks` (`practice_task`), the skill cards' Tasks panel and "Write N missing tasks" on `/admin/practice` | Built and tried locally against the server's grader (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
 to review and done, and a search over lessons and skills), the chosen lesson on the right; each scrolls on its own.
@@ -161,6 +162,29 @@ the infinite loop stopped at 6 s, the memory bomb reported as out of memory. One
 runtime: a fork bomb isn't refused fork by fork; gVisor ends the whole answer once about 20 processes are alive at
 once (exit code 2), and the next answer runs normally. The grader reports it as `crashed`, saying the answer probably
 started too many processes. Short-lived forks, 80 zombies and 200 threads all ran.
+
+**Practice tasks.** For one published skill and one stage of its ladder, a model writes one task in a form the stage
+accepts (choice, fill, predict, code, debug; the form the pool has least of, unless one is asked for), in Spanish and
+English, with its key and a short explanation for after the answer. It sees the skill, the stage's meaning, the
+lesson's objectives and the pool's latest tasks (so it doesn't repeat them). Then the proof:
+
+- **predict:** the grader runs the snippet; it must print exactly the key, and the "likely wrong" answer must differ.
+- **code:** on the grader, the reference solution passes the hidden tests (at least two), and the starter and a
+  plausible wrong solution both fail.
+- **debug:** the buggy code fails the tests and the fixed one passes.
+- **choice and fill:** a model from another provider (DeepSeek when Claude wrote it, Claude Sonnet otherwise) answers
+  blind and must give the key. Choice options are shuffled first: models favour putting the answer first.
+
+lk-practice's `admitCandidate` turns the proven candidate into an item (`executable` or `model-checked` proof; the
+platform's one configuration, `lib/practice/config.ts`, accepts `model-checked`), `validateItems` checks it against the
+published graph, and it's stored as PROVEN. A candidate that fails is stored as REJECTED with the reason, for tuning.
+Claude Sonnet 5.5 writes by default (fast, good Python); each task is one call plus its proof, ending by 27 s, so it
+fits an Amplify request; the page's "Write N missing tasks" loops over every published stage without a task.
+
+Tried on 2026-11-06 with the module-00 graph: all five forms written and proven, choice and fill in 6 to 8 s (DeepSeek
+agreed in under a second), predict, code and debug in 9 to 12 s (on the server's grader); one more from the page in
+11 s. The first call with a new response schema took longer (Anthropic compiles a schema once and caches it for a day),
+so two first attempts ran out of time; a retry passed.
 
 **Node.js.** lk-practice declares Node.js 24 or later. It ran the same on Node 22 (graph check, plan, status), but the
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built
