@@ -6,6 +6,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
+import { addDiscoveryToCourse, courseDiscoveries, setDiscoveryStatus, type CourseDiscovery } from "@/lib/practice/discovery";
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
 import { publishGraph, type PublishedGraph } from "@/lib/practice/graph";
 import { generateTask, type TaskContent, type TaskForm } from "@/lib/practice/tasks";
@@ -72,6 +73,8 @@ export async function getPracticeGraph() {
   });
   // Practice tasks: each published skill's stages, and how many proven tasks each stage has.
   const counts = await prisma.practiceTask.groupBy({ by: ["courseId", "skillKey", "stage"], where: { status: "PROVEN" }, _count: { _all: true } });
+  // Missing prerequisites learners' diagnoses proposed that wait for the admin's decision.
+  const discovered = await prisma.practiceDiscoveredEdge.groupBy({ by: ["courseId"], where: { status: "PROPOSED" }, _count: { _all: true } });
   return {
     models: AUTHORING_CHAIN.map(({ model, label }) => ({ id: model, label })),
     courses: courses.map(({ skillGraphs, ...course }) => {
@@ -85,6 +88,7 @@ export async function getPracticeGraph() {
         latest: latest && { version: latest.version, skillCount: latest.skillCount, edgeCount: latest.edgeCount, publishedAt: latest.publishedAt },
         stages,
         tasks,
+        discovered: discovered.find((row) => row.courseId === course.id)?._count._all ?? 0,
       };
     }),
   };
@@ -261,5 +265,27 @@ export async function retireTask(taskId: string): Promise<Result> {
   if (!(await requireAdmin())) return denied;
   await prisma.practiceTask.update({ where: { id: taskId }, data: { status: "RETIRED" } });
   refresh();
+  return { success: true };
+}
+
+/** Missing prerequisites the learners' diagnoses proposed for a course, with how their probes went. */
+export async function getPracticeDiscoveries(courseId: string): Promise<Result<{ discoveries: CourseDiscovery[] }>> {
+  if (!(await requireAdmin())) return denied;
+  return { success: true, discoveries: await courseDiscoveries(courseId) };
+}
+
+/** Adds a proposed prerequisite to the course's graph for everyone (it applies with the next published version). */
+export async function addPracticeDiscovery(edgeId: string): Promise<Result> {
+  if (!(await requireAdmin())) return denied;
+  const result = await addDiscoveryToCourse(edgeId);
+  if (!result.ok) return { success: false, error: result.error };
+  refresh();
+  return { success: true };
+}
+
+/** Dismisses a proposal so diagnoses don't propose it again, or brings it back. */
+export async function setPracticeDiscoveryStatus(edgeId: string, status: "PROPOSED" | "DISMISSED"): Promise<Result> {
+  if (!(await requireAdmin())) return denied;
+  await setDiscoveryStatus(edgeId, status);
   return { success: true };
 }

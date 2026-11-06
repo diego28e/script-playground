@@ -19,6 +19,7 @@ import {
 } from "@/actions/practice";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { PracticeDiscoveriesButton } from "@/components/admin/practice-discoveries";
 import { SkillTasks } from "@/components/admin/practice-tasks";
 import { Input } from "@/components/ui/input";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -289,6 +290,7 @@ function CourseReview({
               <ListChecks className="mr-2 h-4 w-4" /> Write {missing.length} missing tasks
             </Button>
           )}
+          {course.latest && <PracticeDiscoveriesButton courseId={course.id} waiting={course.discovered} />}
           <Button variant="outline" size="sm" onClick={approveAll} disabled={approvingAll || reviewable === 0 || Boolean(running)}>
             <CheckCheck className="mr-2 h-4 w-4" /> {approvingAll ? "Approving…" : `Approve all ${reviewable}`}
           </Button>

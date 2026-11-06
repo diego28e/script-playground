@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Type, type Schema, type ThinkingLevel } from "@google/genai";
-import { admitCandidate, validateItems, type CandidateItem, type CandidateProof, type PracticeItem } from "@intellectif/lk-practice";
+import { admitCandidate, validateItems, type CandidateItem, type CandidateProof, type PracticeItem, type SkillNode } from "@intellectif/lk-practice";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
@@ -270,9 +270,22 @@ export async function generateTask(input: {
   const version = await prisma.skillGraphVersion.findFirst({ where: { courseId: input.courseId }, orderBy: { version: "desc" }, select: { graph: true } });
   if (!version) return { ok: false, error: "Publish a version of the skill graph first: tasks are written for published skills." };
   const published = version.graph as unknown as PublishedGraph;
-  const node = published.graph.skills.find((skill) => skill.id === input.skillKey);
-  const meta = published.skills[input.skillKey];
+  let node: SkillNode | undefined = published.graph.skills.find((skill) => skill.id === input.skillKey);
+  let meta: { lessonId: string } | undefined = published.skills[input.skillKey];
+  // A skill a diagnosis found, which the course doesn't teach (docs/practice.md, "Missing prerequisites").
+  let found: { forLabel: string } | null = null;
+  if (!node || !meta) {
+    const row = await prisma.practiceFoundSkill.findUnique({ where: { courseId_key: { courseId: input.courseId, key: input.skillKey } } });
+    if (row) {
+      node = row.node as unknown as SkillNode;
+      meta = { lessonId: row.lessonId };
+      const edge = await prisma.practiceDiscoveredEdge.findFirst({ where: { courseId: input.courseId, fromKey: row.key }, orderBy: { createdAt: "asc" }, select: { toKey: true } });
+      found = { forLabel: (edge && published.graph.skills.find((skill) => skill.id === edge.toKey)?.label) ?? "a later skill" };
+    }
+  }
   if (!node || !meta) return { ok: false, error: "This skill isn't in the published graph yet: approve its lesson and publish." };
+  // Items are checked against a graph that has the skill: a found one joins the published graph for the check.
+  const checkGraph = found ? { ...published.graph, skills: [...published.graph.skills, node] } : published.graph;
   const forms = (node.forms?.[input.stage] ?? []) as TaskForm[];
   if (!forms.length) return { ok: false, error: `The skill has no stage "${input.stage}".` };
 
@@ -291,7 +304,10 @@ export async function generateTask(input: {
     `# Skill: ${node.label} (key ${node.id})\n${node.description ?? ""}\nKind: ${node.knowledge}. Ladder: ${ladder.join(" → ")}.${node.criteriaHint ? `\nWhat shows the skill: ${node.criteriaHint}` : ""}`,
     `# Stage: ${input.stage}\n${STAGES[input.stage] ?? input.stage}`,
     `# Form: ${form}\n${FORM_RULES[form]}`,
-    lesson ? `# From lesson ${lesson.code ?? ""}: ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
+    found
+      ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, in plain Python where possible, without the course's libraries unless the skill is about them.`
+      : "",
+    lesson ? `# ${found ? "Where the learner met the gap: lesson" : "From lesson"} ${lesson.code ?? ""}: ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
     `# EXISTING TASKS (don't repeat)\n${existing.map((task) => `- (${task.form}) ${String((task.content as TaskContent).promptEn).replace(/\s+/g, " ").slice(0, 160)}`).join("\n") || "(none yet)"}`,
   ]
     .filter(Boolean)
@@ -362,7 +378,7 @@ export async function generateTask(input: {
     const admitted = admitCandidate(candidate, proof.proof, practice.config);
     if (!admitted.ok) reason = `lk-practice refused it: ${admitted.issues.map((issue) => issue.code).join(", ")}`;
     else {
-      const valid = validateItems([admitted.item], published.graph, practice.config);
+      const valid = validateItems([admitted.item], checkGraph, practice.config);
       if (!valid.ok) reason = `lk-practice refused it: ${valid.issues.map((issue) => issue.code).join(", ")}`;
       else item = admitted.item;
     }

@@ -125,19 +125,19 @@ model Label {
 // Courses are imported from their own repositories (scripts/import-course.ts): modules and lessons are matched by
 // slug on every import and updated in place, so a student's progress survives a re-import.
 model Course {
-  id               String              @id @default(cuid())
-  slug             String              @unique
+  id               String                   @id @default(cuid())
+  slug             String                   @unique
   title            String
   summary          String?
   // The language the course's content is written in (BCP 47), e.g. "en".
-  language         String              @default("en")
-  status           CourseStatus        @default(DRAFT)
+  language         String                   @default("en")
+  status           CourseStatus             @default(DRAFT)
   sourceRepoUrl    String?
   // The commit the course was last imported from.
   sourceRef        String?
   importedAt       DateTime?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
   modules          CourseModule[]
   enrollments      Enrollment[]
   // The practice engine's skill graph (docs/practice.md).
@@ -145,6 +145,8 @@ model Course {
   skillGraphs      SkillGraphVersion[]
   practiceTasks    PracticeTask[]
   practiceLearners PracticeLearner[]
+  foundSkills      PracticeFoundSkill[]
+  discoveredEdges  PracticeDiscoveredEdge[]
 
   @@map("course")
 }
@@ -782,18 +784,22 @@ model PracticeTask {
 // A learner's practice in one course (docs/practice.md, "A session"). lk-practice's state is a cache of the log: the
 // log is the truth, and a new graph version is applied by replaying it.
 model PracticeLearner {
-  id           String             @id @default(cuid())
+  id           String              @id @default(cuid())
   userId       String
   courseId     String
   // The published graph version the state is built on.
   graphVersion Int
   state        Json
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course       Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // This learner's confirmed missing prerequisites (lk-practice DiscoveryExtension[]): their graph is the published
+  // one composed with these (docs/practice.md, "Missing prerequisites").
+  extensions   Json                @default("[]")
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course       Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
   log          PracticeLogEntry[]
   sessions     PracticeSession[]
+  diagnoses    PracticeDiagnosis[]
 
   @@unique([userId, courseId])
   @@map("practice_learner")
@@ -848,4 +854,90 @@ model PracticeAnswer {
 
   @@unique([sessionId, taskId])
   @@map("practice_answer")
+}
+
+// Missing prerequisites (docs/practice.md): when a learner fails a skill twice in a row, a model names the
+// prerequisites that may be missing, and lk-practice tests each with short probes.
+
+enum PracticeDiagnosisStatus {
+  PENDING
+  RUNNING
+  // At least one hypothesis opened.
+  OPENED
+  // The model found nothing missing, or nothing it proposed passed the checks.
+  NONE
+  FAILED
+}
+
+// One diagnosis of a failed skill: asked for after the answer, run by the practice page in the background.
+model PracticeDiagnosis {
+  id         String                  @id @default(cuid())
+  learnerId  String
+  // The failed answer's evidence id (the practice answer's id).
+  evidenceId String                  @unique
+  skillKey   String
+  stage      String
+  taskId     String
+  status     PracticeDiagnosisStatus @default(PENDING)
+  model      String?
+  // What the model proposed: accepted ones with lk-practice's hypothesis id, rejected ones with the check's codes.
+  proposals  Json?
+  error      String?
+  createdAt  DateTime                @default(now())
+  finishedAt DateTime?
+  learner    PracticeLearner         @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+
+  @@index([learnerId, createdAt])
+  @@map("practice_diagnosis")
+}
+
+// A skill the course doesn't teach that a diagnosis named (key "found.<name>"), shared by the course's learners so
+// its tasks are written once.
+model PracticeFoundSkill {
+  id            String         @id @default(cuid())
+  courseId      String
+  key           String
+  labelEs       String
+  labelEn       String
+  descriptionEs String
+  descriptionEn String
+  knowledge     SkillKnowledge
+  runnable      Boolean        @default(true)
+  // lk-practice's SkillNode for it, as hypotheses carry it (its content is part of their ids).
+  node          Json
+  // The lesson of the skill it was first found for: where the map and the task writer place it.
+  lessonId      String
+  createdAt     DateTime       @default(now())
+  course        Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, key])
+  @@map("practice_found_skill")
+}
+
+enum DiscoveredEdgeStatus {
+  PROPOSED
+  // Added to the course's own graph (a skill and a prerequisite on /admin/practice; published with the next version).
+  ADDED
+  // Not proposed again.
+  DISMISSED
+}
+
+// A prerequisite a diagnosis proposed (from -> to), with how its probes went across learners.
+model PracticeDiscoveredEdge {
+  id        String               @id @default(cuid())
+  courseId  String
+  fromKey   String
+  toKey     String
+  status    DiscoveredEdgeStatus @default(PROPOSED)
+  // The first model's reason, shown to the admin.
+  rationale String?
+  opened    Int                  @default(0)
+  confirmed Int                  @default(0)
+  refuted   Int                  @default(0)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  course    Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, fromKey, toKey])
+  @@map("practice_discovered_edge")
 }

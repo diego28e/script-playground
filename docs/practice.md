@@ -101,7 +101,8 @@ end of the phases that need them.
 | The grader on the lab server, and the platform's client for it | `infra/lab/grader` (`server.mjs`, `harness.py`), `lib/practice/grader.ts`, `pnpm grader:check` | Built and tried locally (below) |
 | Practice tasks: writing, the proof gate, the pool, and the admin view | `lib/practice/tasks.ts`, `lib/practice/config.ts`, migration `add_practice_tasks` (`practice_task`), the skill cards' Tasks panel and "Write N missing tasks" on `/admin/practice` | Deployed (Amplify job 62) |
 | Today's practice for learners: state and log, the daily set, grading, retries on code, a few more | `lib/practice/learner.ts`, `actions/practice-learner.ts`, `/practice/<course>` (`components/practice/practice-today.tsx`), migrations `add_practice_learners` and `rescale_task_difficulty`; a "Practise today" button on the course page | Deployed (Amplify job 63) |
-| Entry from the tutor's requests; the due badge, streak and progress map; a `/practice` index | `lib/practice/learner.ts` (`focusSkills`, `practiceDue`, `practiceStreak`, `progressMap`), `components/practice/practice-nav-link.tsx`, `/practice`, `/practice/<course>/map` | Built and tried locally (below) |
+| Entry from the tutor's requests; the due badge, streak and progress map; a `/practice` index | `lib/practice/learner.ts` (`focusSkills`, `practiceDue`, `practiceStreak`, `progressMap`), `components/practice/practice-nav-link.tsx`, `/practice`, `/practice/<course>/map` | Deployed (Amplify job 64) |
+| Missing prerequisites: diagnosis, probes, the learner's own graph, the admin's Discovered view | `lib/practice/discovery.ts`, `lib/practice/learner.ts` (`loadLearner`, `composeLearnerGraph`), migration `add_practice_discovery` (`practice_diagnosis`, `practice_found_skill`, `practice_discovered_edge`, `practice_learner.extensions`), `components/admin/practice-discoveries.tsx` | Built and tried locally (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
 to review and done, and a search over lessons and skills), the chosen lesson on the right; each scrolls on its own.
@@ -248,6 +249,60 @@ showed 2 learning (one rung, back tomorrow, 99% recall), 5 ready, 21 coming with
 first try found the empty-set problem above: the page had planned an empty set before the lessons were completed,
 and kept it for the day.
 
+## Missing prerequisites
+
+Built on lk-practice 0.4's discovery (its guide, "Missing prerequisites"). A model only ever proposes; short probes on
+the prerequisite alone decide.
+
+1. **Notice.** When an answer makes lk-practice emit `skill.diagnosis-suggested` (the skill failed twice in a row at its
+   stage), the answer's reply carries a diagnosis id (`practice_diagnosis`, at most 3 a learner in 24 hours, one at a
+   time per skill). The answer is recorded either way.
+2. **Ask.** The page runs it in the background (`runPracticeDiagnosis`, under 25 s). Claude Sonnet 5.5 (then the
+   authoring chain) gets lk-practice's facts (`prerequisiteRequest`: the blocked skill and stage, its prerequisites, the
+   skills near it, what's already been tested for this learner), the last two attempts (the task, the key or the tests,
+   what the learner gave), and the course's skills except those that build on the blocked one. It names at most two
+   gaps: a course skill by id, or a new skill the course doesn't teach (key, labels and description in both languages,
+   declarative or procedural, runnable or not), each with a one-sentence reason, or nothing when it looks like a slip.
+3. **Check and open.** A new skill becomes `found.<key>`, shared by the course (`practice_found_skill`): a second learner
+   with the same gap probes the same skill and its tasks. Proposals the admin dismissed for that skill are dropped.
+   `checkPrerequisiteHypothesis` checks the rest (cycles, duplicates, what's open or refuted); each accepted one is opened
+   in the learner's log (`open-hypothesis`) and counted on the course's proposal (`practice_discovered_edge`).
+4. **Probe.** `preparePracticeDiscovery` adds to today's set two probes per open hypothesis (distinct tasks at the
+   candidate's top stage), writing and proving a task when there's none (one per call; the page calls up to four times).
+   A probe is answered like any task, recorded with `probe` and context `diagnostic`: it changes no skill. Two failed
+   probes confirm; a pass share of 0.75 or more refutes (two of two); a split asks for more on later days, where
+   lk-practice plans probes first.
+5. **Confirm.** A confirmed hypothesis's `discoveryExtension` is stored on the learner (`practice_learner.extensions`).
+   Their graph is now the published one composed with their extensions (`composeLearnerGraph`), plus the new skills of
+   their hypotheses without edges (so probes on them record and replay); `loadLearner` replays the log whenever that
+   graph's version differs from the state's. A groundwork task on the prerequisite joins today's set, and lk-practice
+   plans it first (`remediation`, reason `discovered`) and re-probes it until it's ready, while the blocked skill waits.
+6. **The admin decides.** `/admin/practice` → "Discovered (N)" lists each proposal (found skills marked), the model's
+   reason, how many learners probed, confirmed and refuted it, and lk-practice's advice across them
+   (`prerequisiteReport`: practising it, harden, revoke, keep). "Add to the course" makes a found skill a skill of the
+   lesson it was found in, keeping its key so learners' history follows it, and adds a soft prerequisite; it applies
+   with the next published version. A learner's own extension then gives way to the course's edge (it no longer
+   composes and is dropped), and their log replays with every verdict kept. "Dismiss" stops the proposal being made
+   again; it can be undone.
+
+The learner sees: a notice while the diagnosis runs ("we're looking at whether something underneath is missing"), then
+how many check questions joined the end of the set; probe cards marked "Check" with a line saying they don't count
+towards progress; after a verdict, "found something underneath: X, you'll practise it before Y" or "you know X: that
+wasn't it"; groundwork cards marked "Groundwork"; and on the map, a confirmed prerequisite under the lesson it was found
+in, with its own mark.
+
+Tried on 2026-11-06 locally, with real calls (production build, Spanish). Two wrong answers on "Create, edit and
+render a Markdown cell" asked for a diagnosis; Sonnet answered in 4.5 s with two new skills ("Recognise basic Markdown
+syntax", "Tell Markdown cells from code cells") and reasons that quoted the wrong option picked twice. Four probes and a
+groundwork task were written and proven (Sonnet, checked by DeepSeek). Two failed probes confirmed the first: the
+learner's graph became `…@1+e48e…` (54 skills, 73 prerequisites) and lk-practice's next plan was the other probe, then the
+confirmed skill (`discovered`), then new skills. On the page, failing a second skill twice showed the notice and added
+two probes about ten seconds later; answering both probes of the Markdown-cells hypothesis right refuted it, with the
+notice; the groundwork card, the map tile and the admin dialog showed as described, and "Add to the course" added the
+skill and edge. Replaying that learner's log on a graph with the skill added kept all three verdicts and every entry.
+The first diagnosis named a course skill that builds on the blocked one, which `checkPrerequisiteHypothesis` refused
+as a cycle; since then the model isn't shown those skills.
+
 **Node.js.** lk-practice declares Node.js 24 or later. It ran the same on Node 22 (graph check, plan, status), but the
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built
 with (nodejs20.x, 22.x or 24.x).
@@ -257,3 +312,6 @@ with (nodejs20.x, 22.x or 24.x).
 - "Explain in your words" by voice, once speech-to-text is in the platform: graded by a model against a rubric.
 - A placement quiz, so someone who already knows a topic can skip ahead (lk-practice supports placement credit).
 - Reminders by email.
+- Closing hypotheses left open for weeks (a probe whose task couldn't be written), with `close-hypothesis`.
+- Admins redrafting a lesson keep skills added from discoveries (their keys start with `found.`); today a redraft may
+  drop them like any skill the new draft doesn't name.

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Evidence, PracticeItem, PracticeState, ReviewLogEntry } from "@intellectif/lk-practice";
+import { composeGraph, type DiscoveryExtension, type Evidence, type PracticeEvent, type PracticeItem, type PracticeState, type ReviewLogEntry, type SkillGraph, type SkillNode } from "@intellectif/lk-practice";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
@@ -11,7 +11,9 @@ import { normaliseAnswer, sameOutput, type TaskContent } from "@/lib/practice/ta
 // skills of the lessons they've completed and the proven task pool; each answer is graded here (questions against the
 // key, code on the grader) and recorded as evidence; the state and its log are saved together.
 
-export type SessionItem = { targetId: string; taskId: string; skillKey: string; stage: string; kind: string };
+// `probe`: the hypothesis this task probes (docs/practice.md, "Missing prerequisites"). `added`: put in the set after it
+// was planned (a probe or a confirmed prerequisite's practice), so it answers no plan target.
+export type SessionItem = { targetId: string; taskId: string; skillKey: string; stage: string; kind: string; probe?: string; added?: boolean };
 
 // A short daily set: about 8 tasks and 15 minutes, at most 3 new skills; "a few more" adds up to 4.
 const DAILY_TARGETS = 8;
@@ -28,40 +30,100 @@ export function localDay(timeZone: string | undefined, at = new Date()): string 
   }
 }
 
-async function latestGraph(courseId: string) {
+export async function latestGraph(courseId: string) {
   const version = await prisma.skillGraphVersion.findFirst({ where: { courseId }, orderBy: { version: "desc" }, select: { version: true, graph: true } });
   return version && { version: version.version, published: version.graph as unknown as PublishedGraph };
 }
 
+/** What the platform shows of a skill; `found` for one a diagnosis named that the course doesn't teach. */
+export type SkillMeta = PublishedGraph["skills"][string] & { found?: boolean };
+/** A learner's graph: the published one with their confirmed prerequisites, and every skill's labels. */
+export type LearnerGraph = { graph: SkillGraph; skills: Record<string, SkillMeta> };
+
+/** The new skills the learner's hypotheses name, from the state or from the log: their probes need them in the graph. */
+function hypothesisNodes(state: PracticeState): SkillNode[] {
+  return Object.values(state.hypotheses ?? {}).flatMap((hypothesis) => (hypothesis.skill ? [hypothesis.skill] : []));
+}
+function loggedHypothesisNodes(entries: readonly ReviewLogEntry[]): SkillNode[] {
+  return entries.flatMap((entry) => (entry.kind === "host" && entry.action.kind === "open-hypothesis" && entry.action.hypothesis.skill ? [entry.action.hypothesis.skill] : []));
+}
+
 /**
- * The learner's state on the latest published graph: created on first use, and rebuilt from the log (lk-practice's
- * replay) when a new version has been published since.
+ * The published graph composed with the learner's confirmed prerequisites (lk-practice's composeGraph), plus the new
+ * skills their hypotheses name, without edges, so nothing waits on them. An extension that no longer composes (its
+ * edge or skill has joined the course's own graph) is dropped.
+ */
+export function composeLearnerGraph(base: SkillGraph, extensions: readonly DiscoveryExtension[], nodes: readonly SkillNode[]) {
+  let kept: DiscoveryExtension[] = [];
+  let graph = base;
+  for (const extension of extensions) {
+    const composed = composeGraph(base, [...kept, extension], practice.config);
+    if (composed.ok) {
+      kept = [...kept, extension];
+      graph = composed.graph;
+    }
+  }
+  const have = new Set(graph.skills.map((skill) => skill.id));
+  const extra: SkillNode[] = [];
+  for (const node of nodes) {
+    if (have.has(node.id)) continue;
+    have.add(node.id);
+    extra.push(node);
+  }
+  return { graph: extra.length ? { ...graph, skills: [...graph.skills, ...extra] } : graph, extensions: kept };
+}
+
+/** Labels for the found skills a learner's graph has. */
+async function foundSkillMeta(courseId: string, graph: SkillGraph, published: PublishedGraph): Promise<Record<string, SkillMeta>> {
+  const missing = graph.skills.map((skill) => skill.id).filter((key) => !published.skills[key]);
+  if (!missing.length) return {};
+  const rows = await prisma.practiceFoundSkill.findMany({ where: { courseId, key: { in: missing } } });
+  return Object.fromEntries(
+    rows.map((row) => [
+      row.key,
+      { labelEs: row.labelEs, labelEn: row.labelEn, descriptionEs: row.descriptionEs, descriptionEn: row.descriptionEn, lessonId: row.lessonId, runnable: row.runnable, found: true },
+    ]),
+  );
+}
+
+/**
+ * The learner's state on their graph (the latest published version with their confirmed prerequisites): created on
+ * first use, and rebuilt from the log (lk-practice's replay) when the graph has changed since: a new version was
+ * published, or a prerequisite was confirmed.
  */
 export async function loadLearner(userId: string, courseId: string) {
   const latest = await latestGraph(courseId);
   if (!latest) return null;
-  const { graph } = latest.published;
+  const base = latest.published.graph;
   let learner = await prisma.practiceLearner.findUnique({ where: { userId_courseId: { userId, courseId } } });
   if (!learner) {
     // An upsert: the header's badge and the practice page may both arrive first.
     learner = await prisma.practiceLearner.upsert({
       where: { userId_courseId: { userId, courseId } },
-      create: { userId, courseId, graphVersion: latest.version, state: practice.initState(userId, graph) as unknown as Prisma.InputJsonObject },
+      create: { userId, courseId, graphVersion: latest.version, state: practice.initState(userId, base) as unknown as Prisma.InputJsonObject },
       update: {},
     });
-  } else if (learner.graphVersion !== latest.version) {
-    const entries = await prisma.practiceLogEntry.findMany({ where: { learnerId: learner.id }, orderBy: { seq: "asc" }, select: { entry: true } });
-    const replayed = practice.replay(entries.map((row) => row.entry as unknown as ReviewLogEntry), graph, userId);
+  }
+  const stored = (learner.extensions ?? []) as unknown as DiscoveryExtension[];
+  let state = learner.state as unknown as PracticeState;
+  let { graph, extensions } = composeLearnerGraph(base, stored, hypothesisNodes(state));
+  if (learner.graphVersion !== latest.version || state.graphVersion !== graph.version || extensions.length !== stored.length) {
+    const entries = (await prisma.practiceLogEntry.findMany({ where: { learnerId: learner.id }, orderBy: { seq: "asc" }, select: { entry: true } })).map(
+      (row) => row.entry as unknown as ReviewLogEntry,
+    );
+    ({ graph, extensions } = composeLearnerGraph(base, stored, loggedHypothesisNodes(entries)));
+    const replayed = practice.replay(entries, graph, userId);
     if (!replayed.ok) console.error(JSON.stringify({ event: "practice.replay_failed", learnerId: learner.id, issues: replayed.issues.slice(0, 5) }));
+    state = replayed.ok ? replayed.state : practice.initState(userId, graph);
     learner = await prisma.practiceLearner.update({
       where: { id: learner.id },
-      data: { graphVersion: latest.version, state: (replayed.ok ? replayed.state : practice.initState(userId, graph)) as unknown as Prisma.InputJsonObject },
+      data: { graphVersion: latest.version, state: state as unknown as Prisma.InputJsonObject, extensions: extensions as unknown as Prisma.InputJsonArray },
     });
   }
-  return { learner, state: learner.state as unknown as PracticeState, ...latest };
+  const published: LearnerGraph = { graph, skills: { ...latest.published.skills, ...(await foundSkillMeta(courseId, graph, latest.published)) } };
+  return { learner, state, published, version: latest.version };
 }
 
-/** Skills the learner may start: those of the lessons they've completed. */
 /** Words of a label, for matching a tutor's request to a skill: lowercase, no accents, no short words. */
 function words(text: string): Set<string> {
   return new Set(
@@ -79,22 +141,23 @@ function words(text: string): Set<string> {
  * request names a skill in words and the lesson it came from; it's matched to that lesson's skill with the most
  * words in common, in either language).
  */
-export async function focusSkills(userId: string, courseId: string, published: PublishedGraph): Promise<string[]> {
+export async function focusSkills(userId: string, courseId: string, published: LearnerGraph): Promise<string[]> {
   const [done, requests] = await Promise.all([
     prisma.lessonProgress.findMany({ where: { userId, status: "COMPLETED", lesson: { module: { courseId } } }, select: { lessonId: true } }),
     prisma.practiceRequest.findMany({ where: { userId, lessonId: { not: null } }, select: { skill: true, lessonId: true }, orderBy: { createdAt: "desc" }, take: 100 }),
   ]);
   const lessons = new Set(done.map((row) => row.lessonId));
+  // Found skills come through their hypotheses (probes, then lk-practice's own planning), never as new skills.
   const focus = new Set(
     Object.entries(published.skills)
-      .filter(([, meta]) => lessons.has(meta.lessonId))
+      .filter(([, meta]) => !meta.found && lessons.has(meta.lessonId))
       .map(([key]) => key),
   );
   for (const request of requests) {
     const asked = words(request.skill);
     let best: { key: string; score: number } | null = null;
     for (const [key, meta] of Object.entries(published.skills)) {
-      if (meta.lessonId !== request.lessonId) continue;
+      if (meta.found || meta.lessonId !== request.lessonId) continue;
       const own = words(`${key.replaceAll("-", " ")} ${meta.labelEs} ${meta.labelEn}`);
       const score = [...asked].filter((word) => own.has(word)).length;
       if (score > 0 && (!best || score > best.score)) best = { key, score };
@@ -112,6 +175,8 @@ export type SkillProgress = {
   stage: string | null;
   due: number | null;
   recall: number | null;
+  // A prerequisite found for this learner that the course doesn't teach.
+  found: boolean;
 };
 
 /** Every skill's status for the progress map, grouped by module and lesson in course order. */
@@ -122,6 +187,8 @@ export async function progressMap(userId: string, courseId: string) {
   const at = Date.now();
   const summary = practice.status(state, published.graph, at);
   const focus = new Set(await focusSkills(userId, courseId, published));
+  // Confirmed prerequisites are started straight away, whatever their lesson (docs/practice.md, "Missing prerequisites").
+  for (const hypothesis of Object.values(state.hypotheses ?? {})) if (hypothesis.verdict === "confirmed" && !hypothesis.closedAt) focus.add(hypothesis.skillId);
   const byKey = new Map(summary.skills.map((skill) => [skill.skillId, skill]));
   const modules = await prisma.courseModule.findMany({
     where: { courseId },
@@ -131,9 +198,20 @@ export async function progressMap(userId: string, courseId: string) {
   const skillsByLesson = new Map<string, SkillProgress[]>();
   for (const [key, meta] of Object.entries(published.skills)) {
     const skill = byKey.get(key);
+    // A found skill shows once it's confirmed for the learner (then it has an edge in their graph), not while probed.
+    if (meta.found && !published.graph.edges.some((edge) => edge.from === key)) continue;
     // "ready" means lk-practice would start it: only for skills the learner has reached (their lesson, or the tutor).
     const status = !skill ? "locked" : skill.status === "ready" && !focus.has(key) ? "upcoming" : skill.status;
-    const entry: SkillProgress = { key, labelEs: meta.labelEs, labelEn: meta.labelEn, status, stage: skill?.stage ?? null, due: skill?.due ?? null, recall: skill?.retrievability ?? null };
+    const entry: SkillProgress = {
+      key,
+      labelEs: meta.labelEs,
+      labelEn: meta.labelEn,
+      status,
+      stage: skill?.stage ?? null,
+      due: skill?.due ?? null,
+      recall: skill?.retrievability ?? null,
+      found: Boolean(meta.found),
+    };
     skillsByLesson.set(meta.lessonId, [...(skillsByLesson.get(meta.lessonId) ?? []), entry]);
   }
   const counts: Record<string, number> = {};
@@ -223,7 +301,11 @@ export async function todaysSession(userId: string, courseId: string, day: strin
 
   const focus = await focusSkills(userId, courseId, published);
   const known = Object.keys(state.skills ?? {});
-  const skills = [...new Set([...focus, ...known])];
+  // The candidates of open and confirmed hypotheses: lk-practice probes and practises them first.
+  const hypothesised = Object.values(state.hypotheses ?? {})
+    .filter((hypothesis) => hypothesis.verdict !== "refuted" && !hypothesis.closedAt)
+    .map((hypothesis) => hypothesis.skillId);
+  const skills = [...new Set([...focus, ...known, ...hypothesised])];
   const tasks = skills.length
     ? await prisma.practiceTask.findMany({ where: { courseId, status: "PROVEN", skillKey: { in: skills } }, select: { item: true } })
     : [];
@@ -263,19 +345,27 @@ export async function todaysSession(userId: string, courseId: string, day: strin
   const excluded = new Set(answeredToday.map((row) => row.taskId));
   const seen = new Set<string>();
   const items: SessionItem[] = [];
+  const now = Date.now();
+  // Used in the last week: lk-practice avoids those, and so does the fallback below when it has a choice.
+  const recent = (item: PracticeItem) => ((state.items?.[item.id]?.lastUsedAt ?? 0) > now - 7 * 86_400_000 ? 1 : 0);
   for (const target of plan.targets) {
     // lk-practice picks a task within 0.5 of the target's difficulty. While a pool is thin there may be none that close:
-    // then the closest proven task for the same skill and stage, not used today, stands in.
+    // then the closest proven task for the same skill and stage, not used today, stands in (one not used this week
+    // first).
     const itemId =
       target.item?.itemId ??
       pool
         .filter((item) => item.skills[0]?.skillId === target.skillIds[0] && item.stage === target.stage && !excluded.has(taskIdOf(item.id)) && !seen.has(taskIdOf(item.id)))
-        .sort((a, b) => Math.abs((a.difficulty ?? 0) - target.targetDifficulty) - Math.abs((b.difficulty ?? 0) - target.targetDifficulty))[0]?.id;
+        .sort(
+          (a, b) =>
+            recent(a) - recent(b) || Math.abs((a.difficulty ?? 0) - target.targetDifficulty) - Math.abs((b.difficulty ?? 0) - target.targetDifficulty),
+        )[0]?.id;
     if (!itemId) continue; // No proven task for this skill and stage yet: it waits for the pool.
     const taskId = taskIdOf(itemId);
     if (seen.has(taskId)) continue;
     seen.add(taskId);
-    items.push({ targetId: target.id, taskId, skillKey: target.skillIds[0], stage: target.stage, kind: target.kind });
+    const probe = target.reason.code === "probe" ? target.reason.hypothesisId : undefined;
+    items.push({ targetId: target.id, taskId, skillKey: target.skillIds[0], stage: target.stage, kind: target.kind, ...(probe ? { probe } : {}) });
   }
   const session = await prisma.practiceSession.create({
     data: { learnerId: learner.id, day, extra, items: items as unknown as Prisma.InputJsonArray, completedAt: items.length ? null : new Date() },
@@ -371,9 +461,10 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
     id: answerId,
     itemId: item.id,
     at: Date.now(),
-    // An extra-set task wasn't planned by lk-practice: it has no target to name.
-    ...(entry.kind === "extra" ? {} : { targetId: entry.targetId }),
-    context: "practice",
+    // An extra-set task, or one added to the set later, wasn't planned by lk-practice: it has no target to name.
+    ...(entry.kind === "extra" || entry.added ? {} : { targetId: entry.targetId }),
+    // A probe changes no skill, only its hypothesis's tally.
+    ...(entry.probe ? { context: "diagnostic" as const, probe: entry.probe } : { context: "practice" as const }),
     durationMs: Math.max(0, Math.round(durationMs)),
     attempts: Math.max(1, Math.round(attempts)),
     source: { kind: "auto", score: graded.feedback.score, maxScore: graded.maxScore, passed: graded.feedback.passed, ...(graded.checks ? { checks: graded.checks } : {}) },
@@ -381,9 +472,11 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
   const recorded = practice.record(loaded.state, { graph: loaded.published.graph, evidence, item });
   let state: PracticeState = loaded.state;
   let appended: readonly ReviewLogEntry[] = [];
+  let events: readonly PracticeEvent[] = [];
   if (recorded.kind === "applied") {
     state = recorded.state;
     appended = recorded.appended;
+    events = recorded.events;
   } else if (recorded.kind === "replay-required") {
     appended = recorded.appended;
   } else if (recorded.kind === "rejected") {
@@ -415,7 +508,11 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
   if (recorded.kind === "replay-required") {
     const entries = await prisma.practiceLogEntry.findMany({ where: { learnerId: loaded.learner.id }, orderBy: { seq: "asc" }, select: { entry: true } });
     const replayed = practice.replay(entries.map((row) => row.entry as unknown as ReviewLogEntry), loaded.published.graph, userId);
-    if (replayed.ok) await prisma.practiceLearner.update({ where: { id: loaded.learner.id }, data: { state: replayed.state as unknown as Prisma.InputJsonObject } });
+    if (replayed.ok) {
+      state = replayed.state;
+      await prisma.practiceLearner.update({ where: { id: loaded.learner.id }, data: { state: replayed.state as unknown as Prisma.InputJsonObject } });
+    }
   }
-  return { ok: true as const, feedback: graded.feedback };
+  // lk-practice's events, for the discovery of missing prerequisites (lib/practice/discovery.ts).
+  return { ok: true as const, feedback: graded.feedback, events, state, learnerId: loaded.learner.id, evidenceId: answerId, entry };
 }

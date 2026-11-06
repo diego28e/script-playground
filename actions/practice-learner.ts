@@ -4,7 +4,8 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { answerTask, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type SessionItem } from "@/lib/practice/learner";
+import { afterAnswer, prepareDiscovery, runDiagnosis, type DiscoveryNote } from "@/lib/practice/discovery";
+import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
 
 // The learner's side of practice (/practice/<course>, docs/practice.md "A session"). Learners only ever get a task's
@@ -36,6 +37,36 @@ function learnerTask(id: string, content: TaskContent) {
   };
 }
 
+/** One session item as the page shows it; `answer` once it was answered. */
+function itemView(
+  item: SessionItem,
+  content: TaskContent,
+  published: LearnerGraph,
+  confirmed: Set<string>,
+  answer?: { answer: unknown; result: unknown },
+) {
+  const meta = published.skills[item.skillKey];
+  return {
+    ...learnerTask(item.taskId, content),
+    skill: { es: meta?.labelEs ?? item.skillKey, en: meta?.labelEn ?? item.skillKey },
+    stage: item.stage,
+    isNew: item.kind === "new",
+    // A check on a prerequisite that may be missing, and practice on one that was found missing.
+    isProbe: Boolean(item.probe),
+    isFound: !item.probe && (item.kind === "discovered" || confirmed.has(item.skillKey)),
+    answer: answer ? { given: answer.answer as Answer, feedback: answer.result as Feedback, explanationEs: content.explanationEs, explanationEn: content.explanationEn } : null,
+  };
+}
+
+/** The skills of the learner's confirmed prerequisites. */
+function confirmedSkills(state: { hypotheses?: Record<string, { verdict: string; skillId: string }> }) {
+  return new Set(
+    Object.values(state.hypotheses ?? {})
+      .filter((hypothesis) => hypothesis.verdict === "confirmed")
+      .map((hypothesis) => hypothesis.skillId),
+  );
+}
+
 export async function getPracticeToday(courseSlug: string, timeZone: string, extra = false) {
   const who = await learnerFor(courseSlug);
   if ("error" in who) return { success: false as const, error: who.error };
@@ -53,28 +84,21 @@ export async function getPracticeToday(courseSlug: string, timeZone: string, ext
   const byId = new Map(tasks.map((task) => [task.id, task.content as unknown as TaskContent]));
   const answered = new Map(answers.map((answer) => [answer.taskId, answer]));
   const doneToday = daySessions.flatMap((entry) => entry.answers);
+  const confirmed = confirmedSkills(loaded.state);
+  // Hypotheses still being probed, or confirmed prerequisites not ready: the page asks for their tasks after loading.
+  const discoveryWaiting = Object.values(loaded.state.hypotheses ?? {}).some(
+    (hypothesis) => !hypothesis.closedAt && (hypothesis.verdict === "open" || (hypothesis.verdict === "confirmed" && !hypothesis.readyAt)),
+  );
   return {
     success: true as const,
     ready: true as const,
     course: who.course,
     sessionId: session.id,
     extra: session.extra,
-    items: items
-      .filter((item) => byId.has(item.taskId))
-      .map((item) => {
-        const content = byId.get(item.taskId)!;
-        const meta = loaded.published.skills[item.skillKey];
-        const answer = answered.get(item.taskId);
-        return {
-          ...learnerTask(item.taskId, content),
-          skill: { es: meta?.labelEs ?? item.skillKey, en: meta?.labelEn ?? item.skillKey },
-          stage: item.stage,
-          isNew: item.kind === "new",
-          answer: answer ? { given: answer.answer as unknown as Answer, feedback: answer.result as unknown as Feedback, explanationEs: content.explanationEs, explanationEn: content.explanationEn } : null,
-        };
-      }),
+    items: items.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed, answered.get(item.taskId))),
     today: { answered: doneToday.length, right: doneToday.filter((answer) => answer.passed).length },
     streak: await practiceStreak(loaded.learner.id, day),
+    discoveryWaiting: discoveryWaiting && !session.extra,
   };
 }
 export type PracticeToday = Extract<Awaited<ReturnType<typeof getPracticeToday>>, { success: true; ready: true }>;
@@ -93,7 +117,7 @@ export async function submitPracticeAnswer(
   answer: z.infer<typeof AnswerSchema>,
   durationMs: number,
   attempts = 1,
-): Promise<Result<{ feedback: Feedback; explanationEs: string; explanationEn: string }>> {
+): Promise<Result<{ feedback: Feedback; explanationEs: string; explanationEn: string; diagnosisId: string | null; discovery: DiscoveryNote | null }>> {
   const who = await learnerFor(courseSlug);
   if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
   const parsed = AnswerSchema.safeParse(answer);
@@ -101,9 +125,21 @@ export async function submitPracticeAnswer(
   try {
     const result = await answerTask(who.userId, sessionId, taskId, parsed.data, durationMs, Math.min(Math.max(Math.round(attempts) || 1, 1), 50));
     if (!result.ok) return { success: false, error: result.error };
+    // A diagnosis to run, or a hypothesis this answer settled (docs/practice.md, "Missing prerequisites"). The answer
+    // is recorded either way: a problem here only skips the discovery.
+    let diagnosisId: string | null = null;
+    let discovery: DiscoveryNote | null = null;
+    const { events, learnerId, state, evidenceId, entry } = result;
+    if (events?.length && learnerId && state && evidenceId && entry) {
+      try {
+        ({ diagnosisId, discovery } = await afterAnswer({ userId: who.userId, courseId: who.course.id, learnerId, state, events, evidenceId, entry }));
+      } catch (error) {
+        console.error(JSON.stringify({ event: "practice.discovery_after_answer_failed", error: error instanceof Error ? error.message : String(error) }));
+      }
+    }
     const task = await prisma.practiceTask.findUnique({ where: { id: taskId }, select: { content: true } });
     const content = task?.content as unknown as TaskContent | undefined;
-    return { success: true, feedback: result.feedback, explanationEs: content?.explanationEs ?? "", explanationEn: content?.explanationEn ?? "" };
+    return { success: true, feedback: result.feedback, explanationEs: content?.explanationEs ?? "", explanationEn: content?.explanationEn ?? "", diagnosisId, discovery };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : "The answer couldn't be graded. Try again." };
   }
@@ -139,3 +175,34 @@ export async function getPracticeMap(courseSlug: string) {
   return { success: true as const, ready: true as const, course: who.course, ...map };
 }
 export type PracticeMapData = Extract<Awaited<ReturnType<typeof getPracticeMap>>, { ready: true }>;
+
+/** Runs a diagnosis the last answer asked for (the page calls it in the background): how many hypotheses it opened. */
+export async function runPracticeDiagnosis(courseSlug: string, diagnosisId: string): Promise<Result<{ opened: number }>> {
+  const who = await learnerFor(courseSlug);
+  if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
+  // Amplify ends a request at about 30 s: the model gets until 25 s, the rest is for saving.
+  const result = await runDiagnosis(who.userId, who.course.id, diagnosisId, Date.now() + 25_000);
+  return result.ok ? { success: true, opened: result.opened } : { success: false, error: result.error };
+}
+
+/**
+ * Adds to today's set what the learner's hypotheses need (probes, and practice on a confirmed prerequisite), writing
+ * a missing task when there's none: the items added, and whether to call again.
+ */
+export async function preparePracticeDiscovery(courseSlug: string, sessionId: string): Promise<Result<{ items: PracticeTaskView[]; more: boolean }>> {
+  const who = await learnerFor(courseSlug);
+  if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
+  const prepared = await prepareDiscovery(who.userId, who.course.id, sessionId, Date.now() + 27_000);
+  if (!prepared) return { success: false, error: "That practice session isn't yours." };
+  if (!prepared.added.length) return { success: true, items: [], more: prepared.more };
+  const loaded = await loadLearner(who.userId, who.course.id);
+  if (!loaded) return { success: false, error: "Practice isn't set up for this course." };
+  const tasks = await prisma.practiceTask.findMany({ where: { id: { in: prepared.added.map((item) => item.taskId) } }, select: { id: true, content: true } });
+  const byId = new Map(tasks.map((task) => [task.id, task.content as unknown as TaskContent]));
+  const confirmed = confirmedSkills(loaded.state);
+  return {
+    success: true,
+    items: prepared.added.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed)),
+    more: prepared.more,
+  };
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Lock, Repeat } from "lucide-react";
+import { ArrowLeft, Layers, Lock, Repeat } from "lucide-react";
 import type { PracticeMapData } from "@/actions/practice-learner";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ const COPY = {
     dueIn: (days: number) => (days === 1 ? "Vuelve mañana" : `Vuelve en ${days} días`),
     recall: (percent: number) => `${percent}% de recuerdo`,
     lesson: "Lección",
+    found: "Base que te faltaba",
     module: "Módulo",
   },
   en: {
@@ -56,6 +57,7 @@ const COPY = {
     dueIn: (days: number) => (days === 1 ? "Back tomorrow" : `Back in ${days} days`),
     recall: (percent: number) => `${percent}% recall`,
     lesson: "Lesson",
+    found: "Groundwork you were missing",
     module: "Module",
   },
 };
@@ -199,6 +201,7 @@ function SkillTile({ skill, t, language, now }: { skill: Skill; t: (typeof COPY)
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm leading-snug font-medium">{label}</p>
         {status === "locked" && <Lock className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />}
+        {skill.found && <Layers role="img" className="mt-0.5 size-3.5 shrink-0" aria-label={t.found} />}
       </div>
       <div className={cn("flex flex-wrap items-center justify-between gap-2 text-xs", filled ? "text-background/80" : "text-muted-foreground")}>
         <span>{t.status[status]}</span>

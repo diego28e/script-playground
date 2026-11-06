@@ -4,20 +4,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { Editor } from "@monaco-editor/react";
-import { ArrowLeft, ArrowRight, Check, Flame, Map as MapIcon, Play, RotateCcw, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Flame, Layers, Map as MapIcon, Play, RotateCcw, ScanSearch, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
-import { getPracticeToday, runPracticeCode, submitPracticeAnswer, type PracticeTaskView, type PracticeToday as Today } from "@/actions/practice-learner";
+import {
+  getPracticeToday,
+  preparePracticeDiscovery,
+  runPracticeCode,
+  runPracticeDiagnosis,
+  submitPracticeAnswer,
+  type PracticeTaskView,
+  type PracticeToday as Today,
+} from "@/actions/practice-learner";
 import { PRACTICE_ANSWERED } from "@/components/practice/practice-nav-link";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { defineAcademiaTheme } from "@/lib/monaco-theme";
+import type { DiscoveryNote } from "@/lib/practice/discovery";
 import type { Feedback } from "@/lib/practice/learner";
 import { cn } from "@/lib/utils";
 
 // Today's practice (docs/practice.md, "A session"): the day's short set, one task at a time. The learner answers
 // (picks, types, predicts, or edits code that runs on the grader), sees right away whether it was right and why, and
-// moves on; when the set is done, the page says so and offers a few more.
+// moves on; when the set is done, the page says so and offers a few more. When a skill fails twice in a row, the page
+// asks for a diagnosis in the background and adds the check questions it brings to the end of the set
+// (docs/practice.md, "Missing prerequisites").
 
 const COPY = {
   es: {
@@ -58,6 +69,14 @@ const COPY = {
     streak: (days: number) => (days === 1 ? "1 día seguido" : `${days} días seguidos`),
     noStreak: "Empieza tu racha hoy",
     map: "Ver mi mapa",
+    probe: "Comprobación",
+    found: "Base",
+    probeHint: "Una comprobación rápida: nos dice si te falta algo de base. No cuenta para tu progreso.",
+    searching: "Este tema te está costando. Estamos viendo si te falta algo de base…",
+    checksAdded: (count: number) => (count === 1 ? "Añadimos una pregunta de comprobación al final de tu práctica." : `Añadimos ${count} preguntas de comprobación al final de tu práctica.`),
+    foundAdded: (count: number) => (count === 1 ? "Añadimos una tarea de base al final de tu práctica." : `Añadimos ${count} tareas de base al final de tu práctica.`),
+    confirmed: (skill: string, forSkill: string) => `Encontramos algo de base que repasar: «${skill}». Lo practicarás antes de volver a «${forSkill}».`,
+    refuted: (skill: string) => `«${skill}» lo dominas: no era eso lo que faltaba.`,
   },
   en: {
     eyebrow: "Today's practice",
@@ -97,11 +116,22 @@ const COPY = {
     streak: (days: number) => (days === 1 ? "1 day in a row" : `${days} days in a row`),
     noStreak: "Start your streak today",
     map: "See my map",
+    probe: "Check",
+    found: "Groundwork",
+    probeHint: "A quick check: it tells us whether something underneath is missing. It doesn't count towards your progress.",
+    searching: "This one is giving you trouble. We're looking at whether something underneath is missing…",
+    checksAdded: (count: number) => (count === 1 ? "We added a check question at the end of today's practice." : `We added ${count} check questions at the end of today's practice.`),
+    foundAdded: (count: number) => (count === 1 ? "We added a groundwork task at the end of today's practice." : `We added ${count} groundwork tasks at the end of today's practice.`),
+    confirmed: (skill: string, forSkill: string) => `Found something underneath to go over: “${skill}”. You'll practise it before going back to “${forSkill}”.`,
+    refuted: (skill: string) => `You know “${skill}”: that wasn't what was missing.`,
   },
 };
 
 type Copy = (typeof COPY)["es"];
 type Answered = NonNullable<PracticeTaskView["answer"]>;
+/** What an answer brought besides its feedback: a diagnosis to run, or a hypothesis it settled. */
+type AnswerExtras = { diagnosisId: string | null; discovery: DiscoveryNote | null };
+type Notice = { kind: "working" | "info"; text: string } | null;
 
 const MARKDOWN =
   "text-base leading-relaxed [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em] [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-code-panel [&_pre]:p-4 [&_pre]:text-sm [&_pre]:text-code-foreground [&_pre_code]:bg-transparent [&_pre_code]:p-0";
@@ -113,6 +143,8 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
   const [state, setState] = useState<"loading" | "ready" | "not-ready" | "error">("loading");
   const [index, setIndex] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const preparing = useRef(false);
   const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
 
   const fetchToday = useCallback((extra: boolean) => getPracticeToday(courseSlug, timeZone, extra).catch(() => null), [courseSlug, timeZone]);
@@ -135,17 +167,85 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
     },
     [],
   );
+  /**
+   * Asks the server to add what the learner's hypotheses need to today's set (probes, groundwork), a few calls at most:
+   * each may write one missing task. The items come back and join the end of the list.
+   */
+  const prepare = useCallback(
+    async (sessionId: string) => {
+      if (preparing.current) return { probes: 0, found: 0 };
+      preparing.current = true;
+      let probes = 0;
+      let found = 0;
+      try {
+        for (let call = 0; call < 4; call++) {
+          const result = await preparePracticeDiscovery(courseSlug, sessionId).catch(() => null);
+          if (!result || !result.success) break;
+          if (result.items.length) {
+            probes += result.items.filter((item) => item.isProbe).length;
+            found += result.items.filter((item) => !item.isProbe).length;
+            setToday((current) => {
+              if (!current || current.sessionId !== sessionId) return current;
+              const have = new Set(current.items.map((item) => item.id));
+              return { ...current, items: [...current.items, ...result.items.filter((item) => !have.has(item.id))] };
+            });
+            window.dispatchEvent(new Event(PRACTICE_ANSWERED));
+          }
+          if (!result.more) break;
+        }
+      } finally {
+        preparing.current = false;
+      }
+      return { probes, found };
+    },
+    [courseSlug],
+  );
+  const added = useCallback(
+    ({ probes, found }: { probes: number; found: number }) => {
+      if (probes) setNotice({ kind: "info", text: t.checksAdded(probes) });
+      else if (found) setNotice({ kind: "info", text: t.foundAdded(found) });
+    },
+    [t],
+  );
+
   useEffect(() => {
     let current = true;
-    void fetchToday(false).then((result) => current && apply(result));
+    void fetchToday(false).then((result) => {
+      if (!current) return;
+      apply(result);
+      // Hypotheses from another day, or tasks written since: their probes and groundwork join today's set.
+      if (result?.success && result.ready && result.discoveryWaiting) void prepare(result.sessionId).then((counts) => current && added(counts));
+    });
     return () => {
       current = false;
     };
-  }, [fetchToday, apply]);
+  }, [fetchToday, apply, prepare, added]);
 
-  const answered = (taskId: string, answer: Answered) => {
+  const answered = (taskId: string, answer: Answered, extras?: AnswerExtras) => {
     setToday((current) => current && { ...current, items: current.items.map((item) => (item.id === taskId ? { ...item, answer } : item)) });
     window.dispatchEvent(new Event(PRACTICE_ANSWERED));
+    if (!today || !extras) return;
+    const sessionId = today.sessionId;
+    const es = language === "es";
+    if (extras.discovery) {
+      const { verdict, skill, forSkill } = extras.discovery;
+      setNotice({ kind: "info", text: verdict === "confirmed" ? t.confirmed(es ? skill.es : skill.en, es ? forSkill.es : forSkill.en) : t.refuted(es ? skill.es : skill.en) });
+      if (verdict === "confirmed") void prepare(sessionId);
+    }
+    if (extras.diagnosisId) {
+      const diagnosisId = extras.diagnosisId;
+      setNotice({ kind: "working", text: t.searching });
+      void (async () => {
+        const result = await runPracticeDiagnosis(courseSlug, diagnosisId).catch(() => null);
+        if (!result || !result.success || !result.opened) {
+          setNotice(null);
+          return;
+        }
+        const counts = await prepare(sessionId);
+        if (counts.probes || counts.found) added(counts);
+        else setNotice(null);
+      })();
+    }
   };
 
   const more = async () => {
@@ -199,6 +299,23 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
         )}
         {state === "error" && <Notice text={t.error} />}
         {state === "not-ready" && <Notice text={t.notReady} />}
+        {notice && (
+          <p
+            role="status"
+            className={cn(
+              "mb-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm",
+              notice.kind === "working" ? "border-border bg-muted/50 text-muted-foreground" : "border-ring/30 bg-ring/10 text-foreground",
+            )}
+          >
+            {notice.kind === "working" ? <DotLoader className="mt-0.5 shrink-0" /> : <ScanSearch className="mt-0.5 size-4 shrink-0 text-ring" aria-hidden="true" />}
+            <span className="flex-1">{notice.text}</span>
+            {notice.kind === "info" && (
+              <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="OK">
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            )}
+          </p>
+        )}
         {state === "ready" && items.length === 0 && <Notice text={t.nothing} />}
         {state === "ready" && today && items.length > 0 && !finished && (
           <TaskCard
@@ -255,7 +372,7 @@ function TaskCard({
   courseSlug: string;
   sessionId: string;
   last: boolean;
-  onAnswered: (taskId: string, answer: Answered) => void;
+  onAnswered: (taskId: string, answer: Answered, extras?: AnswerExtras) => void;
   onNext: () => void;
 }) {
   const es = language === "es";
@@ -287,7 +404,7 @@ function TaskCard({
       toast.error(result && !result.success ? result.error : t.error);
       return;
     }
-    onAnswered(item.id, { given, feedback: result.feedback, explanationEs: result.explanationEs, explanationEn: result.explanationEn });
+    onAnswered(item.id, { given, feedback: result.feedback, explanationEs: result.explanationEs, explanationEn: result.explanationEn }, { diagnosisId: result.diagnosisId, discovery: result.discovery });
   };
 
   // A code task runs as often as the learner likes; the answer is recorded once every test passes (with the number of
@@ -326,7 +443,7 @@ function TaskCard({
       toast.error(result && !result.success ? result.error : t.error);
       return;
     }
-    onAnswered(item.id, { given, feedback: result.feedback, explanationEs: result.explanationEs, explanationEn: result.explanationEn });
+    onAnswered(item.id, { given, feedback: result.feedback, explanationEs: result.explanationEs, explanationEn: result.explanationEn }, { diagnosisId: result.diagnosisId, discovery: result.discovery });
   };
 
   return (
@@ -337,7 +454,18 @@ function TaskCard({
         <span className="text-sm text-muted-foreground">{es ? item.skill.es : item.skill.en}</span>
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t.stage[item.stage] ?? item.stage}</span>
         {item.isNew && <span className="rounded-full bg-ring/15 px-2 py-0.5 text-xs font-medium text-ring">{t.newSkill}</span>}
+        {item.isProbe && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-ring/15 px-2 py-0.5 text-xs font-medium text-ring">
+            <ScanSearch className="size-3" aria-hidden="true" /> {t.probe}
+          </span>
+        )}
+        {item.isFound && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-ring/15 px-2 py-0.5 text-xs font-medium text-ring">
+            <Layers className="size-3" aria-hidden="true" /> {t.found}
+          </span>
+        )}
       </header>
+      {item.isProbe && !answer && <p className="px-6 pt-2 text-sm text-muted-foreground md:px-8">{t.probeHint}</p>}
 
       <div className={cn("px-6 pt-4 md:px-8", MARKDOWN)}>
         <ReactMarkdown>{es ? item.promptEs : item.promptEn}</ReactMarkdown>
