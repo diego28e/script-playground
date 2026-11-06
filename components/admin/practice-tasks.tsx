@@ -108,7 +108,7 @@ function TasksPanel({ courseId, skillKey, stages, lang }: { courseId: string; sk
   );
 }
 
-const MARKDOWN = "text-sm leading-relaxed [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.85em] [&_p]:my-1.5 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0";
+const MARKDOWN = "text-sm leading-relaxed [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.85em] [&_p]:my-1.5 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0";
 
 function Code({ title, text }: { title: string; text: string }) {
   return (
@@ -143,7 +143,9 @@ function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRe
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-semibold text-foreground">{FORM_LABEL[task.form] ?? task.form}</span>
         <span>{task.stage}</span>
-        <span className="tabular-nums">difficulty {task.difficulty > 0 ? "+" : ""}{task.difficulty.toFixed(1)}</span>
+        <span className="tabular-nums" title="A newcomer's chance of getting it right (lk-practice's difficulty, in logits)">
+          {Math.round(100 / (1 + Math.exp(task.difficulty)))}% expected success
+        </span>
         <span className="tabular-nums">about {task.expectedSeconds} s</span>
         <span>{task.model}</span>
         {task.status === "PROVEN" ? (

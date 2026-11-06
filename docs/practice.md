@@ -99,7 +99,8 @@ end of the phases that need them.
 | Publishing a version, checked by lk-practice | `lib/practice/graph.ts` | Built and tried (below) |
 | Admin page: draft, edit, prerequisites, approve, publish | `/admin/practice` (`actions/practice.ts`, `components/admin/practice-graph.tsx`) | Deployed (Amplify job 58) |
 | The grader on the lab server, and the platform's client for it | `infra/lab/grader` (`server.mjs`, `harness.py`), `lib/practice/grader.ts`, `pnpm grader:check` | Built and tried locally (below) |
-| Practice tasks: writing, the proof gate, the pool, and the admin view | `lib/practice/tasks.ts`, `lib/practice/config.ts`, migration `add_practice_tasks` (`practice_task`), the skill cards' Tasks panel and "Write N missing tasks" on `/admin/practice` | Built and tried locally against the server's grader (below) |
+| Practice tasks: writing, the proof gate, the pool, and the admin view | `lib/practice/tasks.ts`, `lib/practice/config.ts`, migration `add_practice_tasks` (`practice_task`), the skill cards' Tasks panel and "Write N missing tasks" on `/admin/practice` | Deployed (Amplify job 62) |
+| Today's practice for learners: state and log, the daily set, grading, retries on code, a few more | `lib/practice/learner.ts`, `actions/practice-learner.ts`, `/practice/<course>` (`components/practice/practice-today.tsx`), migrations `add_practice_learners` and `rescale_task_difficulty`; a "Practise today" button on the course page | Built and tried locally (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
 to review and done, and a search over lessons and skills), the chosen lesson on the right; each scrolls on its own.
@@ -185,6 +186,39 @@ Tried on 2026-11-06 with the module-00 graph: all five forms written and proven,
 agreed in under a second), predict, code and debug in 9 to 12 s (on the server's grader); one more from the page in
 11 s. The first call with a new response schema took longer (Anthropic compiles a schema once and caches it for a day),
 so two first attempts ran out of time; a retry passed.
+
+**Difficulty.** lk-practice reads an item's difficulty in logits against the learner's ability (a newcomer's is 0)
+and aims tasks at 85% expected success, which is -1.73 for a newcomer, within 0.5. The writing model rates a task from
+-1 (easy for its stage) to 1 (hard), 0 typical; `toItemDifficulty` maps that to -1.73 ± 0.8, about 93% to 72% expected
+success. The admin page shows "expected success" rather than logits. (The first tasks, written with the rating as the
+difficulty, are rescaled once by the migration `rescale_task_difficulty`.)
+
+**Today's practice.** `/practice/<course>`, for enrolled learners (and admins), linked from the course page:
+
+- **The state.** `practice_learner` holds lk-practice's state for the learner and course, a cache of the log in
+  `practice_log_entry` (append-only). When a new graph version has been published, the state is rebuilt from the log
+  with `replay`.
+- **The daily set.** Planned once per day, in the learner's time zone: `plan` with the learner's state, the skills of
+  the lessons they've completed as `focusSkills`, the proven tasks as the pool, a budget of 8 tasks and 15 minutes, and
+  at most 3 new skills. While a pool is thin, a target with no task within lk-practice's tolerance gets the closest
+  proven task for the same skill and stage. A target with no task at all waits for the pool.
+- **Answering.** Choice, fill and predict are graded against the key; code and debug run on the grader. A code task can
+  be run as often as the learner likes: each run shows which tests fail, and the answer is recorded when every test
+  passes (with the number of runs as `attempts`, so a fix after a failed run counts as harder) or when they give up.
+  Each answer becomes lk-practice evidence (`auto`, with the score, the time taken and the attempts); the new state and
+  the appended log entries are saved with the answer in one transaction. The learner then sees whether it was right,
+  the key or the tests, and the explanation.
+- **Done for today**, with how many were right, and "a few more": up to 4 tasks on the skills already started, at their
+  current stage, never new skills (the daily cap holds); lk-practice counts one sitting as one review, so these move
+  ability, not the schedule.
+- Learners only ever receive a task's question side: never its key, tests or solutions.
+
+Tried on 2026-11-06 locally (production build, Spanish, dark, desktop and phone): with lesson 00.01 completed, the plan
+gave 3 new skills (the daily cap), each with a task; a right and a wrong answer were recorded as evidence (3 log
+entries, 3 skills in the state); reloading gave the same set; "done for today" with the score; "a few more" gave a set
+on the started skills; a debug task failed 2 of 4 tests on its buggy code, then passed all 4 after the fix, recorded with
+2 attempts; no sideways scroll at 375 px. The first version planned nothing: the tasks sat at difficulty 0, outside
+lk-practice's tolerance of its -1.73 target, which led to the difficulty mapping and the closest-task fallback above.
 
 **Node.js.** lk-practice declares Node.js 24 or later. It ran the same on Node 22 (graph check, plan, status), but the
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built

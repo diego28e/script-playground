@@ -30,6 +30,7 @@ model User {
   tutorSessions      TutorSession[]
   learnerMemory      LearnerMemory[]
   practiceRequests   PracticeRequest[]
+  practiceLearners   PracticeLearner[]
 
   @@map("user")
 }
@@ -124,25 +125,26 @@ model Label {
 // Courses are imported from their own repositories (scripts/import-course.ts): modules and lessons are matched by
 // slug on every import and updated in place, so a student's progress survives a re-import.
 model Course {
-  id             String              @id @default(cuid())
-  slug           String              @unique
-  title          String
-  summary        String?
+  id               String              @id @default(cuid())
+  slug             String              @unique
+  title            String
+  summary          String?
   // The language the course's content is written in (BCP 47), e.g. "en".
-  language       String              @default("en")
-  status         CourseStatus        @default(DRAFT)
-  sourceRepoUrl  String?
+  language         String              @default("en")
+  status           CourseStatus        @default(DRAFT)
+  sourceRepoUrl    String?
   // The commit the course was last imported from.
-  sourceRef      String?
-  importedAt     DateTime?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  modules        CourseModule[]
-  enrollments    Enrollment[]
+  sourceRef        String?
+  importedAt       DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  modules          CourseModule[]
+  enrollments      Enrollment[]
   // The practice engine's skill graph (docs/practice.md).
-  practiceSkills PracticeSkill[]
-  skillGraphs    SkillGraphVersion[]
-  practiceTasks  PracticeTask[]
+  practiceSkills   PracticeSkill[]
+  skillGraphs      SkillGraphVersion[]
+  practiceTasks    PracticeTask[]
+  practiceLearners PracticeLearner[]
 
   @@map("course")
 }
@@ -770,8 +772,80 @@ model PracticeTask {
   contentHash     String
   createdAt       DateTime           @default(now())
   course          Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  answers         PracticeAnswer[]
 
   @@unique([courseId, contentHash])
   @@index([courseId, skillKey, stage, status])
   @@map("practice_task")
+}
+
+// A learner's practice in one course (docs/practice.md, "A session"). lk-practice's state is a cache of the log: the
+// log is the truth, and a new graph version is applied by replaying it.
+model PracticeLearner {
+  id           String             @id @default(cuid())
+  userId       String
+  courseId     String
+  // The published graph version the state is built on.
+  graphVersion Int
+  state        Json
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course       Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  log          PracticeLogEntry[]
+  sessions     PracticeSession[]
+
+  @@unique([userId, courseId])
+  @@map("practice_learner")
+}
+
+// lk-practice's append-only log (ReviewLogEntry), in order.
+model PracticeLogEntry {
+  id        String          @id @default(cuid())
+  learnerId String
+  seq       Int
+  entry     Json
+  at        DateTime
+  learner   PracticeLearner @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+
+  @@unique([learnerId, seq])
+  @@map("practice_log_entry")
+}
+
+// One day's practice for a learner: the planned tasks, in order. "A few more" after the daily set is another session
+// marked extra.
+model PracticeSession {
+  id          String           @id @default(cuid())
+  learnerId   String
+  // The learner's own date (YYYY-MM-DD, in their time zone).
+  day         String
+  extra       Boolean          @default(false)
+  // [{ targetId, taskId, skillKey, stage, kind }] (lib/practice/learner.ts SessionItem).
+  items       Json
+  createdAt   DateTime         @default(now())
+  completedAt DateTime?
+  learner     PracticeLearner  @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  answers     PracticeAnswer[]
+
+  @@index([learnerId, day])
+  @@map("practice_session")
+}
+
+// A learner's answer to one task, with what the page showed them back.
+model PracticeAnswer {
+  id         String          @id @default(cuid())
+  sessionId  String
+  taskId     String
+  answer     Json
+  passed     Boolean
+  score      Float
+  durationMs Int
+  // The grading the learner saw: tests and their messages, output, or the key.
+  result     Json
+  createdAt  DateTime        @default(now())
+  session    PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  task       PracticeTask    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, taskId])
+  @@map("practice_answer")
 }

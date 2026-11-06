@@ -237,6 +237,19 @@ async function proveByModel(task: TaskContent, writer: string, userId: string, d
   return { ok: true, proof: { kind: "model-checked", at: Date.now(), model: result.model, agreed: true }, note: `${result.model} agreed` };
 }
 
+/**
+ * The writing model rates a task from -1 (easy for its stage) to 1 (hard); 0 is typical. lk-practice's difficulty is in
+ * logits against the learner's ability (a newcomer's is 0), and its planner aims tasks at 85% expected success, which
+ * is -1.73 for a newcomer. So a typical task maps to -1.73, and -1..1 to about 93% .. 72% expected success.
+ */
+export function toItemDifficulty(rated: number): number {
+  const clamped = Math.min(Math.max(rated, -1.5), 1.5);
+  return Math.round((clamped * 0.8 - 1.73) * 100) / 100;
+}
+
+/** A newcomer's chance of getting a task right, from its lk-practice difficulty (shown on the admin page). */
+export const expectedSuccess = (difficulty: number) => 1 / (1 + Math.exp(difficulty));
+
 export type GenerateResult =
   | { ok: true; taskId: string; form: TaskForm; model: string; note: string }
   | { ok: false; error: string; taskId?: string; form?: TaskForm; model?: string };
@@ -327,7 +340,7 @@ export async function generateTask(input: {
   const taskId = randomUUID();
   const contentHash = createHash("sha256").update(JSON.stringify([form, task.promptEn, task.code ?? "", task.optionsEn ?? []])).digest("hex");
   const expectedSeconds = Math.round(Math.min(Math.max(task.expectedSeconds, 15), 600));
-  const difficulty = Math.min(Math.max(task.difficulty, -1.5), 1.5);
+  const difficulty = toItemDifficulty(task.difficulty);
 
   let item: PracticeItem | null = null;
   let reason = proof.ok ? null : proof.reason;

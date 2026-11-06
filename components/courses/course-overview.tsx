@@ -26,6 +26,7 @@ const COPY = {
         enrolling: "Inscribiendo…",
         continueWith: (code: string) => `Continuar con ${code}`,
         allDone: "Repasar el curso",
+        practice: "Practicar hoy",
         repository: "Ver en GitHub",
         progress: (done: number, total: number) => `${done} de ${total} lecciones completadas`,
         module: "Módulo",
@@ -49,6 +50,7 @@ const COPY = {
         enrolling: "Enrolling…",
         continueWith: (code: string) => `Continue with ${code}`,
         allDone: "Review the course",
+        practice: "Practise today",
         repository: "View on GitHub",
         progress: (done: number, total: number) => `${done} of ${total} lessons completed`,
         module: "Module",
@@ -162,6 +164,13 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
                         ) : (
                             <ShimmerButton href={`/courses/${course.slug}#${course.modules[0]?.slug ?? ""}`} tone="ink" size="lg">
                                 {t.allDone}
+                            </ShimmerButton>
+                        )}
+                        {signedIn && course.enrolled && (
+                            // Today's short practice set for this course (docs/practice.md).
+                            <ShimmerButton href={`/practice/${course.slug}`} tone="glass" size="lg" onHover>
+                                <Repeat className="size-4" strokeWidth={2.25} aria-hidden="true" />
+                                {t.practice}
                             </ShimmerButton>
                         )}
                         {course.sourceRepoUrl && (
