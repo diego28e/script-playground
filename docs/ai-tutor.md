@@ -23,7 +23,7 @@ Status: **draft for review** (decisions from the interview of 2026-11-05; open p
 | Proactive | Never speaks first. Only the panel and the two error buttons. |
 | Tone | Adapts to the learner: starts as a patient senior engineer, then follows the preferences it remembers. |
 | Language | The learner's language (Spanish or English); code, APIs and technical terms stay in English, as in the course. |
-| Model and cost | The free Gemini models first (`gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite`), then DeepSeek V4.1 Flash (`deepseek-flash`, paid, capped at 200 requests a day); every request in a ledger. |
+| Model and cost | The free Gemini models first (`gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite`), then DeepSeek V4.1 Flash (`deepseek-flash`, paid, capped at 200 requests a day); every request in a ledger. Admins can choose the model the chain starts at, from the panel. |
 
 ### A help request, step by step
 
@@ -221,13 +221,35 @@ from AI Studio before this is built.
 
 | Part | Where | Status |
 |---|---|---|
-| Free-tier quota and ledger for every Gemini call (tutor and platform) | `lib/ai/quota.ts`, `lib/ai/gemini.ts`, table `ai_request` | Built, local |
-| Tutor tables | migration `add_ai_tutor` | Built, local |
+| Free-tier quota and ledger for every Gemini call (tutor and platform) | `lib/ai/quota.ts`, `lib/ai/gemini.ts`, table `ai_request` | Deployed 2026-11-06 |
+| Tutor tables | migration `add_ai_tutor` | Deployed 2026-11-06 |
 | Tutor core: prompt, context, actions, state rules, memory, practice | `lib/tutor/` | Built and tried against Gemini locally (below) |
-| Gemini 3.8 Flash first, DeepSeek V4.1 Flash as the tutor's last fallback | `lib/ai/gemini.ts`, `lib/ai/deepseek.ts` | Built; DeepSeek waits for its key |
-| Learning service | `services/learning`, `infra/lab/learning`, `pnpm learning:build` | Built and tried (below) |
-| Server extension | `infra/lab/tutor`, installed by the student image (`infra/lab/Dockerfile`) | Built and tried (below) |
-| JupyterLab panel and buttons | `infra/lab/tutor/labextension`, built inside the student image | Built and tried in a real lab (below) |
+| Gemini 3.8 Flash first, DeepSeek V4.1 Flash as the tutor's last fallback | `lib/ai/gemini.ts`, `lib/ai/deepseek.ts` | Deployed 2026-11-06 |
+| Learning service | `services/learning`, `infra/lab/learning`, `pnpm learning:build` | Deployed 2026-11-06 on the lab server |
+| Server extension | `infra/lab/tutor`, installed by the student image (`infra/lab/Dockerfile`) | Deployed 2026-11-06 (image `lab-lc-mastery:2026-11-06`) |
+| JupyterLab panel and buttons | `infra/lab/tutor/labextension`, built inside the student image | Deployed 2026-11-06; answered in the production lab |
+| Model choice for admins | the panel's Model list; `chainStartingAt` in `lib/ai/gemini.ts`; `lib/tutor/harness.ts` | Built and tried in a local lab (below) |
+
+**Choosing the model (admins).** A platform admin (the hub's `lab-admin`) gets a Model list under Guide me / Show me:
+"Automatic (waterfall)", the chain as it is, or a model to start at. The chain then starts at that model, goes on with
+the ones after it, then wraps to the ones before it: choosing Gemini 3.6 Flash tries 3.6 Flash, both Flash-Lite
+models, DeepSeek, then 3.8 Flash; choosing DeepSeek falls back to the free models from the top. The chosen model is
+tried even while it cools down, since that is what was asked. Each reply then names the model that wrote it, and the
+chosen one when it didn't answer ("Gemini 3.1 Flash-Lite (instead of Gemini 3.6 Flash)"). The choice is kept per
+browser (`localStorage`), and the service ignores it from anyone who isn't an admin, so learners can't move their
+turns to the paid model.
+
+Tried on 2026-11-06 in a local lab with lesson 00.01: the list showed the five models; choosing Gemini 3.6 Flash
+(whose request failed) answered with 3.1 Flash-Lite and said so; the choice survived a reload; an enrolled learner
+who sent a model got the chain as it is and no list.
+
+**Gemini 3.8 Flash on the free tier.** On 2026-11-06 it didn't answer at all for hours: a three-word prompt got no
+reply in 90 s, whatever the thinking level, so lowering the tutor's thinking would not help. It also refuses the
+MINIMAL thinking level the platform's other AI features ask for (400 "Thinking level MINIMAL is not supported"),
+which failed every one of their calls on it; the chain now sends it LOW instead (`minThinking`). After a timeout a
+model is skipped for 30 minutes (a refusal, 429 or 5xx: five minutes), so a learner pays the wait at most once per
+half hour. The free daily count is per Google project, while each database keeps its own ledger: local trials spend
+production's allowance (3.6 Flash's 20 requests were gone by 02:00 UTC), and Google's 429 then moves the chain on.
 
 Tried in the browser on 2026-11-06, in a lab container from the student image with lesson 00.05: the panel sits in the
 right sidebar; running a cell with a missing colon brought up "Explain this error" and "Suggest a fix"; the reply
@@ -240,8 +262,9 @@ saved the choice; reloading restored the conversation, steps and mode. What the 
 - **The harness decides the reply language.** After English messages, a lighter model kept answering in English to a
   Spanish question. The learner's words now decide (accents and common words), and the turn says "[Reply in
   Spanish.]"; a button press uses the platform language.
-- **A slow model is skipped for five minutes.** `gemini-3.8-flash`, when overloaded, hangs until the 12 s timeout
-  instead of refusing; after a timeout, a 429 or a 5xx, the chain skips that model for five minutes.
+- **A slow model is skipped for a while.** `gemini-3.8-flash`, when overloaded, hangs until the 12 s timeout
+  instead of refusing; after a timeout, a 429 or a 5xx, the chain skips that model (now 30 minutes after a timeout,
+  five after a refusal).
 - When both Flash models are spent or busy, `gemini-3.1-flash-lite` answers: it needs the rules stated plainly per
   turn, which is why the two decisions above moved into the harness.
 

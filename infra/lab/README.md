@@ -140,7 +140,9 @@ Each learner gets a **Tutor** panel in JupyterLab's right sidebar (the mortarboa
 2. **The learning service** (`learning/`), one container beside the hub, reachable only on the lab's network as
    `http://learning:8080`. It asks the hub who each request is for, runs the tutor, and keeps its sessions, memory
    and request ledger in the platform's database.
-3. **The models**: the free Gemini models first, then DeepSeek, paid (`lib/ai/gemini.ts` `TUTOR_CHAIN`).
+3. **The models**: the free Gemini models first, then DeepSeek, paid (`lib/ai/gemini.ts` `TUTOR_CHAIN`). A
+   platform admin also gets a Model list in the panel to start the chain at a chosen model; it still falls back
+   down the list, then wraps to the top.
 
 To deploy or update the learning service, build its bundle on your PC (`pnpm learning:build`, which writes
 `learning/dist/server.mjs` and `learning/schema.prisma`), copy `infra/lab` to the server as for the rest of the lab,

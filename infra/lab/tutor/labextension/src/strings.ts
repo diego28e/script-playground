@@ -30,6 +30,10 @@ const ES = {
   failed: 'El tutor no pudo responder. Inténtalo de nuevo en un momento.',
   modeFailed: 'No se pudo cambiar el modo.',
   practiceFailed: 'No se pudo programar la práctica.',
+  model: 'Modelo',
+  modelAuto: 'Automático (cascada)',
+  modelHelp: 'Empieza por este modelo; si falla, sigue con los siguientes de la lista y luego con los anteriores.',
+  insteadOf: (label: string) => `en lugar de ${label}`,
 };
 
 const EN: typeof ES = {
@@ -61,6 +65,10 @@ const EN: typeof ES = {
   failed: "The tutor couldn't answer. Try again in a moment.",
   modeFailed: "The mode couldn't be changed.",
   practiceFailed: "The practice couldn't be scheduled.",
+  model: 'Model',
+  modelAuto: 'Automatic (waterfall)',
+  modelHelp: 'Starts with this model; if it fails, it moves on to the ones after it in the list, then the ones before.',
+  insteadOf: (label: string) => `instead of ${label}`,
 };
 
 export const language: 'es' | 'en' = (navigator.language || '').toLowerCase().startsWith('es') ? 'es' : 'en';

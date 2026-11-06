@@ -9,6 +9,8 @@ export type Step = { text: string; status: 'todo' | 'stuck' | 'done' };
 export type Detour = { skill: string; stage: string };
 export type Offer = { skill: string; evidence: 'PASSED' | 'SKIPPED' };
 export type Cell = { type: 'code' | 'markdown'; source: string; output?: string };
+/** A model the tutor can start at: only admins get the list (SessionState.models). */
+export type ModelChoice = { id: string; label: string };
 
 export type TurnReply =
   | {
@@ -21,19 +23,22 @@ export type TurnReply =
       unlocked: number[];
       detours: Detour[];
       practiceOffers: Offer[];
+      model: string;
+      chosenModel: string | null;
     }
   | { ok: false; reason?: string; message: string; retryAt?: string };
 
 export type SessionState = {
   ok: boolean;
   mode: Mode;
+  models: ModelChoice[] | null;
   session: {
     id: string;
     objective: string | null;
     steps: Step[];
     unlocked: number[];
     detours: Detour[];
-    messages: { role: string; kind: string; content: string }[];
+    messages: { role: string; kind: string; content: string; model?: string | null }[];
   } | null;
 };
 
@@ -61,5 +66,6 @@ export const api = {
     cells: Cell[];
     activeCell: number;
     platformLanguage: 'es' | 'en';
+    model?: string;
   }) => call<TurnReply>('POST', 'turn', body),
 };

@@ -1,28 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import type { ActivityResult, LearnerResponse, MediaProgress } from "@intellectif/lk-core";
-import type { InteractiveVideoSlot } from "@intellectif/lk-react/components/InteractiveVideo";
+import { InteractiveVideo, type InteractiveVideoSlot } from "@intellectif/lk-react/components/InteractiveVideo";
 import "@intellectif/lk-react/theme/defaults.css";
 import "@intellectif/lk-react/theme/skin.css";
 import { saveVideoState, type VideoState } from "@/actions/lessons";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { LK_STRINGS_ES } from "@/lib/lk-strings-es";
-import { DotLoader } from "@/components/ui/dot-loader";
-
-// The player is drawn in the browser only: lk-react 23.7.1 numbers its element ids with a counter and checks
-// picture-in-picture support while rendering, so its server HTML never matches the browser's and React throws a
-// hydration error. The placeholder keeps the video's shape, so nothing jumps when it arrives.
-const InteractiveVideo = dynamic(() => import("@intellectif/lk-react/components/InteractiveVideo").then((module) => module.InteractiveVideo), {
-    ssr: false,
-    loading: () => (
-        <div className="grid aspect-video w-full place-items-center rounded-2xl bg-black">
-            <DotLoader className="text-white/70" />
-        </div>
-    ),
-});
 
 const COPY = {
     es: {
@@ -99,25 +85,26 @@ function useVideoState(lessonId: string, tracking: boolean, initialState: VideoS
 }
 
 /**
- * The box around either player. It watches the video's metadata to size the player to the picture (a vertical
- * video gets a narrow portrait frame instead of a strip in a 16:9 one), and it works around a race:
+ * The box around either player. It reads the video's size to fit the player to the picture: a vertical video gets a
+ * narrow portrait frame instead of a strip in a 16:9 one.
  *
- * lk-react 23.7.1 reads the video's length and applies the resume point in its `loadedmetadata` handler, and the
- * plain player resumes in its own. When the file is cached, the browser can load the metadata before React has
- * attached the player (a slow render, or before hydration for the server-rendered plain player), and React drops
- * events for an element it hasn't mounted yet: the learner starts at 0:00 with no length shown. When the <video>
- * appears with its metadata already loaded, this replays the event so the players' own handlers run.
+ * Both players are in the server's HTML, so a cached file's metadata can load before hydration, and React drops a
+ * `loadedmetadata` that fires then. The box reads the size itself when the video already has it. lk-react (23.7.2
+ * on) also reads its own metadata on mount; the plain player doesn't, so for it (`replay`) the box fires the event
+ * again and the player's handler resumes where the learner left off.
  */
-function usePlayerBox() {
+function usePlayerBox(replay: boolean) {
     const ref = useRef<HTMLDivElement>(null);
     const [portrait, setPortrait] = useState(false);
     useEffect(() => {
         const container = ref.current;
         if (!container) return;
         // Capture: media events don't bubble, but they do pass through ancestors on the way down.
+        const readSize = (element: HTMLVideoElement) => {
+            if (element.videoWidth > 0) setPortrait(element.videoHeight > element.videoWidth);
+        };
         const onMetadata = (event: Event) => {
-            const element = event.target;
-            if (element instanceof HTMLVideoElement && element.videoWidth > 0) setPortrait(element.videoHeight > element.videoWidth);
+            if (event.target instanceof HTMLVideoElement) readSize(event.target);
         };
         container.addEventListener("loadedmetadata", onMetadata, true);
         let done = false;
@@ -126,7 +113,9 @@ function usePlayerBox() {
             if (!element || done) return;
             done = true;
             observer.disconnect();
-            if (element.readyState >= HTMLMediaElement.HAVE_METADATA) element.dispatchEvent(new Event("loadedmetadata"));
+            if (element.readyState < HTMLMediaElement.HAVE_METADATA) return;
+            if (replay) element.dispatchEvent(new Event("loadedmetadata"));
+            else readSize(element);
         };
         const observer = new MutationObserver(check);
         observer.observe(container, { childList: true, subtree: true });
@@ -135,7 +124,7 @@ function usePlayerBox() {
             observer.disconnect();
             container.removeEventListener("loadedmetadata", onMetadata, true);
         };
-    }, []);
+    }, [replay]);
     return { ref, portrait };
 }
 
@@ -148,7 +137,7 @@ export function LessonVideo({ video, lessonId, title, language, tracking, initia
     const t = COPY[language];
     const { initial, update } = useVideoState(lessonId, tracking, initialState, t.saveError);
     const onProgress = (progress: MediaProgress) => update((current) => ({ ...current, progress }), 4000);
-    const { ref: boxRef, portrait } = usePlayerBox();
+    const { ref: boxRef, portrait } = usePlayerBox(video.kind === "plain");
 
     if (video.kind === "plain") {
         return (

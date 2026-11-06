@@ -49,6 +49,26 @@
   outline-offset: 1px;
 }
 
+.jp-AcademiaTutor-model:not(:empty) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-AcademiaTutor-model select {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-AcademiaTutor-which {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .jp-AcademiaTutor-goal:not(:empty) {
   margin-top: 10px;
 }

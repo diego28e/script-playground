@@ -1,7 +1,7 @@
 import type { Content, ThinkingLevel } from "@google/genai";
 import type { Prisma, TutorMode } from "@prisma/client";
 import { z } from "zod";
-import { TUTOR_CHAIN, generateWithFallback, logAi } from "@/lib/ai/gemini";
+import { TUTOR_CHAIN, chainStartingAt, generateWithFallback, logAi } from "@/lib/ai/gemini";
 import { labGroups } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import { SYSTEM_PROMPT, buildContext, learnerTurn, type TurnContext } from "@/lib/tutor/prompt";
@@ -29,6 +29,8 @@ export const TutorRequestSchema = z.object({
   platformLanguage: z.enum(["es", "en"]).default("es"),
   // The learner switched Guide me / Show me in the panel.
   mode: z.enum(["GUIDE", "SHOW"]).optional(),
+  // The model to start the chain at (the panel's model list, which only admins get). Ignored for anyone else.
+  model: z.string().max(100).optional(),
 });
 export type TutorRequest = z.input<typeof TutorRequestSchema>;
 
@@ -45,7 +47,9 @@ export type TutorReply =
       // Detours closed in this turn: the panel offers "practise this in a few days" for each (recordPractice).
       practiceOffers: { skill: string; evidence: "PASSED" | "SKIPPED" }[];
       actions: AppliedAction[];
+      // The model that answered, and the one the admin chose to start at, if any (the panel shows both).
       model: string;
+      chosenModel: string | null;
       traceId: string;
     }
   | { ok: false; reason: "invalid" | "no-lab-access" | "quota" | "unavailable"; message: string; retryAt?: string; traceId?: string };
@@ -54,6 +58,17 @@ export type TutorReply =
 const SESSION_IDLE_MS = 12 * 3600_000;
 // The conversation the model sees, besides the context block: the latest exchanges of this session.
 const HISTORY_MESSAGES = 12;
+
+/** The models an admin can start the tutor at, in the chain's order: what the panel's model list shows. */
+export const TUTOR_MODELS = TUTOR_CHAIN.map(({ model, label }) => ({ id: model, label }));
+
+/**
+ * Admins (the hub's lab-admin) may choose the model the tutor starts at, to compare models or skip one that is down.
+ * Learners always get the chain as it is: the free models first, the paid one last, and no say in what it costs.
+ */
+function isLabAdmin(groups: string[]) {
+  return groups.includes("lab-admin");
+}
 
 async function courseContext(userId: string, notebookPath: string): Promise<{ lessonId: string | null; course: TurnContext["course"]; lesson: TurnContext["lesson"] }> {
   const lesson = await prisma.lesson.findFirst({
@@ -108,9 +123,11 @@ export async function runTutorTurn(userId: string, input: TutorRequest): Promise
   if (request.kind === "ask" && !request.message?.trim()) return { ok: false, reason: "invalid", message: "Write a question for the tutor." };
 
   // The tutor is part of the lab: the same people the hub admits.
-  if (!(await labGroups(userId)).includes("lab")) {
+  const groups = await labGroups(userId);
+  if (!groups.includes("lab")) {
     return { ok: false, reason: "no-lab-access", message: "The tutor is for learners enrolled in a course." };
   }
+  const chosenModel = isLabAdmin(groups) && TUTOR_CHAIN.some((entry) => entry.model === request.model) ? request.model! : null;
 
   const profile = request.mode
     ? await prisma.tutorProfile.upsert({ where: { userId }, create: { userId, mode: request.mode }, update: { mode: request.mode } })
@@ -156,7 +173,8 @@ export async function runTutorTurn(userId: string, input: TutorRequest): Promise
   const result = await generateWithFallback({
     feature: "tutor",
     pool: "TUTOR",
-    models: TUTOR_CHAIN,
+    models: chainStartingAt(TUTOR_CHAIN, chosenModel ?? undefined),
+    chosenFirst: chosenModel !== null,
     userId,
     contents,
     config: {
@@ -216,6 +234,7 @@ export async function runTutorTurn(userId: string, input: TutorRequest): Promise
     practiceOffers: actions.flatMap((action) => (action.applied && action.effect?.ended ? [action.effect.ended] : [])),
     actions,
     model: result.model,
+    chosenModel,
     traceId: result.traceId,
   };
 }
@@ -228,9 +247,12 @@ export async function recordPractice(userId: string, sessionId: string, skill: s
   return { ok: true as const };
 }
 
-/** What the panel shows when it opens: the learner's mode, and the current session for this notebook, if any. */
+/**
+ * What the panel shows when it opens: the learner's mode, the current session for this notebook, if any, and for
+ * admins the models they can start at (and which model wrote each reply).
+ */
 export async function getTutorSession(userId: string, notebookPath: string) {
-  const [profile, session] = await Promise.all([
+  const [profile, session, groups] = await Promise.all([
     prisma.tutorProfile.findUnique({ where: { userId }, select: { mode: true } }),
     prisma.tutorSession.findFirst({
       where: { userId, notebookPath, updatedAt: { gt: new Date(Date.now() - SESSION_IDLE_MS) } },
@@ -238,13 +260,16 @@ export async function getTutorSession(userId: string, notebookPath: string) {
       select: {
         id: true,
         state: true,
-        messages: { orderBy: { createdAt: "asc" }, take: 60, select: { role: true, kind: true, content: true, createdAt: true } },
+        messages: { orderBy: { createdAt: "asc" }, take: 60, select: { role: true, kind: true, content: true, model: true, createdAt: true } },
       },
     }),
+    labGroups(userId),
   ]);
   const state = readState(session?.state);
+  const admin = isLabAdmin(groups);
   return {
     mode: profile?.mode ?? ("GUIDE" as TutorMode),
+    models: admin ? TUTOR_MODELS : null,
     session: session
       ? {
           id: session.id,
@@ -252,7 +277,7 @@ export async function getTutorSession(userId: string, notebookPath: string) {
           steps: state.steps,
           unlocked: unlockedSteps(state),
           detours: state.detours.map((detour) => ({ skill: detour.skill, stage: detour.stage })),
-          messages: session.messages,
+          messages: session.messages.map(({ model, ...message }) => (admin ? { ...message, model } : message)),
         }
       : null,
   };

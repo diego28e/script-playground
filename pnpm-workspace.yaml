@@ -12,3 +12,9 @@ allowBuilds:
 # dependencies (pg-types, .prisma/client) and every database route returned 500. With a flat layout the
 # dependencies sit at node_modules/<name>, where the deployed function finds them.
 nodeLinker: hoisted
+
+# pnpm 11 installs a version only once it is a day old (minimumReleaseAge, 1440 minutes by default), and checks the
+# lockfile against that on every install, Amplify's included. This exempts one exact version of our own package,
+# published 2026-11-05 21:33 UTC; every other package and version still waits. Safe to delete from 2026-11-06 21:35 UTC.
+minimumReleaseAgeExclude:
+  - "@intellectif/lk-react@23.7.2"

@@ -42,8 +42,8 @@ importers:
         specifier: 1.10.1
         version: 1.10.1
       '@intellectif/lk-react':
-        specifier: 23.7.1
-        version: 23.7.1(@intellectif/lk-core@1.10.1)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)
+        specifier: 23.7.2
+        version: 23.7.2(@intellectif/lk-core@1.10.1)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)
@@ -913,8 +913,8 @@ packages:
     resolution: {integrity: sha512-Btv/Ug0gs1fpXd2LsBAhtu6Zej4NxROeYTY4dRgdiQ2QTg9QkMdDT9e7XhFtNZy5ByMRi49/Z3GpN6/QaefRSw==}
     engines: {node: '>=22'}
 
-  '@intellectif/lk-react@23.7.1':
-    resolution: {integrity: sha512-bmBD7gv96hbsjXkYqND+vsUcFlpBajFAaqgwvVvpBWETPZezxcrPSJrwxn/vFV+3D1l8u4hWotb85MFwq8YI3w==}
+  '@intellectif/lk-react@23.7.2':
+    resolution: {integrity: sha512-9noX8vQhmV5w70Mmh/LrtsO5y0p0FSUF+SrR4lKd3yII+6BYyE2zgEM0qJrxB25Jy/YIlk+MSg1eMtNZ02YZYw==}
     engines: {node: '>=22'}
     peerDependencies:
       '@intellectif/lk-core': ^1.10.1
@@ -1963,6 +1963,7 @@ packages:
 
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
+    deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
   '@unrs/resolver-binding-android-arm-eabi@1.11.1':
     resolution: {integrity: sha512-ppLRUgHVaGRWUx0R0Ut06Mjo9gBaBkg3v/8AxusGLhsIotbBLuRk51rAzqLC8gq6NyyAojEXglNjzf6R948DNw==}
@@ -2646,6 +2647,7 @@ packages:
   eslint@9.39.1:
     resolution: {integrity: sha512-BhHmn2yNOFA9H9JmmIVKJmd288g9hrVRDkdoIgRCRuSySRUHH7r/DI6aAXW9T1WwUuY3DFgrcaqB+deURBLR5g==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -2816,6 +2818,7 @@ packages:
 
   glob@10.5.0:
     resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
   globals@14.0.0:
@@ -5072,7 +5075,7 @@ snapshots:
     dependencies:
       zod: 4.6.5
 
-  '@intellectif/lk-react@23.7.1(@intellectif/lk-core@1.10.1)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)':
+  '@intellectif/lk-react@23.7.2(@intellectif/lk-core@1.10.1)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)':
     dependencies:
       '@intellectif/lk-core': 1.10.1
       react: 19.2.9
