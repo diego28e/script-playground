@@ -22,6 +22,10 @@ export const MODEL_LIMITS: Record<string, { rpm: number; rpd: number }> = {
   // Our own caps: 200 a day for the tutor (about US$0.50 at peak rates for its usual turn, about 7,000 tokens in and
   // 400 out) and 300 for authoring (about US$2 for drafting a whole course's skill graph twice over).
   "deepseek-flash": { rpm: 60, rpd: 500 },
+  // Claude, for authoring only, on the platform's Anthropic credit. Our own caps: drafting the whole course takes
+  // about 130 requests (about US$0.04 each on Opus 5.5 at low effort; check the drafting runs for real figures).
+  "claude-opus-5-5": { rpm: 30, rpd: 400 },
+  "claude-sonnet-5-5": { rpm: 30, rpd: 400 },
 };
 
 /**
@@ -34,6 +38,9 @@ const SHARES: Record<string, Partial<Record<Exclude<AiPool, "TUTOR">, number>>> 
   "gemini-3.1-flash-lite": { PLATFORM: 50, AUTHORING: 100 },
   "gemini-3.5-flash-lite": { PLATFORM: 50, AUTHORING: 100 },
   "deepseek-flash": { AUTHORING: 300 },
+  // All of Claude's allowance is authoring's: the tutor and the platform's features never use it.
+  "claude-opus-5-5": { AUTHORING: 400 },
+  "claude-sonnet-5-5": { AUTHORING: 400 },
 };
 
 /** Requests a day for each person, in the platform's other features. The tutor has no per-person count: its share is. */
@@ -47,6 +54,9 @@ const PRICES: Record<string, { input: number; output: number }> = {
   "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
   // Peak price; off-peak is half (deepSeekPeak). Input at the cache-miss price, so this is an upper bound.
   "deepseek-flash": { input: 0.3, output: 1.2 },
+  // Anthropic's pricing (2026-11-06). Thinking is billed as output and already counted in output tokens.
+  "claude-opus-5-5": { input: 4, output: 20 },
+  "claude-sonnet-5-5": { input: 2, output: 10 },
 };
 
 /** DeepSeek's peak hours: 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday. Everything else is half price. */

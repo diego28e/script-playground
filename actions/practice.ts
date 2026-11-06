@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { TUTOR_CHAIN } from "@/lib/ai/gemini";
+import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
 import { publishGraph } from "@/lib/practice/graph";
 
@@ -70,7 +70,7 @@ export async function getPracticeGraph() {
     },
   });
   return {
-    models: TUTOR_CHAIN.map(({ model, label }) => ({ id: model, label })),
+    models: AUTHORING_CHAIN.map(({ model, label }) => ({ id: model, label })),
     courses: courses.map(({ skillGraphs, ...course }) => ({ ...course, latest: skillGraphs[0] ?? null })),
   };
 }

@@ -1,6 +1,6 @@
 import { Type, type Content, type Schema, type ThinkingLevel } from "@google/genai";
 import { z } from "zod";
-import { TUTOR_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
+import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 
 // Drafting a lesson's practice skills (docs/practice.md, "The skill graph"): a model reads the lesson (objectives,
@@ -134,6 +134,8 @@ export type DraftResult =
  * (its id, and the prerequisites later lessons drew to it, are kept); skills the new draft no longer has are removed.
  */
 export async function draftLesson(lessonId: string, userId: string, model?: string): Promise<DraftResult> {
+  // The whole draft, models and fallbacks included, ends inside one Amplify request (reported to stop at about 30 s).
+  const deadline = Date.now() + 27_000;
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     select: {
@@ -186,13 +188,14 @@ export async function draftLesson(lessonId: string, userId: string, model?: stri
   ].join("\n\n");
   const contents: Content[] = [{ role: "user", parts: [{ text: context }, { text: "Propose this lesson's skills as the JSON object." }] }];
 
-  const chosen = TUTOR_CHAIN.some((entry) => entry.model === model) ? model : undefined;
+  const chosen = AUTHORING_CHAIN.some((entry) => entry.model === model) ? model : undefined;
   const result = await generateWithFallback({
     feature: "graph",
     pool: "AUTHORING",
     userId,
-    models: chainStartingAt(TUTOR_CHAIN, chosen),
+    models: chainStartingAt(AUTHORING_CHAIN, chosen),
     chosenFirst: Boolean(chosen),
+    deadline,
     contents,
     config: {
       systemInstruction: SYSTEM_PROMPT,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowRight, Check, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
@@ -31,9 +31,21 @@ type Lang = "es" | "en";
 type Filter = "all" | "todo" | "review" | "approved";
 type SkillRef = { id: string; key: string; labelEs: string; labelEn: string; lesson: string; order: number };
 
-// DeepSeek drafts noticeably better graphs than the free Flash-Lite models the authoring share falls back to, for
-// about US$0.004 a lesson; the list lets an admin choose otherwise.
-const DEFAULT_MODEL = "deepseek-flash";
+// Drafting starts with Claude Opus 5.5 (the platform's Anthropic credit); the list picks another starting model, and a
+// model that fails passes the lesson to the ones after it (lib/ai/gemini.ts AUTHORING_CHAIN). Kept per browser.
+const DEFAULT_MODEL = "claude-opus-5-5";
+const MODEL_KEY = "practice-draft-model";
+function subscribeStorage(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+function storedModel(): string | null {
+  try {
+    return localStorage.getItem(MODEL_KEY);
+  } catch {
+    return null;
+  }
+}
 const plain = (text: string) => text.replaceAll("`", "").replaceAll("**", "");
 const stateOf = (lesson: Lesson): Exclude<Filter, "all"> => (!lesson.practiceDraft ? "todo" : lesson.practiceDraft.status === "APPROVED" ? "approved" : "review");
 
@@ -91,7 +103,20 @@ function CourseReview({
     return refs;
   }, [lessons]);
 
-  const [model, setModel] = useState(DEFAULT_MODEL);
+  // The stored choice is read as an external store: null on the server and in the first render (so the two agree),
+  // the browser's value after hydration.
+  const stored = useSyncExternalStore(subscribeStorage, storedModel, () => null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const known = (value: string | null) => (value && models.some((entry) => entry.id === value) ? value : null);
+  const model = known(picked) ?? known(stored) ?? DEFAULT_MODEL;
+  const setModel = (value: string) => {
+    setPicked(value);
+    try {
+      localStorage.setItem(MODEL_KEY, value);
+    } catch {
+      // Storage can be blocked; the choice then lasts until the page reloads.
+    }
+  };
   const [lang, setLang] = useState<Lang>("es");
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -191,8 +216,12 @@ function CourseReview({
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             Model
-            <select value={model} onChange={(event) => setModel(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground">
-              <option value="">Automatic (free first)</option>
+            <select
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              title="Drafting starts with this model; if it fails, the next ones in the list take over."
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+            >
               {models.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.label}

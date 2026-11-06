@@ -119,6 +119,23 @@ offline. DeepSeek V4.1 Flash (about 7 s) covered every objective, judged runnabl
 questions only) and gave sensible prerequisites. The page therefore defaults to DeepSeek, at about US$0.004 a
 lesson (about US$0.60 for the whole course); its list can choose the free models instead.
 
+**Claude (2026-11-06).** Drafting now starts with Claude Opus 5.5, on the platform's Anthropic credit, and the page's
+list can start it at Claude Sonnet 5.5, DeepSeek or a free model instead (kept per browser). The authoring chain
+(`lib/ai/gemini.ts` `AUTHORING_CHAIN`) is Opus 5.5, Sonnet 5.5, DeepSeek, then the free models; a model that fails
+passes the lesson to the next, and a refused or missing key skips that provider's other models. Claude is called
+through the official SDK (`lib/ai/claude.ts`) with structured outputs (the draft's schema as JSON Schema, every
+object closed), streamed, at low effort (Opus 5.5 and Sonnet 5.5 always think; effort sets how much). Each Claude
+attempt stops at 25 s, because an Amplify request is reported to run about 30 s at most; a slower answer falls back to
+DeepSeek. The key is `ANTHROPIC_API_KEY`; Claude's whole quota is authoring's (400 requests a day on each model, our
+own cap), so the tutor and learners never use it.
+
+Tried on 2026-11-06 with lessons 00.04, 00.05 and 01.03. Opus 5.5: 18 to 21 s a lesson, 6 or 7 skills, the most
+precise (it told `dotenv_values` from `load_dotenv`, and marked live-service skills as questions only), about US$0.10
+a lesson (about 14,000 tokens in, 2,100 out; about US$13 for the course). Sonnet 5.5: 12 to 13 s, nearly the same
+skills, about US$0.05 a lesson (about US$6.50 for the course). DeepSeek: about 7 s, US$0.004. Because Opus's time
+is close to the limit, a whole draft has a 27 s deadline (`generateWithFallback`'s `deadline`): each attempt gets at
+most the time left, and a fallback with less than 6 s left is skipped rather than started.
+
 **Tried on 2026-11-06** with modules 00 and 01 (18 lessons) on DeepSeek: about 7.6 s a lesson, 5 to 7 skills each.
 Module 00 approved and published as `langchain-langgraph-mastery@1`: 52 skills, 72 prerequisites, accepted by
 `validateGraph` with no warnings; lk-practice planned a first session on it (28 skills ready, 24 locked behind

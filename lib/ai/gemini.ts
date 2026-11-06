@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ApiError, GoogleGenAI, type Content, type FunctionCall, type GenerateContentConfig, type ThinkingLevel } from "@google/genai";
 import type { AiPool } from "@prisma/client";
 import { checkQuota, finishRequest, startRequest } from "@/lib/ai/quota";
+import { ClaudeError, claudeGenerate } from "@/lib/ai/claude";
 import { DeepSeekError, deepSeekGenerate } from "@/lib/ai/deepseek";
 
 // Every Gemini call on the platform goes through generateWithFallback: one model chain, per-attempt timeouts, the
@@ -22,7 +23,7 @@ export type ModelEntry = {
   /** How the lab's tutor panel names it in its model list. */
   label: string;
   timeoutMs: number;
-  provider?: "gemini" | "deepseek";
+  provider?: "gemini" | "deepseek" | "anthropic";
   /** The lowest thinking level the model accepts, when it isn't MINIMAL (gemini-3.8-flash refuses MINIMAL with a 400). */
   minThinking?: "LOW";
 };
@@ -49,6 +50,18 @@ export const MODEL_CHAIN: ReadonlyArray<ModelEntry> = [
 export const TUTOR_CHAIN: ReadonlyArray<ModelEntry> = [
   ...MODEL_CHAIN,
   { model: "deepseek-flash", label: "DeepSeek V4.1 Flash", timeoutMs: 20_000, provider: "deepseek" },
+];
+
+/**
+ * Admins' authoring chain (drafting the practice skill graph): Claude first, on the platform's Anthropic credit, then
+ * DeepSeek, then the free models (only the Flash-Lite ones have an authoring share). Each Claude attempt stops at 25 s:
+ * an Amplify request may run about 30 s, so a slow answer falls back to DeepSeek rather than failing the request.
+ */
+export const AUTHORING_CHAIN: ReadonlyArray<ModelEntry> = [
+  { model: "claude-opus-5-5", label: "Claude Opus 5.5", timeoutMs: 25_000, provider: "anthropic" },
+  { model: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", timeoutMs: 25_000, provider: "anthropic" },
+  { model: "deepseek-flash", label: "DeepSeek V4.1 Flash", timeoutMs: 25_000, provider: "deepseek" },
+  ...MODEL_CHAIN,
 ];
 
 /**
@@ -81,10 +94,14 @@ type Attempt = {
   tokens?: Tokens;
 };
 
-// Worth trying the next model: the model is missing or retired, busy, slow, failing, or rejected a setting.
-// Not worth it: the key itself is refused (401/403), which every model would refuse the same way.
-function shouldFallBack(status: number | undefined) {
-  return status === undefined || ![401, 403].includes(status);
+// A refused key (401/403, or none set) fails every model of that provider the same way: the chain skips the rest of
+// that provider's models and moves on to the next provider. Anything else (missing or retired model, busy, slow,
+// failing, a rejected setting) is worth trying the next model for.
+// Below this, a model has no real chance to answer before the caller's deadline.
+const MIN_ATTEMPT_MS = 6_000;
+
+function keyRefused(status: number | undefined) {
+  return status === 401 || status === 403;
 }
 
 // A model that timed out or answered 429/5xx is skipped for a while, per server process. A refusal (429, 503 "high
@@ -111,6 +128,7 @@ export async function generateWithFallback({
   pool = "PLATFORM",
   models = MODEL_CHAIN,
   chosenFirst = false,
+  deadline,
 }: {
   feature: AiFeature;
   contents: Content[];
@@ -123,6 +141,11 @@ export async function generateWithFallback({
   models?: ReadonlyArray<ModelEntry>;
   /** Someone chose the first model (chainStartingAt): try it even while it cools down, since that is what they asked for. */
   chosenFirst?: boolean;
+  /**
+   * When the whole call must be done (epoch ms), e.g. inside a request the host stops after 30 s. Each attempt gets
+   * at most the time left, and a model is skipped when less than MIN_ATTEMPT_MS remains.
+   */
+  deadline?: number;
 }): Promise<AiResult> {
   const traceId = randomUUID();
   const started = Date.now();
@@ -167,9 +190,17 @@ export async function generateWithFallback({
   let retryAt: Date | null = null;
   // If every model is cooling down, try them all anyway: a cool-down is a guess, never a reason to fail.
   const allCooling = models.every(({ model }) => (coolingUntil.get(model) ?? 0) > Date.now());
+  const refusedProviders = new Set<string>();
   for (const [index, { model, timeoutMs, provider = "gemini", minThinking }] of models.entries()) {
     const attemptStarted = Date.now();
     const chosen = chosenFirst && index === 0;
+    if (refusedProviders.has(provider)) continue;
+    const left = deadline ? deadline - Date.now() : Infinity;
+    if (left < MIN_ATTEMPT_MS) {
+      log("info", { event: "ai.attempt", traceId, feature, attempt: index + 1, model, outcome: "deadline", userId });
+      break;
+    }
+    const attemptMs = Math.min(timeoutMs, left);
     if (!allCooling && !chosen && (coolingUntil.get(model) ?? 0) > Date.now()) {
       log("info", { event: "ai.attempt", traceId, feature, attempt: index + 1, model, outcome: "cooling", userId });
       continue;
@@ -190,8 +221,9 @@ export async function generateWithFallback({
       return finishRequest(requestId, { ok, model, tokens }).catch((error) => log("warn", { event: "ai.ledger", traceId, error: String(error) }));
     };
     try {
-      if (provider === "deepseek") {
-        const answer = await deepSeekGenerate(model, contents, config, AbortSignal.timeout(timeoutMs));
+      if (provider === "deepseek" || provider === "anthropic") {
+        const generate = provider === "deepseek" ? deepSeekGenerate : claudeGenerate;
+        const answer = await generate(model, contents, config, AbortSignal.timeout(attemptMs));
         const outcome: Attempt["outcome"] = answer.text ? "ok" : "empty";
         attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted, tokens: answer.tokens });
         await record(outcome === "ok", answer.tokens);
@@ -220,7 +252,7 @@ export async function generateWithFallback({
       const response = await ai.models.generateContent({
         model,
         contents,
-        config: { ...config, thinkingConfig, abortSignal: AbortSignal.timeout(timeoutMs) },
+        config: { ...config, thinkingConfig, abortSignal: AbortSignal.timeout(attemptMs) },
       });
       const candidate = response.candidates?.[0];
       const usage = response.usageMetadata;
@@ -258,7 +290,7 @@ export async function generateWithFallback({
       const timedOut =
         error instanceof Error &&
         (error.name === "TimeoutError" || error.name === "AbortError" || /AbortError|aborted/i.test(error.message));
-      const status = error instanceof ApiError || error instanceof DeepSeekError ? error.status : undefined;
+      const status = error instanceof ApiError || error instanceof DeepSeekError || error instanceof ClaudeError ? error.status : undefined;
       attempts.push({ model, outcome: timedOut ? "timeout" : "error", status, latencyMs: Date.now() - attemptStarted });
       if (!recorded) await record(false);
       coolDown(model, timedOut, status);
@@ -275,7 +307,7 @@ export async function generateWithFallback({
         // The provider's message (e.g. "high demand", "no longer available"), without the request.
         error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
       });
-      if (!timedOut && !shouldFallBack(status)) break;
+      if (!timedOut && keyRefused(status)) refusedProviders.add(provider);
     }
   }
   // Every model skipped for quota (none was even tried): say when the tutor or feature is back.
