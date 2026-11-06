@@ -9,7 +9,8 @@
     "lint": "eslint",
     "course:import": "tsx scripts/import-course.ts",
     "learning:build": "node scripts/build-learning.mjs",
-    "learning:dev": "tsx services/learning/dev.ts"
+    "learning:dev": "tsx services/learning/dev.ts",
+    "grader:check": "tsx scripts/grader-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.5.0",

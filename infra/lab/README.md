@@ -19,7 +19,8 @@ is a change to `.env`, not a rebuild (see [Opening up](#opening-up)).
 | `compose.yaml` | Runs the hub on `127.0.0.1:8000`, and the learning service on the lab's private network |
 | `tutor/` | The AI tutor in JupyterLab: the panel (`labextension/`, built inside the student image) and the server extension `academia_tutor`, which forwards to the learning service |
 | `learning/` | The learning service's image: the tutor's backend (`services/learning`), built with `pnpm learning:build`; its settings in `learning/.env` |
-| `.dockerignore` | Keeps `.env` files and the tutor's local build output out of the student image's build |
+| `grader/` | The practice grader: runs learners' code answers in throwaway containers from the student image, under gVisor (`grader/server.mjs`, `grader/harness.py`); its secret in `grader/.env` |
+| `.dockerignore` | Keeps `.env` files, the services' folders and the tutor's local build output out of the student image's build |
 | `nginx/lab.conf` | The host nginx site, with WebSocket support for kernels and terminals |
 | `.env.example` | The platform client, the server limit and the per-student limits |
 
@@ -152,6 +153,30 @@ create `learning/.env` from `learning/.env.example` (the platform's `DATABASE_UR
 
 To test on your PC, run the service with `HUB_API_URL=http://localhost:8100/hub/api pnpm learning:dev` against the
 local hub, and point a test lab container at it with `ACADEMIA_LEARNING_URL=http://host.docker.internal:8080`.
+
+## The practice grader
+
+The platform's practice engine (`docs/practice.md`) grades code answers here. `grader` is a small Node service on
+`127.0.0.1:8090`, served by nginx at `https://<lab domain>/grader/`; the platform signs every request with
+`GRADER_SECRET` (the same value in `grader/.env` and in Amplify), and requests older than five minutes are refused.
+
+Each answer runs in a fresh container from `LAB_IMAGE` (the course's own Python and packages): no network, read-only
+except a 16 MB `/tmp`, all capabilities dropped, no privilege gain, 256 MB of memory, one CPU, 64 processes, a time
+limit (15 s by default, 30 s at most), as the learner user, under gVisor (`runsc`, a sandbox kernel between the code and
+the server's). At most three run at once; thirty more may wait. The container is removed after every run, and on
+start the grader removes any left over. The grader holds the Docker socket like the hub, so it is root-equivalent on
+the host; learner code never runs in it.
+
+A run's answer is `{status, ok, tests, error, stdout, wallMs}`: `passed`, `failed` (a test's `assert` failed, with its
+message), `error` (the code raised), `timeout`, `oom` or `crashed`. `harness.py` runs the code, then every `test_*`
+function in the tests against it; it prints its result behind a per-run nonce, so printed text can't pass for it.
+Under gVisor, an answer that keeps about 20 or more processes alive at once is ended by the sandbox (`crashed`, exit
+code 2) instead of having a fork refused; zombies and threads don't trigger it. The answer is stopped in under a
+second and the grader carries on.
+
+Check a grader end to end from your PC with `pnpm grader:check` (right, wrong and hostile answers; it uses
+`GRADER_URL` and `GRADER_SECRET` from `.env.local`). On Docker Desktop, which has no gVisor, add `GRADER_RUNTIME=runc`
+to `infra/lab/.env`.
 
 ## Day to day
 

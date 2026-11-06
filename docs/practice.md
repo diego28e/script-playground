@@ -97,14 +97,16 @@ end of the phases that need them.
 | An authoring share of the AI quota, so admins' drafting never takes learners' requests | `lib/ai/quota.ts` (`AUTHORING`: 100 a day on each Flash-Lite model, 300 on DeepSeek, none on the two Flash models) | Built, local |
 | Drafting a lesson's skills | `lib/practice/draft.ts` | Built and tried (below) |
 | Publishing a version, checked by lk-practice | `lib/practice/graph.ts` | Built and tried (below) |
-| Admin page: draft, edit, prerequisites, approve, publish | `/admin/practice` (`actions/practice.ts`, `components/admin/practice-graph.tsx`) | Built; production build clean |
+| Admin page: draft, edit, prerequisites, approve, publish | `/admin/practice` (`actions/practice.ts`, `components/admin/practice-graph.tsx`) | Deployed (Amplify job 58) |
+| The grader on the lab server, and the platform's client for it | `infra/lab/grader` (`server.mjs`, `harness.py`), `lib/practice/grader.ts`, `pnpm grader:check` | Built and tried locally (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
 to review and done, and a search over lessons and skills), the chosen lesson on the right; each scrolls on its own.
 Skills read as text in one language at a time (Español / English); the pencil opens one for editing, with fields
 that grow to show all their text (Ctrl+Enter saves, Esc cancels). Prerequisites are coloured chips (hard, soft;
 click to switch, × to remove) and "Add" searches the skills before this one. "Approve and next" (key A) approves the
-lesson and opens the next one waiting for review. The chosen lesson is kept in the address (`?lesson=`). On a phone
+lesson and opens the next one waiting for review; "Approve all" (in the header, after a confirmation) approves
+every lesson waiting for review that has skills. The chosen lesson is kept in the address (`?lesson=`). On a phone
 the list sits above the lesson and picking one scrolls to it.
 
 **Drafting.** The model gets the course outline, the lesson's objectives and prerequisites, the notebook itself
@@ -140,6 +142,25 @@ most the time left, and a fallback with less than 6 s left is skipped rather tha
 Module 00 approved and published as `langchain-langgraph-mastery@1`: 52 skills, 72 prerequisites, accepted by
 `validateGraph` with no warnings; lk-practice planned a first session on it (28 skills ready, 24 locked behind
 prerequisites).
+
+**The grader.** A small Node service beside the hub (`infra/lab/README.md`, "The practice grader"), reached at
+`https://lab.academiadelcodigo.com/grader/` with a signed request. Each answer runs in a fresh container from the
+lab's student image, so tasks have exactly the course's packages: no network, read-only but `/tmp`, no capabilities,
+256 MB, one CPU, 64 processes, 15 s by default, and gVisor on the server (decided 2026-11-06: the server also runs
+other work, and gVisor puts a sandbox kernel between hostile code and the server's). The harness runs the answer, then
+the task's `test_*` functions, and returns each test's result and message.
+
+Tried on 2026-11-06 on Docker Desktop (runc, as gVisor runs on Linux only): a right answer passed in 0.5 s; a wrong one
+failed with the assert's message; a syntax error, network access and a write outside `/tmp` came back as errors; an
+infinite loop timed out; a memory bomb was stopped at 256 MB; a fork bomb hit the process limit; a printed fake
+result didn't pass; the hidden tests aren't in the answer's environment; an unsigned request got 401; no container was
+left behind. A LangChain answer with a fake chat model took 6.7 s on half a CPU and 1.9 s on one, so runs get one CPU.
+
+On the server (gVisor, 2026-11-06), `pnpm grader:check` passed: most answers in 0.3 s, the LangChain one in 2.6 s,
+the infinite loop stopped at 6 s, the memory bomb reported as out of memory. One difference from Docker's default
+runtime: a fork bomb isn't refused fork by fork; gVisor ends the whole answer once about 20 processes are alive at
+once (exit code 2), and the next answer runs normally. The grader reports it as `crashed`, saying the answer probably
+started too many processes. Short-lived forks, 80 zombies and 200 threads all ran.
 
 **Node.js.** lk-practice declares Node.js 24 or later. It ran the same on Node 22 (graph check, plan, status), but the
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built

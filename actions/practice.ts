@@ -99,6 +99,18 @@ export async function setLessonApproval(lessonId: string, approved: boolean): Pr
   return { success: true };
 }
 
+/** Approves every lesson of the course that waits for review and has skills; returns how many were approved. */
+export async function approveAllLessons(courseId: string): Promise<Result<{ approved: number }>> {
+  const session = await requireAdmin();
+  if (!session) return denied;
+  const { count } = await prisma.practiceLessonDraft.updateMany({
+    where: { status: "DRAFTED", lesson: { module: { courseId }, practiceSkills: { some: {} } } },
+    data: { status: "APPROVED", approvedAt: new Date(), approvedById: session.user.id },
+  });
+  refresh();
+  return { success: true, approved: count };
+}
+
 const SkillSchema = z.object({
   key: z.string().min(1).max(80),
   labelEs: z.string().trim().min(1).max(120),

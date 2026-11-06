@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRight, Check, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
+import { ArrowRight, Check, CheckCheck, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
 import {
   addSkill,
+  approveAllLessons,
   deleteSkill,
   draftLessonSkills,
   publishPracticeGraph,
@@ -141,6 +142,18 @@ function CourseReview({
   const [running, setRunning] = useState<string | null>(null);
   const stop = useRef(false);
   const [publishing, startPublish] = useTransition();
+  const [approvingAll, startApproveAll] = useTransition();
+
+  // Lessons with skills that still wait for review: what "Approve all" would approve.
+  const reviewable = lessons.filter((lesson) => stateOf(lesson) === "review" && lesson.practiceSkills.length > 0).length;
+  const approveAll = () => {
+    if (!window.confirm(`Approve all ${reviewable} lessons waiting for review? Any of them can go back to review later, and nothing reaches learners until you publish.`)) return;
+    startApproveAll(async () => {
+      const result = await approveAllLessons(course.id);
+      if (!result.success) toast.error(result.error);
+      else toast.success(`${result.approved} lessons approved.`);
+    });
+  };
 
   const draftRemaining = async () => {
     const todo = lessons.filter((lesson) => !lesson.practiceDraft);
@@ -238,6 +251,9 @@ function CourseReview({
               <Sparkles className="mr-2 h-4 w-4" /> Draft {counts.todo} remaining
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={approveAll} disabled={approvingAll || reviewable === 0 || Boolean(running)}>
+            <CheckCheck className="mr-2 h-4 w-4" /> {approvingAll ? "Approving…" : `Approve all ${reviewable}`}
+          </Button>
           <Button size="sm" onClick={publish} disabled={publishing || counts.approved === 0 || Boolean(running)}>
             <Upload className="mr-2 h-4 w-4" /> {publishing ? "Publishing…" : `Publish version ${(course.latest?.version ?? 0) + 1}`}
           </Button>

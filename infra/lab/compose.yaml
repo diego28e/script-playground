@@ -41,6 +41,26 @@ services:
     networks:
       - jupyterhub
 
+  # The practice grader (grader/server.mjs, docs/practice.md): runs learners' code answers in throwaway containers from
+  # the student image, with no network and the gVisor runtime. Loopback port only: nginx serves it at /grader/ on the
+  # lab's domain, and the platform signs every request with GRADER_SECRET (grader/.env).
+  grader:
+    build: grader
+    image: lab-grader:1
+    container_name: grader
+    restart: unless-stopped
+    env_file: grader/.env
+    environment:
+      GRADER_IMAGE: ${LAB_IMAGE}
+      GRADER_RUNTIME: ${GRADER_RUNTIME:-runsc}
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:${GRADER_PORT:-8090}:8080"
+    volumes:
+      # Starts and removes the grading containers. Root-equivalent on the host, like the hub's: no learner code runs here.
+      - /var/run/docker.sock:/var/run/docker.sock
+    mem_limit: 256m
+
 networks:
   jupyterhub:
     name: jupyterhub

@@ -5,6 +5,7 @@
 !.env.example
 learning/
 hub/
+grader/
 tutor/labextension/node_modules/
 tutor/labextension/lib/
 tutor/labextension/tsconfig.tsbuildinfo
