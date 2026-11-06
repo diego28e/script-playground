@@ -20,6 +20,7 @@ import {
   Palette,
 } from "lucide-react";
 import { Button } from "./button";
+import { usePrompt } from "./confirm-dialog";
 import "./rich-text-editor.css";
 
 interface RichTextEditorProps {
@@ -41,6 +42,7 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
     "#ec4899",
   ];
 
+  const { prompt, dialog } = usePrompt();
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -64,8 +66,16 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
 
   if (!editor) return null;
 
-  const addLink = () => {
-    const url = window.prompt("Enter URL:");
+  const addLink = async () => {
+    const url = await prompt({
+      title: "Add a link",
+      label: "Address",
+      placeholder: "https://…",
+      inputType: "url",
+      defaultValue: editor.getAttributes("link").href ?? "",
+      confirmLabel: "Add link",
+      validate: (value) => (/^(https?:\/\/|mailto:|\/)/i.test(value) ? null : "Start with https://, http://, mailto: or /."),
+    });
     if (url) {
       editor.chain().focus().setLink({ href: url }).run();
     }
@@ -73,6 +83,7 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
 
   return (
     <div className="border rounded-lg overflow-hidden bg-card">
+      {dialog}
       <div className="flex flex-wrap gap-1 p-2 border-b bg-muted/40">
         <Button
           type="button"

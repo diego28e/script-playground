@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
     Play,
     RotateCcw,
@@ -301,8 +302,15 @@ export function ChallengeEditor({
         }
     };
 
-    const handleReset = () => {
-        if (confirm("Reset to starter code? Your current progress will be lost.")) {
+    const { confirm, dialog: confirmDialog } = useConfirm();
+    const handleReset = async () => {
+        const ok = await confirm({
+            title: "Reset to the starter code?",
+            description: "Your current code for this challenge is replaced, and it can't be brought back.",
+            confirmLabel: "Reset",
+            tone: "danger",
+        });
+        if (ok) {
             setCode(initialCode);
             localStorage.removeItem(`challenge_${challengeId}_code`);
             setOutput([]);
@@ -387,6 +395,7 @@ export function ChallengeEditor({
 
     return (
         <div className="flex h-full flex-col">
+            {confirmDialog}
             {/* Toolbar */}
             <div className="flex items-center justify-between border-b border-code-border bg-code-panel px-2 py-2 md:px-4 shrink-0">
                 <div className="flex items-center gap-2">

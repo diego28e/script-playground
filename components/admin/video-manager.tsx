@@ -14,6 +14,7 @@ import {
   type VideoLessonList,
 } from "@/actions/videos";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -129,8 +130,16 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
     return () => clearTimeout(timer);
   }, [upload, lesson.title, router]);
 
-  const remove = () => {
-    if (!window.confirm("Take the video off this lesson? The files stay in S3.")) return;
+  const { confirm, dialog } = useConfirm();
+  const remove = async () => {
+    const ok = await confirm({
+      title: "Take the video off this lesson?",
+      detail: lesson.title.replaceAll("`", ""),
+      description: "Learners stop seeing it. The files stay in the media bucket, and you can upload a video again.",
+      confirmLabel: "Remove video",
+      tone: "danger",
+    });
+    if (!ok) return;
     startRemoving(async () => {
       const result = await removeLessonVideo(lesson.id).catch(() => null);
       if (!result?.success) {
@@ -145,6 +154,7 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
   const busy = upload?.status === "UPLOADING" || upload?.status === "ENCODING";
   return (
     <li className="px-4 py-3">
+      {dialog}
       <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 md:grid-cols-[3rem_minmax(0,1fr)_auto]">
         {lesson.video && lesson.video.kind !== "invalid" && lesson.video.poster ? (
           // eslint-disable-next-line @next/next/no-img-element -- a signed CloudFront URL, not an optimisable asset

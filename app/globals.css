@@ -306,3 +306,47 @@
   --lk-color-error: #f87171;
   --lk-color-warning: #fbbf24;
 }
+
+/* Action dialog (components/ui/confirm-dialog.tsx): the backdrop fades, the card rises and settles, the icon pops in
+   with one ring. Radix keeps a closing dialog mounted until its exit animation ends. */
+@keyframes action-dialog-fade-in { from { opacity: 0; } }
+@keyframes action-dialog-fade-out { to { opacity: 0; } }
+@keyframes action-dialog-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 14px)) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes action-dialog-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(0.98); }
+}
+@keyframes action-dialog-icon-pop {
+  0% { opacity: 0; transform: scale(0.5); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes action-dialog-icon-ring {
+  from { opacity: 0.35; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.8); }
+}
+.action-dialog { transform: translate(-50%, -50%); }
+.action-dialog[data-state="open"] { animation: action-dialog-in 260ms cubic-bezier(0.2, 0.9, 0.25, 1) both; }
+.action-dialog[data-state="closed"] { animation: action-dialog-out 150ms ease-in both; }
+.action-dialog-overlay[data-state="open"] { animation: action-dialog-fade-in 180ms ease-out both; }
+.action-dialog-overlay[data-state="closed"] { animation: action-dialog-fade-out 150ms ease-in both; }
+.action-dialog-icon { animation: action-dialog-icon-pop 460ms 90ms cubic-bezier(0.2, 0.9, 0.3, 1.25) both; }
+.action-dialog-icon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  pointer-events: none;
+  animation: action-dialog-icon-ring 900ms 260ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .action-dialog[data-state],
+  .action-dialog-overlay[data-state],
+  .action-dialog-icon,
+  .action-dialog-icon::after { animation: none; }
+  .action-dialog-icon::after { opacity: 0; }
+}

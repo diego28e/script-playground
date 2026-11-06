@@ -22,6 +22,7 @@ import { Challenge, Label as LabelType } from "@prisma/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { GripVertical, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { deleteChallenge, reorderChallenges } from "@/actions/challenges";
@@ -41,6 +42,7 @@ function SortableChallengeItem({
     onDeleted: (id: string) => void;
 }) {
     const [deleting, setDeleting] = useState(false);
+    const { confirm, dialog } = useConfirm();
     const {
         attributes,
         listeners,
@@ -60,7 +62,9 @@ function SortableChallengeItem({
     const handleDelete = async (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (deleting || !confirm(`Delete "${challenge.title}"? This can't be undone.`)) return;
+        if (deleting) return;
+        const ok = await confirm({ title: "Delete this challenge?", detail: challenge.title, description: "This can't be undone.", confirmLabel: "Delete", tone: "danger" });
+        if (!ok) return;
         setDeleting(true);
         try {
             const result = await deleteChallenge(challenge.id);
@@ -75,6 +79,7 @@ function SortableChallengeItem({
 
     return (
         <div ref={setNodeRef} style={style} className="mb-2">
+            {dialog}
             <Card className={cn("bg-card hover:bg-accent/5 transition-colors", isDragging && "border-primary")}>
                 <CardContent className="p-4 flex items-center gap-4">
                     <div

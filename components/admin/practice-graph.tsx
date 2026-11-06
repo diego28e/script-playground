@@ -17,6 +17,7 @@ import {
   type SkillInput,
 } from "@/actions/practice";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { cn } from "@/lib/utils";
@@ -146,8 +147,15 @@ function CourseReview({
 
   // Lessons with skills that still wait for review: what "Approve all" would approve.
   const reviewable = lessons.filter((lesson) => stateOf(lesson) === "review" && lesson.practiceSkills.length > 0).length;
-  const approveAll = () => {
-    if (!window.confirm(`Approve all ${reviewable} lessons waiting for review? Any of them can go back to review later, and nothing reaches learners until you publish.`)) return;
+  const { confirm, dialog } = useConfirm();
+  const approveAll = async () => {
+    const ok = await confirm({
+      title: "Approve every lesson waiting for review?",
+      detail: `${reviewable} ${reviewable === 1 ? "lesson" : "lessons"}`,
+      description: "Any of them can go back to review later, and nothing reaches learners until you publish a version.",
+      confirmLabel: "Approve all",
+    });
+    if (!ok) return;
     startApproveAll(async () => {
       const result = await approveAllLessons(course.id);
       if (!result.success) toast.error(result.error);
@@ -193,6 +201,7 @@ function CourseReview({
 
   return (
     <div className="space-y-5">
+      {dialog}
       {/* The course at a glance, and what applies to all of it. */}
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 rounded-2xl bg-muted/60 px-5 py-4">
         <div className="min-w-0 flex-1 space-y-2.5">
@@ -436,9 +445,19 @@ function LessonDetail({
   const state = stateOf(lesson);
   const usedLater = lesson.practiceSkills.reduce((sum, skill) => sum + skill._count.requiredBy, 0);
 
-  const draft = () =>
+  const { confirm, dialog } = useConfirm();
+  const draft = async () => {
+    if (lesson.practiceSkills.length) {
+      const ok = await confirm({
+        title: `Redraft ${lesson.code}?`,
+        detail: `${lesson.practiceSkills.length} skills replaced`,
+        description: `The model writes this lesson's skills again. A skill that keeps its key keeps its place${usedLater ? `, with the ${usedLater} prerequisite links later lessons draw to it` : ""}; your edits to the others are lost.`,
+        confirmLabel: "Redraft",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
     start(async () => {
-      if (lesson.practiceSkills.length && !window.confirm(`Redraft ${lesson.code}? Its skills are replaced; a skill that keeps its key keeps its place${usedLater ? ` and the ${usedLater} links later skills draw to it` : ""}.`)) return;
       const result = await draftLessonSkills(lesson.id, model || undefined);
       if (!result.success) toast.error(result.error);
       else {
@@ -446,6 +465,7 @@ function LessonDetail({
         if (result.dropped.length) toast.warning(`Left out: ${result.dropped.join("; ")}`, { duration: 12000 });
       }
     });
+  };
   const approve = (value: boolean) =>
     start(async () => {
       const result = await setLessonApproval(lesson.id, value);
@@ -472,6 +492,7 @@ function LessonDetail({
 
   return (
     <article id="lesson-detail" className="flex min-h-0 scroll-mt-4 flex-col overflow-hidden rounded-2xl bg-card">
+      {dialog}
       <header className="space-y-3 bg-muted/40 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -560,9 +581,21 @@ function SkillView({ skill, lang, skillRefs, onEdit }: { skill: Skill; lang: Lan
   const linked = new Set(skill.requires.map((edge) => edge.from.id));
   const candidates = [...skillRefs.values()].filter((entry) => own && entry.order < own.order && !linked.has(entry.id) && entry.id !== skill.id).reverse();
   const label = (ref: SkillRef | undefined, fallback: string) => (ref ? (lang === "es" ? ref.labelEs : ref.labelEn) : fallback);
+  const { confirm, dialog } = useConfirm();
+  const remove = async () => {
+    const ok = await confirm({
+      title: "Delete this skill?",
+      detail: skill.key,
+      description: `${lang === "es" ? skill.labelEs : skill.labelEn}${skill._count.requiredBy ? `. ${skill._count.requiredBy} later ${skill._count.requiredBy === 1 ? "skill loses" : "skills lose"} it as a prerequisite.` : "."}`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (ok) run(() => deleteSkill(skill.id));
+  };
 
   return (
     <li className={cn("group rounded-xl bg-muted/40 p-4 transition-opacity", pending && "opacity-60")}>
+      {dialog}
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-1.5">
           <h4 className="text-base font-semibold leading-snug">{lang === "es" ? skill.labelEs : skill.labelEn}</h4>
@@ -579,7 +612,7 @@ function SkillView({ skill, lang, skillRefs, onEdit }: { skill: Skill; lang: Lan
           <Button size="sm" variant="ghost" className="h-8 px-2" onClick={onEdit} aria-label={`Edit ${skill.key}`}>
             <Pencil className="h-4 w-4" />
           </Button>
-          <Button size="sm" variant="ghost" className="h-8 px-2 text-destructive" onClick={() => window.confirm(`Delete ${skill.key}?`) && run(() => deleteSkill(skill.id))} aria-label={`Delete ${skill.key}`}>
+          <Button size="sm" variant="ghost" className="h-8 px-2 text-destructive" onClick={() => void remove()} aria-label={`Delete ${skill.key}`}>
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
