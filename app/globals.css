@@ -350,3 +350,18 @@
   .action-dialog-icon::after { animation: none; }
   .action-dialog-icon::after { opacity: 0; }
 }
+
+/* Tooltip (components/ui/tip.tsx): fades in while rising a few pixels away from its trigger. */
+@keyframes tip-in-top { from { opacity: 0; transform: translateY(4px); } }
+@keyframes tip-in-bottom { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes tip-in-left { from { opacity: 0; transform: translateX(4px); } }
+@keyframes tip-in-right { from { opacity: 0; transform: translateX(-4px); } }
+@keyframes tip-out { to { opacity: 0; } }
+.tip-content[data-side="top"] { animation: tip-in-top 160ms ease-out both; }
+.tip-content[data-side="bottom"] { animation: tip-in-bottom 160ms ease-out both; }
+.tip-content[data-side="left"] { animation: tip-in-left 160ms ease-out both; }
+.tip-content[data-side="right"] { animation: tip-in-right 160ms ease-out both; }
+.tip-content[data-state="closed"] { animation: tip-out 100ms ease-in both; }
+@media (prefers-reduced-motion: reduce) {
+  .tip-content[data-side] { animation: none; }
+}

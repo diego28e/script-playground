@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { Tip } from "@/components/ui/tip";
 import { useLanguage } from "@/components/providers/language-provider";
 
 type Theme = "system" | "light" | "dark";
@@ -57,14 +58,15 @@ export function ThemeToggle() {
   const Icon = ICONS[theme];
   const label = LABELS[language][theme];
   return (
+    <Tip content={label} side="bottom">
     <button
       type="button"
       onClick={next}
       aria-label={label}
-      title={label}
       className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Icon className="size-4" aria-hidden="true" />
     </button>
+    </Tip>
   );
 }

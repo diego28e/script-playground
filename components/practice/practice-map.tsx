@@ -5,6 +5,7 @@ import { ArrowLeft, Layers, Lock, Repeat } from "lucide-react";
 import type { PracticeMapData } from "@/actions/practice-learner";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { cn } from "@/lib/utils";
 
 // The progress map (docs/practice.md, "What the learner sees"): every skill of the course, grouped by module and
@@ -206,7 +207,8 @@ function SkillTile({ skill, t, language, now }: { skill: Skill; t: (typeof COPY)
       <div className={cn("flex flex-wrap items-center justify-between gap-2 text-xs", filled ? "text-background/80" : "text-muted-foreground")}>
         <span>{t.status[status]}</span>
         {started && (
-          <span className="inline-flex items-center gap-1.5" title={skill.stage ? t.stage[skill.stage] : undefined}>
+          <Tip content={skill.stage ? t.stage[skill.stage] : null}>
+          <span className="inline-flex items-center gap-1.5">
             {skill.stage && <span className="sr-only">{t.stage[skill.stage]}</span>}
             {[1, 2, 3, 4].map((position) => (
               <span
@@ -216,6 +218,7 @@ function SkillTile({ skill, t, language, now }: { skill: Skill; t: (typeof COPY)
               />
             ))}
           </span>
+          </Tip>
         )}
       </div>
       {started && days !== null && (

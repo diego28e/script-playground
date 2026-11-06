@@ -6,6 +6,7 @@ import { ArrowRight, Check, Layers, ScanSearch, Undo2, X } from "lucide-react";
 import { addPracticeDiscovery, getPracticeDiscoveries, setPracticeDiscoveryStatus } from "@/actions/practice";
 import type { CourseDiscovery } from "@/lib/practice/discovery";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -33,9 +34,11 @@ export function PracticeDiscoveriesButton({ courseId, waiting }: { courseId: str
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} title="Prerequisites learners were missing, found by diagnoses and confirmed by probes">
-        <ScanSearch className="mr-2 h-4 w-4" /> Discovered{waiting ? ` (${waiting})` : ""}
-      </Button>
+      <Tip content="Prerequisites learners were missing, found by diagnoses and confirmed by probes">
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <ScanSearch className="mr-2 h-4 w-4" /> Discovered{waiting ? ` (${waiting})` : ""}
+        </Button>
+      </Tip>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85dvh] max-w-3xl overflow-y-auto">
           <DialogHeader>

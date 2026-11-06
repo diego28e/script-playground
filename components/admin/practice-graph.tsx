@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PracticeDiscoveriesButton } from "@/components/admin/practice-discoveries";
+import { Tip } from "@/components/ui/tip";
 import { TaskModelsContext } from "@/components/admin/practice-task-editor";
 import { SkillTasks } from "@/components/admin/practice-tasks";
 import { Input } from "@/components/ui/input";
@@ -266,18 +267,19 @@ function CourseReview({
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             Model
-            <select
-              value={model}
-              onChange={(event) => setModel(event.target.value)}
-              title="Drafting starts with this model; if it fails, the next ones in the list take over."
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-            >
-              {models.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.label}
-                </option>
-              ))}
-            </select>
+            <Tip content="Drafting starts with this model; if it fails, the next ones in the list take over.">
+              <select
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              >
+                {models.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+            </Tip>
           </label>
           {running ? (
             <Button variant="outline" size="sm" onClick={() => (stop.current = true)}>
@@ -289,9 +291,11 @@ function CourseReview({
             </Button>
           )}
           {!running && course.latest && (
-            <Button variant="outline" size="sm" onClick={writeMissing} disabled={missing.length === 0} title="One proven task for every stage of every published skill that has none yet">
-              <ListChecks className="mr-2 h-4 w-4" /> Write {missing.length} missing tasks
-            </Button>
+            <Tip wrap content="One proven task for every stage of every published skill that has none yet">
+              <Button variant="outline" size="sm" onClick={writeMissing} disabled={missing.length === 0}>
+                <ListChecks className="mr-2 h-4 w-4" /> Write {missing.length} missing tasks
+              </Button>
+            </Tip>
           )}
           {course.latest && <PracticeDiscoveriesButton courseId={course.id} waiting={course.discovered} />}
           <Button variant="outline" size="sm" onClick={approveAll} disabled={approvingAll || reviewable === 0 || Boolean(running)}>
@@ -444,7 +448,10 @@ function LessonRail({
                           active ? "bg-background font-medium text-foreground" : "text-foreground/80 hover:bg-background/60",
                         )}
                       >
-                        <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", STATE[state].dot)} title={STATE[state].label} />
+                        <Tip content={STATE[state].label} side="left">
+                          <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", STATE[state].dot)} aria-hidden="true" />
+                        </Tip>
+                        <span className="sr-only">{STATE[state].label}:</span>
                         <span className="w-10 shrink-0 tabular-nums text-muted-foreground">{lesson.code}</span>
                         <span className="min-w-0 flex-1 leading-snug">{plain(lesson.title)}</span>
                         {lesson.practiceSkills.length > 0 && <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{lesson.practiceSkills.length}</span>}
@@ -564,9 +571,11 @@ function LessonDetail({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {state === "review" && (
-            <Button size="sm" onClick={() => approve(true)} disabled={pending} title="Shortcut: A">
-              <Check className="mr-2 h-4 w-4" /> Approve and next <ArrowRight className="ml-1.5 h-4 w-4" />
-            </Button>
+            <Tip wrap content="Shortcut: A">
+              <Button size="sm" onClick={() => approve(true)} disabled={pending} aria-keyshortcuts="A">
+                <Check className="mr-2 h-4 w-4" /> Approve and next <ArrowRight className="ml-1.5 h-4 w-4" />
+              </Button>
+            </Tip>
           )}
           {state === "approved" && (
             <Button size="sm" variant="outline" onClick={() => approve(false)} disabled={pending}>
@@ -684,19 +693,22 @@ function SkillView({
           const ref = skillRefs.get(edge.from.id);
           const hard = edge.strength === "HARD";
           return (
-            <span key={edge.id} className={cn("inline-flex max-w-full items-center rounded-lg text-sm", hard ? "bg-rose-500/12 text-rose-900 dark:text-rose-100" : "bg-sky-500/12 text-sky-900 dark:text-sky-100")} title={`${edge.from.key}${edge.reason ? `: ${edge.reason}` : ""}`}>
-              <button
-                type="button"
-                onClick={() => run(() => setPrerequisite(skill.id, edge.from.id, hard ? "SOFT" : "HARD"))}
-                className="rounded-l-lg px-2 py-1 font-semibold hover:bg-black/5 dark:hover:bg-white/10"
-                title="Hard: locked until it is mastered. Soft: practised first. Click to switch."
-              >
-                {hard ? "Hard" : "Soft"}
-              </button>
+            <span key={edge.id} className={cn("inline-flex max-w-full items-center rounded-lg text-sm", hard ? "bg-rose-500/12 text-rose-900 dark:text-rose-100" : "bg-sky-500/12 text-sky-900 dark:text-sky-100")}>
+              <Tip content="Hard: locked until it is mastered. Soft: practised first. Click to switch.">
+                <button
+                  type="button"
+                  onClick={() => run(() => setPrerequisite(skill.id, edge.from.id, hard ? "SOFT" : "HARD"))}
+                  className="rounded-l-lg px-2 py-1 font-semibold hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  {hard ? "Hard" : "Soft"}
+                </button>
+              </Tip>
+              <Tip content={`${edge.from.key}${edge.reason ? `: ${edge.reason}` : ""}`}>
               <span className="truncate py-1 pr-1">
                 {ref?.lesson ? `${ref.lesson} ` : ""}
                 {label(ref, edge.from.labelEn)}
               </span>
+              </Tip>
               <button type="button" onClick={() => run(() => setPrerequisite(skill.id, edge.from.id, null))} className="rounded-r-lg px-1.5 py-1 opacity-60 hover:opacity-100" aria-label={`Remove ${edge.from.key}`}>
                 <X className="h-3.5 w-3.5" />
               </button>

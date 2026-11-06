@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
     Play,
@@ -400,36 +401,38 @@ export function ChallengeEditor({
             <div className="flex items-center justify-between border-b border-code-border bg-code-panel px-2 py-2 md:px-4 shrink-0">
                 <div className="flex items-center gap-2">
                     {!isMobile && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={onToggleDescription}
-                            className="text-code-muted hover:text-code-foreground"
-                            title={
-                                isDescriptionVisible ? "Hide description" : "Show description"
-                            }
-                        >
-                            {isDescriptionVisible ? (
-                                <ChevronLeft className="h-4 w-4" />
-                            ) : (
-                                <ChevronRight className="h-4 w-4" />
-                            )}
-                        </Button>
+                        <Tip content={isDescriptionVisible ? "Hide description" : "Show description"}>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={onToggleDescription}
+                                className="text-code-muted hover:text-code-foreground"
+                                aria-label={isDescriptionVisible ? "Hide description" : "Show description"}
+                            >
+                                {isDescriptionVisible ? (
+                                    <ChevronLeft className="h-4 w-4" />
+                                ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                )}
+                            </Button>
+                        </Tip>
                     )}
                     <span className="text-xs text-code-muted md:text-sm">script.js</span>
                 </div>
                 <div className="flex items-center gap-1 md:gap-2">
                     <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-code-muted hover:text-code-foreground"
-                                title="Settings"
-                            >
-                                <Settings className="h-4 w-4" />
-                            </Button>
-                        </DropdownMenuTrigger>
+                        <Tip content="Settings">
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-code-muted hover:text-code-foreground"
+                                    aria-label="Settings"
+                                >
+                                    <Settings className="h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                        </Tip>
                         <DropdownMenuContent
                             align="end"
                             className="w-56"
@@ -449,16 +452,18 @@ export function ChallengeEditor({
                     </DropdownMenu>
 
                     <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-code-muted hover:text-code-foreground"
-                                title={session ? "AI Assistant" : "AI Assistant (sign in to use)"}
-                            >
-                                <Sparkles className="h-4 w-4 text-spark" />
-                            </Button>
-                        </DropdownMenuTrigger>
+                        <Tip content={session ? "AI Assistant" : "AI Assistant (sign in to use)"}>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-code-muted hover:text-code-foreground"
+                                    aria-label="AI Assistant"
+                                >
+                                    <Sparkles className="h-4 w-4 text-spark" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                        </Tip>
                         <DropdownMenuContent
                             align="end"
                             className="w-56"
@@ -496,24 +501,28 @@ export function ChallengeEditor({
                         </DropdownMenuContent>
                     </DropdownMenu>
 
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleReset}
-                        className="text-code-muted hover:text-code-foreground"
-                        title="Reset to starter"
-                    >
-                        <RotateCcw className="h-4 w-4" />
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleFormat}
-                        className="text-code-muted hover:text-code-foreground"
-                        title="Format Code"
-                    >
-                        <AlignLeft className="h-4 w-4" />
-                    </Button>
+                    <Tip content="Reset to starter">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleReset}
+                            className="text-code-muted hover:text-code-foreground"
+                            aria-label="Reset to starter"
+                        >
+                            <RotateCcw className="h-4 w-4" />
+                        </Button>
+                    </Tip>
+                    <Tip content="Format code">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleFormat}
+                            className="text-code-muted hover:text-code-foreground"
+                            aria-label="Format code"
+                        >
+                            <AlignLeft className="h-4 w-4" />
+                        </Button>
+                    </Tip>
                     <Button
                         variant="ghost"
                         size="sm"
@@ -524,6 +533,17 @@ export function ChallengeEditor({
                         <Play className="h-4 w-4" />
                         <span className="hidden sm:inline ml-1">Run</span>
                     </Button>
+                    {/* Wrapped: the button is disabled until the code has run, and a disabled button gets no hover. */}
+                    <Tip
+                        wrap
+                        content={
+                            !hasRun
+                                ? "Run code first"
+                                : error
+                                    ? "Fix errors before submitting"
+                                    : "Submit your solution!"
+                        }
+                    >
                     <Button
                         variant={isSubmitReady ? "default" : "ghost"}
                         size="sm"
@@ -538,17 +558,11 @@ export function ChallengeEditor({
                                 : "text-code-muted hover:text-code-foreground opacity-60"
                             }
                         `}
-                        title={
-                            !hasRun
-                                ? "Run code first"
-                                : error
-                                    ? "Fix errors before submitting"
-                                    : "Submit your solution!"
-                        }
                     >
                         <Send className="h-4 w-4" />
                         <span className="hidden md:inline ml-1">Submit</span>
                     </Button>
+                    </Tip>
                 </div>
             </div>
             {/* Editor */}

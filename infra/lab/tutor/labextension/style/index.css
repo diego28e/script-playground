@@ -217,3 +217,50 @@
   cursor: wait;
   opacity: 0.6;
 }
+
+/* Tooltips (panel.ts tip()): below the element, aligned to its left edge so the narrow panel doesn't cut them off,
+   after a short delay, like the platform's. */
+.jp-AcademiaTutor [data-tip] {
+  position: relative;
+}
+
+.jp-AcademiaTutor [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--jp-ui-font-color0);
+  color: var(--jp-layout-color0);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: normal;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  opacity: 0;
+  transform: translateY(-3px);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out;
+}
+
+.jp-AcademiaTutor [data-tip]:hover::after,
+.jp-AcademiaTutor [data-tip]:focus-visible::after,
+.jp-AcademiaTutor [data-tip]:focus-within::after {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 300ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jp-AcademiaTutor [data-tip]::after {
+    transform: none;
+    transition: opacity 1ms 300ms;
+  }
+}

@@ -203,7 +203,7 @@ export class TutorPanel extends Widget {
       button.type = 'button';
       button.className = 'jp-AcademiaTutor-modeButton';
       button.textContent = label;
-      button.title = help;
+      tip(button, help);
       button.setAttribute('role', 'radio');
       button.setAttribute('aria-checked', String(this.mode === mode));
       button.addEventListener('click', () => void this.setMode(mode));
@@ -223,7 +223,8 @@ export class TutorPanel extends Widget {
     caption.textContent = t.model;
     const select = document.createElement('select');
     select.className = 'jp-mod-styled';
-    select.title = t.modelHelp;
+    // A select can't draw a tooltip of its own (no ::after): the label around it does.
+    tip(this.modelBox, t.modelHelp);
     for (const [id, label] of [['', t.modelAuto], ...this.models.map((model) => [model.id, model.label])]) {
       const option = document.createElement('option');
       option.value = id;
@@ -355,4 +356,13 @@ export class TutorPanel extends Widget {
     this.node.classList.toggle('jp-mod-busy', busy);
     this.refreshErrorBar();
   }
+}
+
+/**
+ * The panel's tooltip, drawn by style/index.css ([data-tip]): never the browser's `title`, whose look and timing are
+ * the operating system's. The text is also the element's accessible description.
+ */
+function tip(element: HTMLElement, text: string): void {
+  element.dataset.tip = text;
+  element.setAttribute('aria-description', text);
 }

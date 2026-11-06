@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { LanguageProvider } from "@/components/providers/language-provider";
 import { ThemeScript } from "@/components/theme/theme-script";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,8 +39,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <LanguageProvider>
-          {children}
-          <Toaster position="top-right" />
+          {/* Every tooltip on the platform (components/ui/tip.tsx) opens after the same short delay. */}
+          <TooltipProvider delayDuration={300}>
+            {children}
+            <Toaster position="top-right" />
+          </TooltipProvider>
         </LanguageProvider>
       </body>
     </html>

@@ -7,6 +7,7 @@ import { Archive, Check, ChevronDown, Pencil, Sparkles, X } from "lucide-react";
 import { getSkillTasks, retireTask, writeSkillTask, type SkillTask } from "@/actions/practice";
 import { TaskEditor } from "@/components/admin/practice-task-editor";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { cn } from "@/lib/utils";
@@ -146,9 +147,9 @@ function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRe
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-semibold text-foreground">{FORM_LABEL[task.form] ?? task.form}</span>
         <span>{task.stage}</span>
-        <span className="tabular-nums" title="A newcomer's chance of getting it right (lk-practice's difficulty, in logits)">
-          {Math.round(100 / (1 + Math.exp(task.difficulty)))}% expected success
-        </span>
+        <Tip content={`A newcomer's chance of getting it right (lk-practice's difficulty: ${task.difficulty} logits)`}>
+          <span className="tabular-nums">{Math.round(100 / (1 + Math.exp(task.difficulty)))}% expected success</span>
+        </Tip>
         <span className="tabular-nums">about {task.expectedSeconds} s</span>
         <span>{task.model}</span>
         {task.status === "PROVEN" ? (

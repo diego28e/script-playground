@@ -24,6 +24,7 @@ import { recordLessonOpened, setLessonCompleted } from "@/actions/lessons";
 import { enrollInCourse } from "@/actions/courses";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
+import { Tip } from "@/components/ui/tip";
 import { InlineCode } from "@/components/courses/inline-code";
 import { LessonVideo } from "@/components/courses/lesson-video";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
@@ -202,6 +203,8 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                             </ShimmerButton>
                         )}
                         {tracking ? (
+                            // Wrapped: ShimmerButton keeps its own ref, which a tooltip trigger needs.
+                            <Tip wrap content={completed ? t.undoHint : null}>
                             <ShimmerButton
                                 tone={completed ? "ink" : "glass"}
                                 size="lg"
@@ -210,11 +213,11 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                                 pending={saving}
                                 pendingLabel={t.saving}
                                 aria-pressed={completed}
-                                title={completed ? t.undoHint : undefined}
                             >
                                 {completed ? <Check className="size-4" strokeWidth={2.5} aria-hidden="true" /> : <CircleDashed className="size-4" aria-hidden="true" />}
                                 {completed ? t.completed : t.markComplete}
                             </ShimmerButton>
+                            </Tip>
                         ) : signedIn ? (
                             <ShimmerButton tone="glass" size="lg" onHover onClick={enroll} pending={enrolling} pendingLabel={t.enrolling}>
                                 {t.enrollToTrack}
