@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { LogOut, Shield, SquareCode } from "lucide-react";
+import { LogOut, Repeat, Shield, SquareCode } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useLanguage } from "@/components/providers/language-provider";
 import {
@@ -20,8 +20,8 @@ import { Button } from "@/components/ui/button";
 import { DotLoader } from "@/components/ui/dot-loader";
 
 const COPY = {
-    en: { challenges: "Challenges", admin: "Admin dashboard", signOut: "Log out", signingOut: "Logging out…", signOutError: "We couldn't log you out. Try again.", menu: "Account menu" },
-    es: { challenges: "Retos", admin: "Panel de administración", signOut: "Cerrar sesión", signingOut: "Cerrando sesión…", signOutError: "No pudimos cerrar tu sesión. Inténtalo de nuevo.", menu: "Menú de la cuenta" },
+    en: { challenges: "Challenges", practice: "Practice", admin: "Admin dashboard", signOut: "Log out", signingOut: "Logging out…", signOutError: "We couldn't log you out. Try again.", menu: "Account menu" },
+    es: { challenges: "Retos", practice: "Práctica", admin: "Panel de administración", signOut: "Cerrar sesión", signingOut: "Cerrando sesión…", signOutError: "No pudimos cerrar tu sesión. Inténtalo de nuevo.", menu: "Menú de la cuenta" },
 };
 
 export function UserDropdown() {
@@ -73,6 +73,12 @@ export function UserDropdown() {
                     <Link href="/challenges">
                         <SquareCode className="mr-2 h-4 w-4" />
                         <span>{t.challenges}</span>
+                    </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                    <Link href="/practice">
+                        <Repeat className="mr-2 h-4 w-4" />
+                        <span>{t.practice}</span>
                     </Link>
                 </DropdownMenuItem>
                 {(session.user as { role?: string }).role === "ADMIN" && (

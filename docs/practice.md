@@ -100,7 +100,8 @@ end of the phases that need them.
 | Admin page: draft, edit, prerequisites, approve, publish | `/admin/practice` (`actions/practice.ts`, `components/admin/practice-graph.tsx`) | Deployed (Amplify job 58) |
 | The grader on the lab server, and the platform's client for it | `infra/lab/grader` (`server.mjs`, `harness.py`), `lib/practice/grader.ts`, `pnpm grader:check` | Built and tried locally (below) |
 | Practice tasks: writing, the proof gate, the pool, and the admin view | `lib/practice/tasks.ts`, `lib/practice/config.ts`, migration `add_practice_tasks` (`practice_task`), the skill cards' Tasks panel and "Write N missing tasks" on `/admin/practice` | Deployed (Amplify job 62) |
-| Today's practice for learners: state and log, the daily set, grading, retries on code, a few more | `lib/practice/learner.ts`, `actions/practice-learner.ts`, `/practice/<course>` (`components/practice/practice-today.tsx`), migrations `add_practice_learners` and `rescale_task_difficulty`; a "Practise today" button on the course page | Built and tried locally (below) |
+| Today's practice for learners: state and log, the daily set, grading, retries on code, a few more | `lib/practice/learner.ts`, `actions/practice-learner.ts`, `/practice/<course>` (`components/practice/practice-today.tsx`), migrations `add_practice_learners` and `rescale_task_difficulty`; a "Practise today" button on the course page | Deployed (Amplify job 63) |
+| Entry from the tutor's requests; the due badge, streak and progress map; a `/practice` index | `lib/practice/learner.ts` (`focusSkills`, `practiceDue`, `practiceStreak`, `progressMap`), `components/practice/practice-nav-link.tsx`, `/practice`, `/practice/<course>/map` | Built and tried locally (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
 to review and done, and a search over lessons and skills), the chosen lesson on the right; each scrolls on its own.
@@ -219,6 +220,33 @@ entries, 3 skills in the state); reloading gave the same set; "done for today" w
 on the started skills; a debug task failed 2 of 4 tests on its buggy code, then passed all 4 after the fix, recorded with
 2 attempts; no sideways scroll at 375 px. The first version planned nothing: the tasks sat at difficulty 0, outside
 lk-practice's tolerance of its -1.73 target, which led to the difficulty mapping and the closest-task fallback above.
+
+**Entry and habit (phase 5).**
+
+- **Focus skills** are the skills of the lessons the learner has completed, plus those the tutor offered to practise.
+  A tutor request names a skill in words and the lesson it came from; it's matched to that lesson's skill with the
+  most words in common (key and both labels, lowercase, no accents, words of 3 letters or more). A request that matches
+  nothing is left out.
+- **The due badge.** "Práctica" in the header (and in the account menu, which is how phones get there) shows how many
+  tasks wait today: what's left of today's set, or, before it's planned, the reviews due plus the new skills waiting
+  that have a task (at most the daily cap). No planning and no model call; it's asked again on every page change and
+  after each answer.
+- **The streak:** days in a row with the daily set finished (with at least one answer), in the learner's time zone,
+  ending today, or yesterday while today's set isn't done. It shows under the course title on the practice page.
+- **The progress map** (`/practice/<course>/map`): every skill by module and lesson, coloured by lk-practice's status
+  (mastered, credited, reviewing, learning, ready, locked, suspended), with "comes with its lesson" for a skill
+  lk-practice would start but the learner hasn't reached; for a started skill, its rung on the ladder, when it comes
+  back and its recall.
+- **`/practice`** goes straight to the course when the learner has one with practice, and lists them otherwise.
+- **An empty daily set isn't kept:** one planned before the learner reached any skill (or before its tasks were
+  written) is planned again on the next visit, so a lesson completed later in the day counts the same day.
+
+Tried on 2026-11-06 locally (production build, Spanish, desktop and phone): with lessons 00.01 and 00.02 completed,
+the badge said 3 before planning, 2 once the set was planned (the planner's choice within 15 minutes), 1 after the
+first answer and none after the second; the streak went from "start your streak today" to "1 day in a row"; the map
+showed 2 learning (one rung, back tomorrow, 99% recall), 5 ready, 21 coming with their lesson and 24 locked. The
+first try found the empty-set problem above: the page had planned an empty set before the lessons were completed,
+and kept it for the day.
 
 **Node.js.** lk-practice declares Node.js 24 or later. It ran the same on Node 22 (graph check, plan, status), but the
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built

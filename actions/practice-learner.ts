@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { answerTask, localDay, todaysSession, tryCode, type Answer, type Feedback, type SessionItem } from "@/lib/practice/learner";
+import { answerTask, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
 
 // The learner's side of practice (/practice/<course>, docs/practice.md "A session"). Learners only ever get a task's
@@ -74,6 +74,7 @@ export async function getPracticeToday(courseSlug: string, timeZone: string, ext
         };
       }),
     today: { answered: doneToday.length, right: doneToday.filter((answer) => answer.passed).length },
+    streak: await practiceStreak(loaded.learner.id, day),
   };
 }
 export type PracticeToday = Extract<Awaited<ReturnType<typeof getPracticeToday>>, { success: true; ready: true }>;
@@ -121,3 +122,20 @@ export async function runPracticeCode(courseSlug: string, sessionId: string, tas
     return { success: false, error: error instanceof Error ? error.message : "The tests couldn't run. Try again." };
   }
 }
+
+/** The header's badge: what's left to practise today, per course. Zero for visitors and for courses without practice. */
+export async function getPracticeDue(timeZone: string) {
+  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
+  if (!session) return { total: 0, courses: [] as { slug: string; title: string; due: number }[] };
+  return practiceDue(session.user.id, timeZone);
+}
+
+/** The progress map: every skill of the course by module and lesson, with where the learner stands. */
+export async function getPracticeMap(courseSlug: string) {
+  const who = await learnerFor(courseSlug);
+  if ("error" in who) return { success: false as const, error: who.error ?? "Sign in to practise." };
+  const map = await progressMap(who.userId, who.course.id);
+  if (!map) return { success: true as const, ready: false as const, course: who.course };
+  return { success: true as const, ready: true as const, course: who.course, ...map };
+}
+export type PracticeMapData = Extract<Awaited<ReturnType<typeof getPracticeMap>>, { ready: true }>;

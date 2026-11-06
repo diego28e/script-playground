@@ -10,12 +10,13 @@ import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
+import { PracticeNavLink } from "@/components/practice/practice-nav-link";
 import { cn } from "@/lib/utils";
 import { LAB_URL } from "@/lib/lab";
 
 const COPY = {
-    en: { courses: "Courses", challenges: "Challenges", lab: "Lab", signIn: "Sign in", start: "Get started" },
-    es: { courses: "Cursos", challenges: "Retos", lab: "Laboratorio", signIn: "Entrar", start: "Empezar" },
+    en: { courses: "Courses", challenges: "Challenges", practice: "Practice", lab: "Lab", signIn: "Sign in", start: "Get started" },
+    es: { courses: "Cursos", challenges: "Retos", practice: "Práctica", lab: "Laboratorio", signIn: "Entrar", start: "Empezar" },
 };
 
 const NAV_LINK =
@@ -56,6 +57,7 @@ export function Navbar() {
                                 >
                                     {t.challenges}
                                 </Link>
+                                <PracticeNavLink label={t.practice} className={NAV_LINK} active={pathname.startsWith("/practice")} pathname={pathname} />
                                 <a href={LAB_URL} target="_blank" rel="noopener noreferrer" className={cn(NAV_LINK, "inline-flex items-center gap-1.5")}>
                                     {t.lab}
                                     <ExternalLink className="size-3.5" aria-hidden="true" />

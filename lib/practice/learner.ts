@@ -43,8 +43,11 @@ export async function loadLearner(userId: string, courseId: string) {
   const { graph } = latest.published;
   let learner = await prisma.practiceLearner.findUnique({ where: { userId_courseId: { userId, courseId } } });
   if (!learner) {
-    learner = await prisma.practiceLearner.create({
-      data: { userId, courseId, graphVersion: latest.version, state: practice.initState(userId, graph) as unknown as Prisma.InputJsonObject },
+    // An upsert: the header's badge and the practice page may both arrive first.
+    learner = await prisma.practiceLearner.upsert({
+      where: { userId_courseId: { userId, courseId } },
+      create: { userId, courseId, graphVersion: latest.version, state: practice.initState(userId, graph) as unknown as Prisma.InputJsonObject },
+      update: {},
     });
   } else if (learner.graphVersion !== latest.version) {
     const entries = await prisma.practiceLogEntry.findMany({ where: { learnerId: learner.id }, orderBy: { seq: "asc" }, select: { entry: true } });
@@ -59,12 +62,148 @@ export async function loadLearner(userId: string, courseId: string) {
 }
 
 /** Skills the learner may start: those of the lessons they've completed. */
-async function focusSkills(userId: string, courseId: string, published: PublishedGraph): Promise<string[]> {
-  const done = await prisma.lessonProgress.findMany({ where: { userId, status: "COMPLETED", lesson: { module: { courseId } } }, select: { lessonId: true } });
+/** Words of a label, for matching a tutor's request to a skill: lowercase, no accents, no short words. */
+function words(text: string): Set<string> {
+  return new Set(
+    text
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/[^a-z0-9_]+/)
+      .filter((word) => word.length > 2),
+  );
+}
+
+/**
+ * Skills the learner may start: those of the lessons they've completed, and those the tutor offered to practise (a
+ * request names a skill in words and the lesson it came from; it's matched to that lesson's skill with the most
+ * words in common, in either language).
+ */
+export async function focusSkills(userId: string, courseId: string, published: PublishedGraph): Promise<string[]> {
+  const [done, requests] = await Promise.all([
+    prisma.lessonProgress.findMany({ where: { userId, status: "COMPLETED", lesson: { module: { courseId } } }, select: { lessonId: true } }),
+    prisma.practiceRequest.findMany({ where: { userId, lessonId: { not: null } }, select: { skill: true, lessonId: true }, orderBy: { createdAt: "desc" }, take: 100 }),
+  ]);
   const lessons = new Set(done.map((row) => row.lessonId));
-  return Object.entries(published.skills)
-    .filter(([, meta]) => lessons.has(meta.lessonId))
-    .map(([key]) => key);
+  const focus = new Set(
+    Object.entries(published.skills)
+      .filter(([, meta]) => lessons.has(meta.lessonId))
+      .map(([key]) => key),
+  );
+  for (const request of requests) {
+    const asked = words(request.skill);
+    let best: { key: string; score: number } | null = null;
+    for (const [key, meta] of Object.entries(published.skills)) {
+      if (meta.lessonId !== request.lessonId) continue;
+      const own = words(`${key.replaceAll("-", " ")} ${meta.labelEs} ${meta.labelEn}`);
+      const score = [...asked].filter((word) => own.has(word)).length;
+      if (score > 0 && (!best || score > best.score)) best = { key, score };
+    }
+    if (best) focus.add(best.key);
+  }
+  return [...focus];
+}
+
+export type SkillProgress = {
+  key: string;
+  labelEs: string;
+  labelEn: string;
+  status: string;
+  stage: string | null;
+  due: number | null;
+  recall: number | null;
+};
+
+/** Every skill's status for the progress map, grouped by module and lesson in course order. */
+export async function progressMap(userId: string, courseId: string) {
+  const loaded = await loadLearner(userId, courseId);
+  if (!loaded) return null;
+  const { state, published } = loaded;
+  const at = Date.now();
+  const summary = practice.status(state, published.graph, at);
+  const focus = new Set(await focusSkills(userId, courseId, published));
+  const byKey = new Map(summary.skills.map((skill) => [skill.skillId, skill]));
+  const modules = await prisma.courseModule.findMany({
+    where: { courseId },
+    orderBy: { position: "asc" },
+    select: { position: true, title: true, lessons: { orderBy: { position: "asc" }, select: { id: true, code: true, title: true } } },
+  });
+  const skillsByLesson = new Map<string, SkillProgress[]>();
+  for (const [key, meta] of Object.entries(published.skills)) {
+    const skill = byKey.get(key);
+    // "ready" means lk-practice would start it: only for skills the learner has reached (their lesson, or the tutor).
+    const status = !skill ? "locked" : skill.status === "ready" && !focus.has(key) ? "upcoming" : skill.status;
+    const entry: SkillProgress = { key, labelEs: meta.labelEs, labelEn: meta.labelEn, status, stage: skill?.stage ?? null, due: skill?.due ?? null, recall: skill?.retrievability ?? null };
+    skillsByLesson.set(meta.lessonId, [...(skillsByLesson.get(meta.lessonId) ?? []), entry]);
+  }
+  const counts: Record<string, number> = {};
+  for (const list of skillsByLesson.values()) for (const skill of list) counts[skill.status] = (counts[skill.status] ?? 0) + 1;
+  return {
+    at,
+    counts,
+    modules: modules
+      .map((courseModule) => ({
+        position: courseModule.position,
+        title: courseModule.title,
+        lessons: courseModule.lessons.filter((lesson) => skillsByLesson.has(lesson.id)).map((lesson) => ({ code: lesson.code, title: lesson.title, skills: skillsByLesson.get(lesson.id)! })),
+      }))
+      .filter((courseModule) => courseModule.lessons.length),
+  };
+}
+
+/** Consecutive days with the daily set finished, ending today (or yesterday, while today's isn't done yet). */
+export async function practiceStreak(learnerId: string, today: string): Promise<{ days: number; doneToday: boolean }> {
+  const sessions = await prisma.practiceSession.findMany({
+    where: { learnerId, extra: false, completedAt: { not: null }, answers: { some: {} } },
+    select: { day: true },
+    orderBy: { day: "desc" },
+    take: 400,
+  });
+  const days = new Set(sessions.map((session) => session.day));
+  const step = (day: string) => {
+    const date = new Date(`${day}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - 1);
+    return date.toISOString().slice(0, 10);
+  };
+  const doneToday = days.has(today);
+  let cursor = doneToday ? today : step(today);
+  let count = 0;
+  while (days.has(cursor)) {
+    count += 1;
+    cursor = step(cursor);
+  }
+  return { days: count, doneToday };
+}
+
+/**
+ * What the header's badge counts: the tasks left in today's set, or, before it's planned, the reviews due plus the
+ * new skills waiting (at most the daily cap). Cheap: no planning, no task pool.
+ */
+export async function practiceDue(userId: string, timeZone: string) {
+  const learners = await prisma.practiceLearner.findMany({ where: { userId }, select: { id: true, courseId: true, course: { select: { slug: true, title: true } } } });
+  const enrolled = await prisma.enrollment.findMany({ where: { userId, course: { skillGraphs: { some: {} } } }, select: { courseId: true, course: { select: { slug: true, title: true } } } });
+  const day = localDay(timeZone);
+  const courses: { slug: string; title: string; due: number }[] = [];
+  for (const { courseId, course } of enrolled) {
+    const learner = learners.find((entry) => entry.courseId === courseId);
+    const session = learner ? await prisma.practiceSession.findFirst({ where: { learnerId: learner.id, day, extra: false }, select: { items: true, _count: { select: { answers: true } } } }) : null;
+    // An empty set is planned again on the next visit, so it counts like no set.
+    if (session && (session.items as unknown as SessionItem[]).length) {
+      courses.push({ ...course, due: Math.max(0, (session.items as unknown as SessionItem[]).length - session._count.answers) });
+      continue;
+    }
+    const loaded = await loadLearner(userId, courseId);
+    if (!loaded) continue;
+    const summary = practice.status(loaded.state, loaded.published.graph, Date.now());
+    const focus = new Set(await focusSkills(userId, courseId, loaded.published));
+    // A new skill only counts once it has a task to practise it with.
+    const withTasks = new Set(
+      (await prisma.practiceTask.findMany({ where: { courseId, status: "PROVEN", skillKey: { in: [...focus] } }, select: { skillKey: true }, distinct: ["skillKey"] })).map((task) => task.skillKey),
+    );
+    const fresh = summary.skills.filter((skill) => skill.status === "ready" && focus.has(skill.skillId) && withTasks.has(skill.skillId)).length;
+    courses.push({ ...course, due: summary.dueNow + Math.min(fresh, MAX_NEW_SKILLS) });
+  }
+  return { total: courses.reduce((sum, course) => sum + course.due, 0), courses };
 }
 
 const taskIdOf = (itemId: string) => itemId.replace(/^task:/, "");
@@ -76,8 +215,11 @@ export async function todaysSession(userId: string, courseId: string, day: strin
   const { learner, state, published } = loaded;
 
   const existing = await prisma.practiceSession.findFirst({ where: { learnerId: learner.id, day, extra }, orderBy: { createdAt: "desc" } });
-  // An extra set is planned anew each time the learner asks, once the previous one is finished.
-  if (existing && (!extra || !existing.completedAt)) return { session: existing, loaded };
+  // An extra set is planned anew each time the learner asks, once the previous one is finished. So is a daily set
+  // that came out empty (no skill reached yet, or no task for it): a lesson completed later today should count today.
+  const empty = existing && (existing.items as unknown as SessionItem[]).length === 0;
+  if (existing && !empty && (!extra || !existing.completedAt)) return { session: existing, loaded };
+  if (existing && empty && !extra) await prisma.practiceSession.deleteMany({ where: { id: existing.id } });
 
   const focus = await focusSkills(userId, courseId, published);
   const known = Object.keys(state.skills ?? {});

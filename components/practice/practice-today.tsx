@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { Editor } from "@monaco-editor/react";
-import { ArrowLeft, ArrowRight, Check, Play, RotateCcw, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Flame, Map as MapIcon, Play, RotateCcw, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { getPracticeToday, runPracticeCode, submitPracticeAnswer, type PracticeTaskView, type PracticeToday as Today } from "@/actions/practice-learner";
+import { PRACTICE_ANSWERED } from "@/components/practice/practice-nav-link";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -54,6 +55,9 @@ const COPY = {
     more: "Unos cuantos más",
     noMore: "No hay más por hoy. ¡Buen trabajo!",
     error: "No pudimos cargar tu práctica. Inténtalo de nuevo.",
+    streak: (days: number) => (days === 1 ? "1 día seguido" : `${days} días seguidos`),
+    noStreak: "Empieza tu racha hoy",
+    map: "Ver mi mapa",
   },
   en: {
     eyebrow: "Today's practice",
@@ -90,6 +94,9 @@ const COPY = {
     more: "A few more",
     noMore: "Nothing more for today. Well done!",
     error: "We couldn't load your practice. Try again.",
+    streak: (days: number) => (days === 1 ? "1 day in a row" : `${days} days in a row`),
+    noStreak: "Start your streak today",
+    map: "See my map",
   },
 };
 
@@ -136,8 +143,10 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
     };
   }, [fetchToday, apply]);
 
-  const answered = (taskId: string, answer: Answered) =>
+  const answered = (taskId: string, answer: Answered) => {
     setToday((current) => current && { ...current, items: current.items.map((item) => (item.id === taskId ? { ...item, answer } : item)) });
+    window.dispatchEvent(new Event(PRACTICE_ANSWERED));
+  };
 
   const more = async () => {
     setLoadingMore(true);
@@ -148,6 +157,8 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
   const items = today?.items ?? [];
   const done = items.filter((item) => item.answer).length;
   const finished = state === "ready" && index >= items.length;
+  // The streak was counted when the page loaded; finishing today's set here adds today to it.
+  const streak = today ? today.streak.days + (finished && items.length > 0 && !today.extra && !today.streak.doneToday ? 1 : 0) : 0;
 
   return (
     <div className="container mx-auto max-w-3xl px-4 py-10 md:py-14">
@@ -158,9 +169,20 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">{t.eyebrow}</p>
           <h1 className="mt-2 text-3xl font-light tracking-tight text-balance md:text-4xl">{courseTitle}</h1>
+          {state === "ready" && today && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+              <span className={cn("inline-flex items-center gap-1.5", streak > 0 ? "text-foreground" : "text-muted-foreground")}>
+                <Flame className={cn("size-4", streak > 0 && "text-ring")} aria-hidden="true" />
+                {streak > 0 ? t.streak(streak) : t.noStreak}
+              </span>
+              <Link href={`/practice/${courseSlug}/map`} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground hover:underline">
+                <MapIcon className="size-4" aria-hidden="true" /> {t.map}
+              </Link>
+            </div>
+          )}
         </div>
         {state === "ready" && items.length > 0 && (
-          <div className="min-w-40 text-right">
+          <div className="w-full sm:w-auto sm:min-w-40 sm:text-right">
             <p className="font-mono text-xs text-muted-foreground">{t.progress(done, items.length)}</p>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
               <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(done / items.length) * 100}%` }} />
