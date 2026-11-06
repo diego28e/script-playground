@@ -102,7 +102,8 @@ end of the phases that need them.
 | Practice tasks: writing, the proof gate, the pool, and the admin view | `lib/practice/tasks.ts`, `lib/practice/config.ts`, migration `add_practice_tasks` (`practice_task`), the skill cards' Tasks panel and "Write N missing tasks" on `/admin/practice` | Deployed (Amplify job 62) |
 | Today's practice for learners: state and log, the daily set, grading, retries on code, a few more | `lib/practice/learner.ts`, `actions/practice-learner.ts`, `/practice/<course>` (`components/practice/practice-today.tsx`), migrations `add_practice_learners` and `rescale_task_difficulty`; a "Practise today" button on the course page | Deployed (Amplify job 63) |
 | Entry from the tutor's requests; the due badge, streak and progress map; a `/practice` index | `lib/practice/learner.ts` (`focusSkills`, `practiceDue`, `practiceStreak`, `progressMap`), `components/practice/practice-nav-link.tsx`, `/practice`, `/practice/<course>/map` | Deployed (Amplify job 64) |
-| Missing prerequisites: diagnosis, probes, the learner's own graph, the admin's Discovered view | `lib/practice/discovery.ts`, `lib/practice/learner.ts` (`loadLearner`, `composeLearnerGraph`), migration `add_practice_discovery` (`practice_diagnosis`, `practice_found_skill`, `practice_discovered_edge`, `practice_learner.extensions`), `components/admin/practice-discoveries.tsx` | Built and tried locally (below) |
+| Missing prerequisites: diagnosis, probes, the learner's own graph, the admin's Discovered view | `lib/practice/discovery.ts`, `lib/practice/learner.ts` (`loadLearner`, `composeLearnerGraph`), migration `add_practice_discovery` (`practice_diagnosis`, `practice_found_skill`, `practice_discovered_edge`, `practice_learner.extensions`), `components/admin/practice-discoveries.tsx` | Deployed (Amplify job 65) |
+| Going back to earlier tasks; hints by DeepSeek; editing a task by hand or with a model | `components/practice/practice-today.tsx`, `lib/practice/hints.ts`, `lib/practice/tasks.ts` (`aiEditTask`, `saveTaskEdit`), `components/admin/practice-task-editor.tsx`, migration `add_practice_hints` (`practice_hint`, `practice_task.editedFromId`) | Built and tried locally (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
 to review and done, and a search over lessons and skills), the chosen lesson on the right; each scrolls on its own.
@@ -302,6 +303,39 @@ notice; the groundwork card, the map tile and the admin dialog showed as describ
 skill and edge. Replaying that learner's log on a graph with the skill added kept all three verdicts and every entry.
 The first diagnosis named a course skill that builds on the blocked one, which `checkPrerequisiteHypothesis` refused
 as a cycle; since then the model isn't shown those skills.
+
+## Going back, hints and edits
+
+**Going back.** A row of numbered steps sits above the task: green for right, amber for wrong, outlined for the task
+still open (a probe shows a magnifier). The learner can open any task they've answered, with its answer, feedback and
+hints, and the first one still open; tasks after it stay locked until they get there. Each task also has "Previous".
+
+**Hints.** Before answering, "Hint" asks DeepSeek V4.1 Flash (then the free Gemini models, in the tutor's pool) for
+one or two sentences written for the learner's attempt so far: the option they lean towards, what they typed, or their
+code. Up to three a task, each more specific (hint 1 names the idea, 2 where to look, 3 nearly there), and 40 a learner
+in 24 hours. The model sees the key, to steer by, and is told never to give it or echo its wording. A hint that gives
+it away anyway is refused and asked for once more: for choice, fill and predict tasks by lk-core's `hintRevealsAnswer`
+(the check the OCW quizzes' AI hints use; a predict task's output counts as the answer), for code by any code block or
+line of the solution. Hints are kept (`practice_hint`), shown again when the learner goes back, and counted on the
+server into the answer's evidence (`hintsUsed`), so a hinted right answer counts for less; the page says so after
+answering. DeepSeek's daily cap went from 500 to 1,000 for this (300 still authoring's), at about US$0.0006 a hint.
+
+**Editing a task.** On `/admin/practice`, each task (proven or rejected) has "Edit": every field of its form (prompts,
+options and the right one, accepted answers, code, expected output, tests, solutions, explanations, difficulty and
+time). "Edit with AI" takes an instruction and a model from the authoring list (Claude Sonnet by default) and fills
+the fields with its rewrite; nothing is saved until the admin saves. Saving proves the task again like a new one: code
+on the grader, a question answered blind by a model other than the one that edited it (DeepSeek for a Claude edit,
+Sonnet for an edit by hand). When it passes it joins the pool as a new task (`editedFromId` points back) and the old
+one is retired, so past answers keep pointing at what learners saw; when it fails, the reason shows and nothing
+changes.
+
+Tried on 2026-11-06 locally (production build, Spanish): two DeepSeek hints on a choice task, each more specific; the
+answer's evidence recorded `hintsUsed: 2` and the page said so; "Previous" and the steps went back to it with its
+answer, feedback and hints, while the third task stayed locked. The first hints echoed the right option's wording, so
+the prompt now forbids that and keeps hint 1 general; after that, hint 1 on another task named the idea without the
+key's words. On the admin page, "make the options about the same length" with Sonnet came back in about 10 s, and saving
+it was proven by DeepSeek and retired the original; moving the right-option mark to a wrong option by hand was refused
+("claude-sonnet-5-5 answered 3, not the key") with nothing saved.
 
 **Node.js.** lk-practice declares Node.js 24 or later. It ran the same on Node 22 (graph check, plan, status), but the
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built

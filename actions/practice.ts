@@ -9,7 +9,7 @@ import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
 import { addDiscoveryToCourse, courseDiscoveries, setDiscoveryStatus, type CourseDiscovery } from "@/lib/practice/discovery";
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
 import { publishGraph, type PublishedGraph } from "@/lib/practice/graph";
-import { generateTask, type TaskContent, type TaskForm } from "@/lib/practice/tasks";
+import { aiEditTask, generateTask, saveTaskEdit, type TaskContent, type TaskForm } from "@/lib/practice/tasks";
 
 // The practice skill graph's admin page (/admin/practice, docs/practice.md): draft each lesson's skills with a model,
 // edit and approve them, then publish a version for learners.
@@ -258,6 +258,29 @@ export async function writeSkillTask(courseId: string, skillKey: string, stage: 
   refresh();
   if (!result.ok) return { success: false, error: result.error };
   return { success: true, form: result.form, model: result.model, note: result.note };
+}
+
+/** A model's rewrite of one task, following the admin's instruction, for the admin to review before saving. */
+export async function aiEditPracticeTask(taskId: string, instruction: string, model: string): Promise<Result<{ task: TaskContent; model: string }>> {
+  const session = await requireAdmin();
+  if (!session) return denied;
+  if (!instruction.trim()) return { success: false, error: "Say what to change." };
+  const result = await aiEditTask({ taskId, instruction: instruction.slice(0, 4000), model, userId: session.user.id, deadline: Date.now() + 27_000 });
+  return result.ok ? { success: true, task: result.task, model: result.model } : { success: false, error: result.error };
+}
+
+/**
+ * Saves an edited task: proven again like a new one; when it passes it replaces the old task, which is retired.
+ * `editedWith` is the model that rewrote it, or null for an edit by hand.
+ */
+export async function savePracticeTaskEdit(taskId: string, task: TaskContent, editedWith: string | null): Promise<Result<{ taskId: string; note: string }>> {
+  const session = await requireAdmin();
+  if (!session) return denied;
+  // An Amplify request is reported to stop at about 30 s: the proof ends by 27 s.
+  const result = await saveTaskEdit({ taskId, task, editedWith, userId: session.user.id, deadline: Date.now() + 27_000 });
+  refresh();
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, taskId: result.taskId, note: result.note };
 }
 
 /** Takes a task out of the pool (it stays in the table, marked RETIRED). */

@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PracticeDiscoveriesButton } from "@/components/admin/practice-discoveries";
+import { TaskModelsContext } from "@/components/admin/practice-task-editor";
 import { SkillTasks } from "@/components/admin/practice-tasks";
 import { Input } from "@/components/ui/input";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -225,6 +226,8 @@ function CourseReview({
   const drafted = (counts.review + counts.approved) / Math.max(1, counts.all);
 
   return (
+    // The models an admin can pick for a task's AI edit (components/admin/practice-task-editor.tsx).
+    <TaskModelsContext.Provider value={models}>
     <div className="space-y-5">
       {dialog}
       {/* The course at a glance, and what applies to all of it. */}
@@ -337,6 +340,7 @@ function CourseReview({
         )}
       </div>
     </div>
+    </TaskModelsContext.Provider>
   );
 }
 

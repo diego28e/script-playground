@@ -75,7 +75,7 @@ export function chainStartingAt(chain: ReadonlyArray<ModelEntry>, model: string 
   return index <= 0 ? chain : [...chain.slice(index), ...chain.slice(0, index)];
 }
 
-export type AiFeature = "explain" | "ask" | "translate" | "tutor" | "graph" | "diagnose";
+export type AiFeature = "explain" | "ask" | "translate" | "tutor" | "graph" | "diagnose" | "hint";
 
 export type AiResult =
   | { ok: true; text: string; functionCalls: FunctionCall[]; model: string; traceId: string }

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { afterAnswer, prepareDiscovery, runDiagnosis, type DiscoveryNote } from "@/lib/practice/discovery";
+import { askHint, MAX_HINTS } from "@/lib/practice/hints";
 import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
 
@@ -44,6 +45,7 @@ function itemView(
   published: LearnerGraph,
   confirmed: Set<string>,
   answer?: { answer: unknown; result: unknown },
+  hints: string[] = [],
 ) {
   const meta = published.skills[item.skillKey];
   return {
@@ -54,6 +56,9 @@ function itemView(
     // A check on a prerequisite that may be missing, and practice on one that was found missing.
     isProbe: Boolean(item.probe),
     isFound: !item.probe && (item.kind === "discovered" || confirmed.has(item.skillKey)),
+    // Hints asked for before answering, oldest first, and how many more there may be.
+    hints,
+    maxHints: MAX_HINTS,
     answer: answer ? { given: answer.answer as Answer, feedback: answer.result as Feedback, explanationEs: content.explanationEs, explanationEn: content.explanationEn } : null,
   };
 }
@@ -76,11 +81,14 @@ export async function getPracticeToday(courseSlug: string, timeZone: string, ext
 
   const { session, loaded } = today;
   const items = session.items as unknown as SessionItem[];
-  const [tasks, answers, daySessions] = await Promise.all([
+  const [tasks, answers, daySessions, hintRows] = await Promise.all([
     prisma.practiceTask.findMany({ where: { id: { in: items.map((item) => item.taskId) } }, select: { id: true, content: true } }),
     prisma.practiceAnswer.findMany({ where: { sessionId: session.id }, select: { taskId: true, answer: true, result: true } }),
     prisma.practiceSession.findMany({ where: { learnerId: loaded.learner.id, day }, select: { answers: { select: { passed: true } } } }),
+    prisma.practiceHint.findMany({ where: { sessionId: session.id }, orderBy: { number: "asc" }, select: { taskId: true, text: true } }),
   ]);
+  const hintsByTask = new Map<string, string[]>();
+  for (const hint of hintRows) hintsByTask.set(hint.taskId, [...(hintsByTask.get(hint.taskId) ?? []), hint.text]);
   const byId = new Map(tasks.map((task) => [task.id, task.content as unknown as TaskContent]));
   const answered = new Map(answers.map((answer) => [answer.taskId, answer]));
   const doneToday = daySessions.flatMap((entry) => entry.answers);
@@ -95,7 +103,7 @@ export async function getPracticeToday(courseSlug: string, timeZone: string, ext
     course: who.course,
     sessionId: session.id,
     extra: session.extra,
-    items: items.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed, answered.get(item.taskId))),
+    items: items.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed, answered.get(item.taskId), hintsByTask.get(item.taskId))),
     today: { answered: doneToday.length, right: doneToday.filter((answer) => answer.passed).length },
     streak: await practiceStreak(loaded.learner.id, day),
     discoveryWaiting: discoveryWaiting && !session.extra,
@@ -205,4 +213,20 @@ export async function preparePracticeDiscovery(courseSlug: string, sessionId: st
     items: prepared.added.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed)),
     more: prepared.more,
   };
+}
+
+/** The next hint for an open task (lib/practice/hints.ts), written for the learner's attempt so far. */
+export async function askPracticeHint(
+  courseSlug: string,
+  sessionId: string,
+  taskId: string,
+  attempt: z.infer<typeof AnswerSchema>,
+  language: "es" | "en",
+): Promise<Result<{ number: number; text: string; left: number }>> {
+  const who = await learnerFor(courseSlug);
+  if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
+  const parsed = AnswerSchema.safeParse(attempt);
+  if (!parsed.success) return { success: false, error: "That attempt can't be read." };
+  const result = await askHint({ userId: who.userId, sessionId, taskId, attempt: parsed.data, language: language === "es" ? "es" : "en" });
+  return result.ok ? { success: true, number: result.number, text: result.text, left: result.left } : { success: false, error: result.error };
 }

@@ -456,6 +456,8 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
 
   const loaded = await loadLearner(userId, session.learner.courseId);
   if (!loaded) return { ok: false as const, error: "Practice isn't set up for this course yet." };
+  // Hints asked for before answering (lib/practice/hints.ts), counted here rather than trusted from the page.
+  const hintsUsed = await prisma.practiceHint.count({ where: { sessionId, taskId } });
   const answerId = randomUUID();
   const evidence: Evidence = {
     id: answerId,
@@ -467,6 +469,7 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
     ...(entry.probe ? { context: "diagnostic" as const, probe: entry.probe } : { context: "practice" as const }),
     durationMs: Math.max(0, Math.round(durationMs)),
     attempts: Math.max(1, Math.round(attempts)),
+    ...(hintsUsed ? { hintsUsed } : {}),
     source: { kind: "auto", score: graded.feedback.score, maxScore: graded.maxScore, passed: graded.feedback.passed, ...(graded.checks ? { checks: graded.checks } : {}) },
   };
   const recorded = practice.record(loaded.state, { graph: loaded.published.graph, evidence, item });

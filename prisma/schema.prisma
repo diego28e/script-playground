@@ -772,9 +772,12 @@ model PracticeTask {
   model           String
   traceId         String?
   contentHash     String
+  // An admin's edit makes a new task (proven again) and retires this one: the task it replaced.
+  editedFromId    String?
   createdAt       DateTime           @default(now())
   course          Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
   answers         PracticeAnswer[]
+  hints           PracticeHint[]
 
   @@unique([courseId, contentHash])
   @@index([courseId, skillKey, stage, status])
@@ -832,6 +835,7 @@ model PracticeSession {
   completedAt DateTime?
   learner     PracticeLearner  @relation(fields: [learnerId], references: [id], onDelete: Cascade)
   answers     PracticeAnswer[]
+  hints       PracticeHint[]
 
   @@index([learnerId, day])
   @@map("practice_session")
@@ -940,4 +944,22 @@ model PracticeDiscoveredEdge {
 
   @@unique([courseId, fromKey, toKey])
   @@map("practice_discovered_edge")
+}
+
+// A hint a learner asked for on a task before answering it (docs/practice.md, "Hints"): at most three a task, each
+// more specific than the last. Their number goes into the answer's evidence (lk-practice's hintsUsed).
+model PracticeHint {
+  id        String          @id @default(cuid())
+  sessionId String
+  taskId    String
+  // 1, 2 or 3.
+  number    Int
+  text      String
+  model     String
+  createdAt DateTime        @default(now())
+  session   PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  task      PracticeTask    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, taskId, number])
+  @@map("practice_hint")
 }

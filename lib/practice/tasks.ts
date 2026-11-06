@@ -254,6 +254,131 @@ export type GenerateResult =
   | { ok: true; taskId: string; form: TaskForm; model: string; note: string }
   | { ok: false; error: string; taskId?: string; form?: TaskForm; model?: string };
 
+/** The skill a task practises: its node (published, or a skill a diagnosis found), its lesson, and a graph to check items with. */
+async function skillFor(courseId: string, skillKey: string) {
+  const version = await prisma.skillGraphVersion.findFirst({ where: { courseId }, orderBy: { version: "desc" }, select: { graph: true } });
+  if (!version) return { error: "Publish a version of the skill graph first: tasks are written for published skills." } as const;
+  const published = version.graph as unknown as PublishedGraph;
+  let node: SkillNode | undefined = published.graph.skills.find((skill) => skill.id === skillKey);
+  let meta: { lessonId: string } | undefined = published.skills[skillKey];
+  // A skill a diagnosis found, which the course doesn't teach (docs/practice.md, "Missing prerequisites").
+  let found: { forLabel: string } | null = null;
+  if (!node || !meta) {
+    const row = await prisma.practiceFoundSkill.findUnique({ where: { courseId_key: { courseId, key: skillKey } } });
+    if (row) {
+      node = row.node as unknown as SkillNode;
+      meta = { lessonId: row.lessonId };
+      const edge = await prisma.practiceDiscoveredEdge.findFirst({ where: { courseId, fromKey: row.key }, orderBy: { createdAt: "asc" }, select: { toKey: true } });
+      found = { forLabel: (edge && published.graph.skills.find((skill) => skill.id === edge.toKey)?.label) ?? "a later skill" };
+    }
+  }
+  if (!node || !meta) return { error: "This skill isn't in the published graph yet: approve its lesson and publish." } as const;
+  // Items are checked against a graph that has the skill: a found one joins the published graph for the check.
+  const checkGraph = found ? { ...published.graph, skills: [...published.graph.skills, node] } : published.graph;
+  return { node, meta, found, checkGraph } as const;
+}
+
+/** What a model is told about the skill, stage and form, before it writes or edits a task. */
+async function taskContext(skill: Exclude<Awaited<ReturnType<typeof skillFor>>, { error: string }>, stage: string, form: TaskForm) {
+  const { node, meta, found } = skill;
+  const lesson = await prisma.lesson.findUnique({ where: { id: meta.lessonId }, select: { code: true, title: true, objectives: true } });
+  const ladder = Object.keys(node.forms ?? {});
+  return [
+    `# Skill: ${node.label} (key ${node.id})\n${node.description ?? ""}\nKind: ${node.knowledge}. Ladder: ${ladder.join(" → ")}.${node.criteriaHint ? `\nWhat shows the skill: ${node.criteriaHint}` : ""}`,
+    `# Stage: ${stage}\n${STAGES[stage] ?? stage}`,
+    `# Form: ${form}\n${FORM_RULES[form]}`,
+    found
+      ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, in plain Python where possible, without the course's libraries unless the skill is about them.`
+      : "",
+    lesson ? `# ${found ? "Where the learner met the gap: lesson" : "From lesson"} ${lesson.code ?? ""}: ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
+  ].filter(Boolean);
+}
+
+/**
+ * Proves a task (code on the grader, a question by a second model) and stores it: PROVEN with lk-practice's item when
+ * it passes; when it fails, REJECTED with the reason if `keepRejected`, otherwise not at all.
+ */
+async function proveAndStore(input: {
+  courseId: string;
+  skillKey: string;
+  stage: string;
+  form: TaskForm;
+  task: TaskContent;
+  model: string;
+  traceId?: string;
+  userId: string;
+  deadline: number;
+  checkGraph: PublishedGraph["graph"];
+  keepRejected: boolean;
+  editedFromId?: string;
+}): Promise<GenerateResult> {
+  const { task, form } = input;
+  const shape = shapeProblem(task);
+  const proof: Proof = shape
+    ? { ok: false, reason: shape }
+    : form === "choice" || form === "fill"
+      ? await proveByModel(task, input.model, input.userId, input.deadline)
+      : await proveByRunning(task);
+
+  const taskId = randomUUID();
+  const contentHash = createHash("sha256").update(JSON.stringify([form, task.promptEn, task.code ?? "", task.optionsEn ?? []])).digest("hex");
+  const expectedSeconds = Math.round(Math.min(Math.max(task.expectedSeconds, 15), 600));
+  const difficulty = toItemDifficulty(task.difficulty);
+
+  let item: PracticeItem | null = null;
+  let reason = proof.ok ? null : proof.reason;
+  if (proof.ok) {
+    const candidate: CandidateItem = {
+      id: `task:${taskId}`,
+      skills: [{ skillId: input.skillKey, weight: 1 }],
+      stage: input.stage,
+      difficulty,
+      expectedSeconds,
+      fluentSeconds: Math.round(expectedSeconds * 0.5),
+      slowSeconds: Math.round(expectedSeconds * 1.5),
+      form,
+      contentHash,
+      origin: "generated",
+      status: "unproven",
+      content: null,
+    };
+    const admitted = admitCandidate(candidate, proof.proof, practice.config);
+    if (!admitted.ok) reason = `lk-practice refused it: ${admitted.issues.map((issue) => issue.code).join(", ")}`;
+    else {
+      const valid = validateItems([admitted.item], input.checkGraph, practice.config);
+      if (!valid.ok) reason = `lk-practice refused it: ${valid.issues.map((issue) => issue.code).join(", ")}`;
+      else item = admitted.item;
+    }
+  }
+  if (!item && !input.keepRejected) return { ok: false, form, model: input.model, error: `It didn't pass its proof: ${reason}` };
+
+  try {
+    await prisma.practiceTask.create({
+      data: {
+        id: taskId,
+        courseId: input.courseId,
+        skillKey: input.skillKey,
+        stage: input.stage,
+        form,
+        difficulty,
+        expectedSeconds,
+        content: task as unknown as Prisma.InputJsonObject,
+        item: item ? (item as unknown as Prisma.InputJsonObject) : undefined,
+        status: item ? "PROVEN" : "REJECTED",
+        rejectReason: reason,
+        model: input.model,
+        traceId: input.traceId,
+        contentHash,
+        editedFromId: input.editedFromId,
+      },
+    });
+  } catch {
+    return { ok: false, form, model: input.model, error: input.editedFromId ? "Nothing changed: the pool already has this exact task." : "The model repeated a task the pool already has." };
+  }
+  if (!item) return { ok: false, taskId, form, model: input.model, error: `Rejected: ${reason}` };
+  return { ok: true, taskId, form, model: input.model, note: proof.ok ? proof.note : "" };
+}
+
 /**
  * Writes, proves and stores one task for `skillKey` at `stage`, in `form` (or the form the pool has least of). A task
  * that fails its proof is stored as REJECTED with the reason. Everything ends by `deadline` (epoch ms).
@@ -267,26 +392,9 @@ export async function generateTask(input: {
   userId: string;
   deadline: number;
 }): Promise<GenerateResult> {
-  const version = await prisma.skillGraphVersion.findFirst({ where: { courseId: input.courseId }, orderBy: { version: "desc" }, select: { graph: true } });
-  if (!version) return { ok: false, error: "Publish a version of the skill graph first: tasks are written for published skills." };
-  const published = version.graph as unknown as PublishedGraph;
-  let node: SkillNode | undefined = published.graph.skills.find((skill) => skill.id === input.skillKey);
-  let meta: { lessonId: string } | undefined = published.skills[input.skillKey];
-  // A skill a diagnosis found, which the course doesn't teach (docs/practice.md, "Missing prerequisites").
-  let found: { forLabel: string } | null = null;
-  if (!node || !meta) {
-    const row = await prisma.practiceFoundSkill.findUnique({ where: { courseId_key: { courseId: input.courseId, key: input.skillKey } } });
-    if (row) {
-      node = row.node as unknown as SkillNode;
-      meta = { lessonId: row.lessonId };
-      const edge = await prisma.practiceDiscoveredEdge.findFirst({ where: { courseId: input.courseId, fromKey: row.key }, orderBy: { createdAt: "asc" }, select: { toKey: true } });
-      found = { forLabel: (edge && published.graph.skills.find((skill) => skill.id === edge.toKey)?.label) ?? "a later skill" };
-    }
-  }
-  if (!node || !meta) return { ok: false, error: "This skill isn't in the published graph yet: approve its lesson and publish." };
-  // Items are checked against a graph that has the skill: a found one joins the published graph for the check.
-  const checkGraph = found ? { ...published.graph, skills: [...published.graph.skills, node] } : published.graph;
-  const forms = (node.forms?.[input.stage] ?? []) as TaskForm[];
+  const skill = await skillFor(input.courseId, input.skillKey);
+  if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
+  const forms = (skill.node.forms?.[input.stage] ?? []) as TaskForm[];
   if (!forms.length) return { ok: false, error: `The skill has no stage "${input.stage}".` };
 
   const existing = await prisma.practiceTask.findMany({
@@ -297,21 +405,10 @@ export async function generateTask(input: {
   });
   // The form this stage's pool has least of, unless one was asked for.
   const form = input.form && forms.includes(input.form) ? input.form : [...forms].sort((a, b) => existing.filter((task) => task.form === a).length - existing.filter((task) => task.form === b).length)[0];
-
-  const lesson = await prisma.lesson.findUnique({ where: { id: meta.lessonId }, select: { code: true, title: true, objectives: true } });
-  const ladder = Object.keys(node.forms ?? {});
   const context = [
-    `# Skill: ${node.label} (key ${node.id})\n${node.description ?? ""}\nKind: ${node.knowledge}. Ladder: ${ladder.join(" → ")}.${node.criteriaHint ? `\nWhat shows the skill: ${node.criteriaHint}` : ""}`,
-    `# Stage: ${input.stage}\n${STAGES[input.stage] ?? input.stage}`,
-    `# Form: ${form}\n${FORM_RULES[form]}`,
-    found
-      ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, in plain Python where possible, without the course's libraries unless the skill is about them.`
-      : "",
-    lesson ? `# ${found ? "Where the learner met the gap: lesson" : "From lesson"} ${lesson.code ?? ""}: ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
+    ...(await taskContext(skill, input.stage, form)),
     `# EXISTING TASKS (don't repeat)\n${existing.map((task) => `- (${task.form}) ${String((task.content as TaskContent).promptEn).replace(/\s+/g, " ").slice(0, 160)}`).join("\n") || "(none yet)"}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ].join("\n\n");
 
   const chosen = AUTHORING_CHAIN.some((entry) => entry.model === input.model) ? input.model! : DEFAULT_TASK_MODEL;
   // Leave room for the proof: running code or asking a second model takes a few seconds.
@@ -346,66 +443,90 @@ export async function generateTask(input: {
     const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
     task = { ...task, optionsEs: order.map((i) => task.optionsEs![i]), optionsEn: order.map((i) => task.optionsEn![i]), answerIndex: order.indexOf(task.answerIndex) };
   }
-  const shape = shapeProblem(task);
-  const proof: Proof = shape
-    ? { ok: false, reason: shape }
-    : form === "choice" || form === "fill"
-      ? await proveByModel(task, written.model, input.userId, input.deadline)
-      : await proveByRunning(task);
+  return proveAndStore({ ...input, form, task, model: written.model, traceId: written.traceId, checkGraph: skill.checkGraph, keepRejected: true });
+}
 
-  const taskId = randomUUID();
-  const contentHash = createHash("sha256").update(JSON.stringify([form, task.promptEn, task.code ?? "", task.optionsEn ?? []])).digest("hex");
-  const expectedSeconds = Math.round(Math.min(Math.max(task.expectedSeconds, 15), 600));
-  const difficulty = toItemDifficulty(task.difficulty);
+// --- Admins' edits (docs/practice.md, "Editing a task") --------------------------------------------------------------
 
-  let item: PracticeItem | null = null;
-  let reason = proof.ok ? null : proof.reason;
-  if (proof.ok) {
-    const candidate: CandidateItem = {
-      id: `task:${taskId}`,
-      skills: [{ skillId: input.skillKey, weight: 1 }],
-      stage: input.stage,
-      difficulty,
-      expectedSeconds,
-      fluentSeconds: Math.round(expectedSeconds * 0.5),
-      slowSeconds: Math.round(expectedSeconds * 1.5),
-      form,
-      contentHash,
-      origin: "generated",
-      status: "unproven",
-      content: null,
-    };
-    const admitted = admitCandidate(candidate, proof.proof, practice.config);
-    if (!admitted.ok) reason = `lk-practice refused it: ${admitted.issues.map((issue) => issue.code).join(", ")}`;
-    else {
-      const valid = validateItems([admitted.item], checkGraph, practice.config);
-      if (!valid.ok) reason = `lk-practice refused it: ${valid.issues.map((issue) => issue.code).join(", ")}`;
-      else item = admitted.item;
-    }
-  }
-
-  try {
-    await prisma.practiceTask.create({
-      data: {
-        id: taskId,
-        courseId: input.courseId,
-        skillKey: input.skillKey,
-        stage: input.stage,
-        form,
-        difficulty,
-        expectedSeconds,
-        content: task as unknown as Prisma.InputJsonObject,
-        item: item ? (item as unknown as Prisma.InputJsonObject) : undefined,
-        status: item ? "PROVEN" : "REJECTED",
-        rejectReason: reason,
-        model: written.model,
-        traceId: written.traceId,
-        contentHash,
+/**
+ * A model's rewrite of one task, following the admin's instruction: returned for the admin to review, not stored.
+ * The form stays; everything the instruction doesn't mention should too.
+ */
+export async function aiEditTask(input: { taskId: string; instruction: string; model: string; userId: string; deadline: number }): Promise<{ ok: true; task: TaskContent; model: string } | { ok: false; error: string }> {
+  const row = await prisma.practiceTask.findUnique({ where: { id: input.taskId }, select: { courseId: true, skillKey: true, stage: true, form: true, content: true } });
+  if (!row) return { ok: false, error: "That task is gone." };
+  const skill = await skillFor(row.courseId, row.skillKey);
+  if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
+  const form = row.form as TaskForm;
+  const context = [
+    ...(await taskContext(skill, row.stage, form)),
+    `# THE TASK NOW\n${JSON.stringify(row.content, null, 1)}`,
+    `# WHAT THE ADMIN WANTS CHANGED\n${input.instruction}`,
+  ].join("\n\n");
+  const chosen = AUTHORING_CHAIN.some((entry) => entry.model === input.model) ? input.model : DEFAULT_TASK_MODEL;
+  const written = await generateWithFallback({
+    feature: "graph",
+    pool: "AUTHORING",
+    userId: input.userId,
+    models: chainStartingAt(AUTHORING_CHAIN, chosen),
+    chosenFirst: true,
+    deadline: input.deadline,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: context },
+          {
+            text: `Rewrite THE TASK NOW as the admin asks, as a ${form} task for the same skill and stage. Keep everything the request doesn't ask to change, keep Spanish and English saying the same thing, and keep the key, tests and solutions consistent with any change. Answer with the whole task as the JSON object.`,
+          },
+        ],
       },
-    });
+    ],
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseSchema: RESPONSE_SCHEMA,
+      thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
+      maxOutputTokens: 8192,
+    },
+  });
+  if (!written.ok) return { ok: false, error: written.reason === "quota" ? "Today's authoring allowance is used up." : "No model could rewrite the task in time. Try again." };
+  try {
+    const task = TaskSchema.parse(JSON.parse(written.text));
+    return { ok: true, task: { ...task, form }, model: written.model };
   } catch {
-    return { ok: false, form, model: written.model, error: "The model repeated a task the pool already has." };
+    return { ok: false, error: `${written.model} didn't answer with a valid task.` };
   }
-  if (!item) return { ok: false, taskId, form, model: written.model, error: `Rejected: ${reason}` };
-  return { ok: true, taskId, form, model: written.model, note: proof.ok ? proof.note : "" };
+}
+
+/**
+ * Saves an admin's edit (made by hand or with a model): the edited task is proven like a new one; when it passes, it
+ * joins the pool as a new task and the old one is retired, so past answers keep pointing at what learners saw.
+ */
+export async function saveTaskEdit(input: { taskId: string; task: unknown; editedWith: string | null; userId: string; deadline: number }): Promise<GenerateResult> {
+  const row = await prisma.practiceTask.findUnique({ where: { id: input.taskId }, select: { id: true, courseId: true, skillKey: true, stage: true, form: true, status: true } });
+  if (!row) return { ok: false, error: "That task is gone." };
+  if (row.status === "RETIRED") return { ok: false, error: "That task was retired or already replaced by an edit." };
+  const parsed = TaskSchema.safeParse(input.task);
+  if (!parsed.success) return { ok: false, error: `The task isn't complete: ${parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`).slice(0, 3).join("; ")}` };
+  const skill = await skillFor(row.courseId, row.skillKey);
+  if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
+  const form = row.form as TaskForm;
+  // The writer decides who checks a question: a model other than the one that wrote it.
+  const writer = input.editedWith && AUTHORING_CHAIN.some((entry) => entry.model === input.editedWith) ? input.editedWith : "admin";
+  const result = await proveAndStore({
+    courseId: row.courseId,
+    skillKey: row.skillKey,
+    stage: row.stage,
+    form,
+    task: { ...parsed.data, form },
+    model: writer === "admin" ? "edited by an admin" : `${writer}, edited`,
+    userId: input.userId,
+    deadline: input.deadline,
+    checkGraph: skill.checkGraph,
+    keepRejected: false,
+    editedFromId: row.id,
+  });
+  if (result.ok) await prisma.practiceTask.update({ where: { id: row.id }, data: { status: "RETIRED" } });
+  return result;
 }

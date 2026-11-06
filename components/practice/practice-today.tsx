@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { Editor } from "@monaco-editor/react";
-import { ArrowLeft, ArrowRight, Check, Flame, Layers, Map as MapIcon, Play, RotateCcw, ScanSearch, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Flame, Layers, Lightbulb, Map as MapIcon, Play, RotateCcw, ScanSearch, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import {
+  askPracticeHint,
   getPracticeToday,
   preparePracticeDiscovery,
   runPracticeCode,
@@ -77,6 +78,15 @@ const COPY = {
     foundAdded: (count: number) => (count === 1 ? "Añadimos una tarea de base al final de tu práctica." : `Añadimos ${count} tareas de base al final de tu práctica.`),
     confirmed: (skill: string, forSkill: string) => `Encontramos algo de base que repasar: «${skill}». Lo practicarás antes de volver a «${forSkill}».`,
     refuted: (skill: string) => `«${skill}» lo dominas: no era eso lo que faltaba.`,
+    previous: "Anterior",
+    steps: "Tareas de hoy",
+    step: (number: number, state: string) => `Tarea ${number}: ${state}`,
+    stepState: { right: "correcta", wrong: "por mejorar", current: "la actual", later: "más adelante" } as Record<string, string>,
+    hint: "Pista",
+    hintLoading: "Pensando una pista…",
+    hintNumber: (number: number) => `Pista ${number}`,
+    noMoreHints: "No quedan más pistas para esta tarea",
+    hintsUsed: (count: number) => (count === 1 ? "Usaste 1 pista: un acierto con pista cuenta un poco menos." : `Usaste ${count} pistas: un acierto con pistas cuenta un poco menos.`),
   },
   en: {
     eyebrow: "Today's practice",
@@ -124,6 +134,15 @@ const COPY = {
     foundAdded: (count: number) => (count === 1 ? "We added a groundwork task at the end of today's practice." : `We added ${count} groundwork tasks at the end of today's practice.`),
     confirmed: (skill: string, forSkill: string) => `Found something underneath to go over: “${skill}”. You'll practise it before going back to “${forSkill}”.`,
     refuted: (skill: string) => `You know “${skill}”: that wasn't what was missing.`,
+    previous: "Previous",
+    steps: "Today's tasks",
+    step: (number: number, state: string) => `Task ${number}: ${state}`,
+    stepState: { right: "right", wrong: "to improve", current: "the current one", later: "later" } as Record<string, string>,
+    hint: "Hint",
+    hintLoading: "Thinking of a hint…",
+    hintNumber: (number: number) => `Hint ${number}`,
+    noMoreHints: "No hints left for this task",
+    hintsUsed: (count: number) => (count === 1 ? "You used 1 hint: a right answer with a hint counts a little less." : `You used ${count} hints: a right answer with hints counts a little less.`),
   },
 };
 
@@ -221,6 +240,9 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
     };
   }, [fetchToday, apply, prepare, added]);
 
+  const hinted = (taskId: string, hint: string) =>
+    setToday((current) => current && { ...current, items: current.items.map((item) => (item.id === taskId ? { ...item, hints: [...item.hints, hint] } : item)) });
+
   const answered = (taskId: string, answer: Answered, extras?: AnswerExtras) => {
     setToday((current) => current && { ...current, items: current.items.map((item) => (item.id === taskId ? { ...item, answer } : item)) });
     window.dispatchEvent(new Event(PRACTICE_ANSWERED));
@@ -257,6 +279,9 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
   const items = today?.items ?? [];
   const done = items.filter((item) => item.answer).length;
   const finished = state === "ready" && index >= items.length;
+  // The learner can go back to any task they've answered, and forward to the first one still open.
+  const firstOpen = items.findIndex((item) => !item.answer);
+  const reachable = (at: number) => Boolean(items[at]?.answer) || at === firstOpen;
   // The streak was counted when the page loaded; finishing today's set here adds today to it.
   const streak = today ? today.streak.days + (finished && items.length > 0 && !today.extra && !today.streak.doneToday ? 1 : 0) : 0;
 
@@ -317,6 +342,36 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
           </p>
         )}
         {state === "ready" && items.length === 0 && <Notice text={t.nothing} />}
+        {state === "ready" && items.length > 1 && (
+          <nav aria-label={t.steps} className="mb-4">
+            <ol className="flex flex-wrap gap-1.5">
+              {items.map((item, at) => {
+                const stepState = item.answer ? (item.answer.feedback.passed ? "right" : "wrong") : at === firstOpen ? "current" : "later";
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => setIndex(at)}
+                      disabled={!reachable(at)}
+                      aria-current={at === index ? "step" : undefined}
+                      aria-label={t.step(at + 1, t.stepState[stepState])}
+                      className={cn(
+                        "flex size-8 items-center justify-center rounded-full font-mono text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        stepState === "right" && "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300",
+                        stepState === "wrong" && "bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-200",
+                        stepState === "current" && "border border-foreground/40 text-foreground hover:bg-muted",
+                        stepState === "later" && "border border-dashed border-border text-muted-foreground/60",
+                        at === index && "ring-2 ring-ring ring-offset-2 ring-offset-background",
+                      )}
+                    >
+                      {item.isProbe ? <ScanSearch className="size-3.5" aria-hidden="true" /> : at + 1}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+        )}
         {state === "ready" && today && items.length > 0 && !finished && (
           <TaskCard
             key={items[index].id}
@@ -327,7 +382,9 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
             sessionId={today.sessionId}
             last={index === items.length - 1}
             onAnswered={answered}
+            onHint={hinted}
             onNext={() => setIndex(index + 1)}
+            onPrevious={index > 0 ? () => setIndex(index - 1) : undefined}
           />
         )}
         {finished && items.length > 0 && today && (
@@ -364,7 +421,9 @@ function TaskCard({
   sessionId,
   last,
   onAnswered,
+  onHint,
   onNext,
+  onPrevious,
 }: {
   item: PracticeTaskView;
   t: Copy;
@@ -373,7 +432,9 @@ function TaskCard({
   sessionId: string;
   last: boolean;
   onAnswered: (taskId: string, answer: Answered, extras?: AnswerExtras) => void;
+  onHint: (taskId: string, hint: string) => void;
   onNext: () => void;
+  onPrevious?: () => void;
 }) {
   const es = language === "es";
   // When the task appeared, for the answer's duration (set after render: reading the clock while rendering isn't pure).
@@ -398,6 +459,26 @@ function TaskCard({
   }, [answer]);
 
   const ready = item.form === "choice" ? choice !== null : isCode ? code.trim().length > 0 : text.trim().length > 0;
+
+  // Hints (lib/practice/hints.ts): written for the attempt so far, at most item.maxHints, before answering.
+  const [hinting, setHinting] = useState(false);
+  const askHint = async () => {
+    if (hinting || answer || item.hints.length >= item.maxHints) return;
+    setHinting(true);
+    const attempt = item.form === "choice" ? (choice === null ? {} : { index: choice }) : isCode ? { code } : { text };
+    const result = await askPracticeHint(courseSlug, sessionId, item.id, attempt, language).catch(() => null);
+    setHinting(false);
+    if (!result || !result.success) {
+      toast.error(result && !result.success ? result.error : t.error);
+      return;
+    }
+    onHint(item.id, result.text);
+  };
+  const previousButton = onPrevious && (
+    <Button variant="ghost" onClick={onPrevious} className="mr-auto">
+      <ArrowLeft className="mr-2 size-4" /> {t.previous}
+    </Button>
+  );
   const record = async (given: { index?: number; text?: string; code?: string }, attempts: number) => {
     const result = await submitPracticeAnswer(courseSlug, sessionId, item.id, given, Date.now() - shownAt.current, attempts).catch(() => null);
     if (!result || !result.success) {
@@ -550,8 +631,35 @@ function TaskCard({
 
         {!answer && trial && <TrialResults feedback={trial} t={t} />}
 
+        {item.hints.length > 0 && (
+          <ol aria-live="polite" className="mt-4 space-y-2">
+            {item.hints.map((hint, at) => (
+              <li key={at} className="practice-feedback flex gap-3 rounded-2xl border border-ring/25 bg-ring/8 px-4 py-3 text-sm">
+                <Lightbulb className="mt-0.5 size-4 shrink-0 text-ring" aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium text-muted-foreground">{t.hintNumber(at + 1)}</span>
+                  <span className="[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em] [&_p]:inline">
+                    <ReactMarkdown allowedElements={["p", "code", "em", "strong"]} unwrapDisallowed>
+                      {hint}
+                    </ReactMarkdown>
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+
         {!answer && (
           <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+            {previousButton}
+            {item.hints.length < item.maxHints ? (
+              <Button variant="outline" onClick={() => void askHint()} disabled={hinting || sending}>
+                {hinting ? <DotLoader className="mr-2" /> : <Lightbulb className="mr-2 size-4" />}
+                {hinting ? t.hintLoading : t.hint}
+              </Button>
+            ) : (
+              <span className="text-xs text-muted-foreground">{t.noMoreHints}</span>
+            )}
             {isCode && runs > 0 && (
               <Button variant="ghost" onClick={() => void giveUp()} disabled={sending}>
                 {t.giveUp}
@@ -565,9 +673,11 @@ function TaskCard({
         )}
 
         {answer && <FeedbackPanel answer={answer} form={item.form} t={t} es={es} />}
+        {answer && item.hints.length > 0 && <p className="mt-3 text-xs text-muted-foreground">{t.hintsUsed(item.hints.length)}</p>}
 
         {answer && (
-          <div className="mt-5 flex justify-end">
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+            {previousButton}
             <Button ref={nextRef} onClick={onNext}>
               {last ? t.finish : t.next} <ArrowRight className="ml-2 size-4" />
             </Button>

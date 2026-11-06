@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
-import { Archive, Check, ChevronDown, Sparkles, X } from "lucide-react";
+import { Archive, Check, ChevronDown, Pencil, Sparkles, X } from "lucide-react";
 import { getSkillTasks, retireTask, writeSkillTask, type SkillTask } from "@/actions/practice";
+import { TaskEditor } from "@/components/admin/practice-task-editor";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -121,6 +122,7 @@ function Code({ title, text }: { title: string; text: string }) {
 
 function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRetired: () => void }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
   const { confirm, dialog } = useConfirm();
   const c = task.content;
@@ -140,6 +142,7 @@ function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRe
   return (
     <li className={cn("rounded-lg bg-muted/50 p-3", pending && "opacity-60")}>
       {dialog}
+      {editing && <TaskEditor task={task} open={editing} onOpenChange={setEditing} onSaved={onRetired} />}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-semibold text-foreground">{FORM_LABEL[task.form] ?? task.form}</span>
         <span>{task.stage}</span>
@@ -158,6 +161,9 @@ function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRe
         <span className="flex-1" />
         <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground">
           {open ? "Less" : "Key and explanation"}
+        </button>
+        <button type="button" onClick={() => setEditing(true)} className="inline-flex items-center gap-1 hover:text-foreground" aria-label="Edit this task">
+          <Pencil className="h-3.5 w-3.5" /> Edit
         </button>
         {task.status === "PROVEN" && (
           <button type="button" onClick={() => void retire()} className="inline-flex items-center gap-1 hover:text-destructive" aria-label="Retire this task">
