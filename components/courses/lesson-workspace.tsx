@@ -2,7 +2,7 @@
 
 import { useEffect, useOptimistic, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import {
@@ -26,6 +26,7 @@ import { useLanguage } from "@/components/providers/language-provider";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { Tip } from "@/components/ui/tip";
 import { InlineCode } from "@/components/courses/inline-code";
+import { LabFrame } from "@/components/courses/lab-frame";
 import { LessonVideo } from "@/components/courses/lesson-video";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
@@ -46,6 +47,10 @@ const COPY = {
         prerequisites: "Antes de empezar",
         openInLab: "Abrir en tu laboratorio",
         labHint: "El notebook se abre en tu laboratorio, en una pestaña nueva. Si tu servidor está apagado, se enciende primero (tarda unos segundos).",
+        labHintTabs: "Trabájalo aquí, en la pestaña Notebook, o en tu laboratorio completo, en una pestaña nueva.",
+        tabs: "Vista de la lección",
+        tabLesson: "Lección",
+        tabNotebook: "Notebook",
         viewSource: "Ver en GitHub",
         markComplete: "Marcar como completada",
         completed: "Completada",
@@ -73,6 +78,10 @@ const COPY = {
         prerequisites: "Before you start",
         openInLab: "Open in your lab",
         labHint: "The notebook opens in your lab, in a new tab. If your server is stopped, it starts first (a few seconds).",
+        labHintTabs: "Work on it right here, in the Notebook tab, or in your full lab, in a new tab.",
+        tabs: "Lesson view",
+        tabLesson: "Lesson",
+        tabNotebook: "Notebook",
         viewSource: "View on GitHub",
         markComplete: "Mark as complete",
         completed: "Completed",
@@ -167,9 +176,40 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
     const Icon = KIND_ICONS[lesson.kind];
     const here = lessonPath(course.slug, data.module.slug, lesson.slug);
 
+    // The Notebook tab (docs/notebook-embed.md): the lesson's notebook, in the learner's own lab, right here. Only for
+    // enrolled learners, who are the ones the lab lets in. The tab is kept in the address (?tab=notebook); the frame
+    // loads the first time the tab opens and then stays, so switching back and forth doesn't restart JupyterLab.
+    const notebookTab = Boolean(inLab && tracking);
+    const tabInAddress = useSearchParams().get("tab");
+    const [tab, setTab] = useState<"lesson" | "notebook">(tabInAddress === "notebook" ? "notebook" : "lesson");
+    const showNotebook = notebookTab && tab === "notebook";
+    // The frame is never rendered on the server: it depends on the screen's width (a phone gets a link instead, and must
+    // never load the frame, which starts the learner's lab server). A lesson opened at ?tab=notebook mounts it right
+    // after the page comes alive in the browser.
+    const [notebookOpened, setNotebookOpened] = useState(false);
+    useEffect(() => {
+        if (!showNotebook) return;
+        // A timer, not an animation frame: those don't run while the page is in a background tab.
+        const timer = window.setTimeout(() => setNotebookOpened(true), 0);
+        return () => window.clearTimeout(timer);
+    }, [showNotebook]);
+    const selectTab = (next: "lesson" | "notebook") => {
+        setTab(next);
+        if (next === "notebook") {
+            setNotebookOpened(true);
+            // A video left playing behind the notebook would go on talking.
+            document.querySelectorAll<HTMLMediaElement>("#lesson-panel-lesson video, #lesson-panel-lesson audio").forEach((media) => media.pause());
+        }
+        const url = new URL(window.location.href);
+        if (next === "notebook") url.searchParams.set("tab", "notebook");
+        else url.searchParams.delete("tab");
+        window.history.replaceState(window.history.state, "", url);
+    };
+
     return (
-        <div className="container mx-auto grid gap-8 px-4 py-8 lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-12 lg:py-10">
-            <LessonOutline data={data} progress={progress} currentHref={here} t={t} />
+        <div className={cn("container mx-auto grid gap-8 px-4 py-8 lg:gap-12 lg:py-10", showNotebook ? "lg:grid-cols-1" : "lg:grid-cols-[300px_minmax(0,1fr)]")}>
+            {/* The notebook takes the whole width: the outline steps aside while it's open. */}
+            {!showNotebook && <LessonOutline data={data} progress={progress} currentHref={here} t={t} />}
 
             <article className="min-w-0">
                 <header className="border-b border-border pb-8">
@@ -239,8 +279,54 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                             </a>
                         )}
                     </div>
-                    {inLab && <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted-foreground">{t.labHint}</p>}
+                    {inLab && <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted-foreground">{notebookTab ? t.labHintTabs : t.labHint}</p>}
+                    {notebookTab && (
+                        <div role="tablist" aria-label={t.tabs} className="mt-6 inline-flex rounded-full bg-muted p-1">
+                            {(["lesson", "notebook"] as const).map((id) => (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    role="tab"
+                                    id={`lesson-tab-${id}`}
+                                    aria-selected={tab === id}
+                                    aria-controls={`lesson-panel-${id}`}
+                                    tabIndex={tab === id ? 0 : -1}
+                                    onClick={() => selectTab(id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                                        event.preventDefault();
+                                        const other = id === "lesson" ? "notebook" : "lesson";
+                                        selectTab(other);
+                                        document.getElementById(`lesson-tab-${other}`)?.focus();
+                                    }}
+                                    className={cn(
+                                        "inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                        tab === id ? "bg-card text-foreground shadow-[var(--shadow-tile)]" : "text-muted-foreground hover:text-foreground",
+                                    )}
+                                >
+                                    {id === "lesson" ? <BookOpen className="size-4" aria-hidden="true" /> : <NotebookPen className="size-4" aria-hidden="true" />}
+                                    {id === "lesson" ? t.tabLesson : t.tabNotebook}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </header>
+
+                {notebookTab && (
+                    <div role="tabpanel" id="lesson-panel-notebook" aria-labelledby="lesson-tab-notebook" hidden={!showNotebook} className="pt-6">
+                        {notebookOpened ? (
+                            <LabFrame courseSlug={course.slug} sourcePath={lesson.sourcePath!} language={language} />
+                        ) : (
+                            <div className="h-[calc(100dvh-9rem)] min-h-[520px]" aria-hidden="true" />
+                        )}
+                    </div>
+                )}
+
+                <div
+                    id="lesson-panel-lesson"
+                    {...(notebookTab ? { role: "tabpanel", "aria-labelledby": "lesson-tab-lesson" } : {})}
+                    hidden={showNotebook}
+                >
 
                 {(lesson.objectives.length > 0 || lesson.prerequisites) && (
                     <section className="grid gap-6 border-b border-border py-8 md:grid-cols-2">
@@ -290,6 +376,7 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                 {((lesson.kind === "VIDEO" && !video) || lesson.kind === "PRACTICE") && (
                     <p className="my-8 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-sm text-muted-foreground">{t.unavailable}</p>
                 )}
+                </div>
 
                 <nav aria-label={`${t.previous} / ${t.next}`} className="mt-8 grid gap-3 border-t border-border pt-8 sm:grid-cols-2">
                     {previous ? (
