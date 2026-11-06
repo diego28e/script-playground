@@ -7,8 +7,9 @@ const globalForPrisma = globalThis as unknown as {
   pool: Pool | undefined;
 };
 
-// Supabase requires TLS; the local development database (infra/dev) has none.
-const isLocalDatabase = /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL ?? "");
+// Supabase requires TLS; the local development database (infra/dev) has none. host.docker.internal is that same
+// local database seen from a container (the learning service run in the local lab).
+const isLocalDatabase = /@(localhost|127\.0\.0\.1|host\.docker\.internal)[:/]/.test(process.env.DATABASE_URL ?? "");
 
 const pool =
   globalForPrisma.pool ??

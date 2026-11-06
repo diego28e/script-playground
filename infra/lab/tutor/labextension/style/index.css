@@ -1,0 +1,199 @@
+/* The tutor panel, in JupyterLab's own colours and type, so it follows the light and dark themes. */
+
+.jp-AcademiaTutor {
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-AcademiaTutor-header {
+  flex: none;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-AcademiaTutor-mode {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--jp-layout-color2);
+}
+
+.jp-AcademiaTutor-modeButton {
+  flex: 1;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.jp-AcademiaTutor-modeButton[aria-checked='true'] {
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.jp-AcademiaTutor-modeButton:focus-visible,
+.jp-AcademiaTutor button:focus-visible,
+.jp-AcademiaTutor-input:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+}
+
+.jp-AcademiaTutor-goal:not(:empty) {
+  margin-top: 10px;
+}
+
+.jp-AcademiaTutor-objective {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.jp-AcademiaTutor-steps {
+  margin: 6px 0 0;
+  padding-left: 22px;
+  color: var(--jp-ui-font-color2);
+  line-height: 1.5;
+}
+
+.jp-AcademiaTutor-steps li::marker {
+  color: var(--jp-ui-font-color3);
+}
+
+.jp-AcademiaTutor-steps li[data-status='done'] {
+  color: var(--jp-success-color1);
+}
+
+.jp-AcademiaTutor-steps li[data-status='done']::before {
+  content: '✓ ';
+}
+
+.jp-AcademiaTutor-steps li[data-status='stuck'] {
+  color: var(--jp-ui-font-color0);
+  font-weight: 600;
+}
+
+.jp-AcademiaTutor-steps li[data-status='stuck']::before {
+  content: '● ';
+  color: var(--jp-warn-color1);
+}
+
+.jp-AcademiaTutor-unlocked {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--jp-brand-color3);
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 400;
+}
+
+.jp-AcademiaTutor-detour {
+  margin-top: 6px;
+  color: var(--jp-warn-color0);
+  font-weight: 600;
+}
+
+.jp-AcademiaTutor-log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.jp-AcademiaTutor-message {
+  margin-bottom: 14px;
+}
+
+.jp-AcademiaTutor-who {
+  margin-bottom: 3px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.jp-AcademiaTutor-learner .jp-AcademiaTutor-body {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--jp-layout-color2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jp-AcademiaTutor-tutor .jp-AcademiaTutor-body .jp-RenderedMarkdown {
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.jp-AcademiaTutor-tutor .jp-AcademiaTutor-body pre {
+  overflow-x: auto;
+}
+
+.jp-AcademiaTutor-offer {
+  display: block;
+  margin-top: 8px;
+  white-space: normal;
+  text-align: left;
+}
+
+.jp-AcademiaTutor-notice {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+  line-height: 1.5;
+}
+
+.jp-AcademiaTutor-status:not(:empty) {
+  flex: none;
+  padding: 4px 12px;
+  color: var(--jp-ui-font-color2);
+  font-style: italic;
+}
+
+.jp-AcademiaTutor-errorBar:not(:empty) {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+  border-top: 1px solid var(--jp-border-color2);
+}
+
+.jp-AcademiaTutor-form {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 12px;
+}
+
+.jp-AcademiaTutor-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 6px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font: inherit;
+  resize: vertical;
+}
+
+.jp-AcademiaTutor-send {
+  align-self: flex-end;
+}
+
+.jp-AcademiaTutor button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}

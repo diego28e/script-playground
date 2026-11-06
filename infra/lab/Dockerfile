@@ -49,6 +49,21 @@ RUN python -m venv /opt/course \
 RUN python -m venv /opt/jupyter \
  && /opt/jupyter/bin/pip install "jupyterlab==${JUPYTERLAB_VERSION}" "jupyterhub==${JUPYTERHUB_VERSION}"
 
+# The AI tutor (tutor/, docs/ai-tutor.md): its JupyterLab panel is built here, with Node taken from the official
+# image (same Debian, and this machine's architecture), then installed with its server side, which forwards the
+# panel's requests to the learning service. jupyter-builder, which builds it, comes with JupyterLab 4.6.
+# Last, so a tutor change rebuilds only these layers.
+COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:24-bookworm-slim /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY tutor /tmp/tutor
+RUN cd /tmp/tutor/labextension \
+ && node /usr/local/lib/node_modules/npm/bin/npm-cli.js ci --no-audit --no-fund \
+ && node node_modules/typescript/bin/tsc \
+ && /opt/jupyter/bin/jupyter-builder build . \
+ && mkdir -p /opt/jupyter/share/jupyter/labextensions \
+ && cp -r /tmp/tutor/academia_tutor/labextension /opt/jupyter/share/jupyter/labextensions/academia-tutor \
+ && /opt/jupyter/bin/pip install /tmp/tutor
+
 
 FROM ${PYTHON_IMAGE}
 
@@ -73,6 +88,8 @@ RUN echo "${COURSE_ROOT}/src" > "$(/opt/course/bin/python -c 'import sysconfig; 
 
 COPY kernel.json /opt/jupyter/share/jupyter/kernels/lc-mastery/kernel.json
 COPY jupyter_server_config.py /opt/jupyter/etc/jupyter/jupyter_server_config.py
+# Enables the tutor's server extension the way JupyterLab enables itself (a file per extension in .d/).
+COPY tutor/jupyter-config/academia_tutor.json /opt/jupyter/etc/jupyter/jupyter_server_config.d/academia_tutor.json
 # JupyterLab defaults (theme follows the system, line numbers, no news pop-up); a student's own settings win.
 COPY overrides.json /opt/jupyter/share/jupyter/lab/settings/overrides.json
 COPY start-lab.sh /usr/local/bin/start-lab

@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "course:import": "tsx scripts/import-course.ts"
+    "course:import": "tsx scripts/import-course.ts",
+    "learning:build": "node scripts/build-learning.mjs",
+    "learning:dev": "tsx services/learning/dev.ts"
   },
   "dependencies": {
     "@aws-sdk/client-mediaconvert": "3.1161.0",

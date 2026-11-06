@@ -7,38 +7,43 @@ datasource db {
 }
 
 model User {
-  id             String           @id @default(cuid())
-  name           String?
-  email          String           @unique
-  emailVerified  Boolean?
-  image          String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  role           Role             @default(USER)
-  accounts       Account[]
-  sessions       Session[]
-  submissions    Submission[]
-  enrollments    Enrollment[]
-  lessonProgress LessonProgress[]
+  id                 String              @id @default(cuid())
+  name               String?
+  email              String              @unique
+  emailVerified      Boolean?
+  image              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  role               Role                @default(USER)
+  accounts           Account[]
+  sessions           Session[]
+  submissions        Submission[]
+  enrollments        Enrollment[]
+  lessonProgress     LessonProgress[]
   // OpenID Connect provider (the lab hub signs in through the platform): see the oauth models below.
   oauthClients       OauthClient[]
   oauthRefreshTokens OauthRefreshToken[]
   oauthAccessTokens  OauthAccessToken[]
   oauthConsents      OauthConsent[]
+  // The AI tutor (docs/ai-tutor.md).
+  tutorProfile       TutorProfile?
+  tutorSessions      TutorSession[]
+  learnerMemory      LearnerMemory[]
+  practiceRequests   PracticeRequest[]
 
   @@map("user")
 }
 
 model Session {
-  id        String   @id @default(cuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  ipAddress String?
-  userAgent String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String              @id @default(cuid())
+  userId             String
+  token              String              @unique
+  expiresAt          DateTime
+  ipAddress          String?
+  userAgent          String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   oauthRefreshTokens OauthRefreshToken[]
   oauthAccessTokens  OauthAccessToken[]
 
@@ -183,6 +188,7 @@ model Lesson {
   module           CourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress         LessonProgress[]
   videoUploads     VideoUpload[]
+  tutorSessions    TutorSession[]
 
   @@unique([moduleId, slug])
   @@index([moduleId, position])
@@ -249,6 +255,145 @@ model LessonProgress {
   @@map("lesson_progress")
 }
 
+// ── AI requests: the ledger, and the count the free-tier quota is read from (lib/ai/quota.ts) ──────────────────
+// One row per request to Gemini, written before the call (PENDING) so concurrent calls count, and completed with
+// the tokens after. `day` is the Pacific date, the day Google's daily quotas use.
+model AiRequest {
+  id             String          @id @default(cuid())
+  pool           AiPool
+  feature        String
+  model          String
+  userId         String?
+  status         AiRequestStatus @default(PENDING)
+  day            String
+  inputTokens    Int             @default(0)
+  outputTokens   Int             @default(0)
+  // Thinking tokens, billed as output.
+  thoughtTokens  Int             @default(0)
+  // What the call would cost at the paid rates, in millionths of a dollar. The key is on the free tier today,
+  // so this is what the free tier saves, and what a billed project would pay.
+  listCostMicros Int             @default(0)
+  traceId        String
+  createdAt      DateTime        @default(now())
+
+  @@index([day, model, pool])
+  @@index([model, createdAt])
+  @@index([userId, day])
+  @@map("ai_request")
+}
+
+enum AiPool {
+  // The tutor in the lab.
+  TUTOR
+  // The platform's other AI features (challenges, translation).
+  PLATFORM
+}
+
+enum AiRequestStatus {
+  PENDING
+  OK
+  FAILED
+}
+
+// ── The AI tutor (docs/ai-tutor.md) ────────────────────────────────────────────────────────────────────────────
+// What the tutor keeps per learner across sessions: the help mode they chose.
+model TutorProfile {
+  userId    String    @id
+  mode      TutorMode @default(GUIDE)
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tutor_profile")
+}
+
+enum TutorMode {
+  GUIDE
+  SHOW
+}
+
+// One conversation about one notebook. `state` is the harness's (lib/tutor/state.ts): the micro-steps of the
+// current objective, the hint levels given per step, and the goal stack of detours.
+model TutorSession {
+  id           String         @id @default(cuid())
+  userId       String
+  lessonId     String?
+  notebookPath String
+  state        Json           @default("{}")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson       Lesson?        @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  messages     TutorMessage[]
+
+  @@index([userId, notebookPath, updatedAt])
+  @@map("tutor_session")
+}
+
+model TutorMessage {
+  id        String       @id @default(cuid())
+  sessionId String
+  role      String
+  // ask, explain_error, suggest_fix or reply.
+  kind      String
+  content   String
+  // The tool calls the tutor made with this reply, as the harness applied them.
+  actions   Json?
+  model     String?
+  traceId   String?
+  createdAt DateTime     @default(now())
+  session   TutorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("tutor_message")
+}
+
+// A fact the tutor learned about a learner. A newer fact on the same subject supersedes the old one, which is kept
+// with `supersededAt` set: the learner's history, the way a temporal knowledge graph keeps it.
+model LearnerMemory {
+  id              String     @id @default(cuid())
+  userId          String
+  kind            MemoryKind
+  subject         String
+  fact            String
+  skill           String?
+  sourceSessionId String?
+  validFrom       DateTime   @default(now())
+  supersededAt    DateTime?
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, supersededAt])
+  @@map("learner_memory")
+}
+
+enum MemoryKind {
+  PREFERENCE
+  MISCONCEPTION
+  STRENGTH
+  STRUGGLE
+}
+
+// A skill the learner agreed to practise after a detour; the practice engine (milestone 10) schedules it.
+model PracticeRequest {
+  id        String           @id @default(cuid())
+  userId    String
+  skill     String
+  evidence  PracticeEvidence
+  lessonId  String?
+  sessionId String?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("practice_request")
+}
+
+enum PracticeEvidence {
+  // The learner passed the detour's challenge.
+  PASSED
+  // The learner skipped the detour ("I know this").
+  SKIPPED
+}
+
 enum Role {
   USER
   ADMIN
@@ -290,7 +435,6 @@ enum SubmissionStatus {
   PASSED
   FAILED
 }
-
 
 // --- OpenID Connect provider ----------------------------------------------------------------------------
 // Tables of Better Auth's jwt plugin and @better-auth/oauth-provider 1.7.16 (lib/auth.ts), field for field as

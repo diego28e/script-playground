@@ -1,4 +1,5 @@
-# The lab's hub. Student containers are not listed here: the hub starts one per student from LAB_IMAGE.
+# The lab's hub, and the learning service (the AI tutor's backend). Student containers are not listed here: the hub
+# starts one per student from LAB_IMAGE, on the same network, where they reach the service as http://learning:8080.
 # Needs Docker Compose v2: `docker compose up -d --build` from this folder (see README.md).
 name: lab
 
@@ -20,6 +21,23 @@ services:
       # no student code ever runs in it, and student containers never get the socket.
       - /var/run/docker.sock:/var/run/docker.sock
       - hub-data:/srv/jupyterhub/data
+    networks:
+      - jupyterhub
+
+  # The AI tutor's backend (docs/ai-tutor.md). Build its bundle on your PC first: `pnpm learning:build`.
+  # No published port: only containers on the jupyterhub network reach it, and it checks every learner with the hub.
+  learning:
+    build: learning
+    image: lab-learning:1
+    container_name: learning
+    restart: unless-stopped
+    env_file: learning/.env
+    environment:
+      HUB_API_URL: http://jupyterhub:8081/hub/api
+      PORT: "8080"
+    mem_limit: 512m
+    depends_on:
+      - hub
     networks:
       - jupyterhub
 

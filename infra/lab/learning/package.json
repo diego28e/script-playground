@@ -1,0 +1,12 @@
+{
+  "name": "academia-learning-service",
+  "private": true,
+  "type": "module",
+  "description": "The AI tutor's backend for the lab (built from services/learning by pnpm learning:build).",
+  "dependencies": {
+    "@prisma/adapter-pg": "7.0.0",
+    "@prisma/client": "7.0.0",
+    "pg": "8.16.3",
+    "prisma": "7.0.0"
+  }
+}

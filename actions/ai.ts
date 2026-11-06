@@ -14,6 +14,7 @@ export type AiResponse = { success: true; text: string } | { success: false; rea
 // under the same trace ID.
 const MESSAGES: Record<FailureReason, string> = {
   unavailable: "The AI assistant isn't available right now. Try again in a few minutes.",
+  quota: "The AI assistant has reached today's limit. It's back tomorrow.",
   blocked: "The AI assistant can't answer that request. Try rephrasing it.",
   misconfigured: "The AI assistant isn't set up yet.",
   unauthenticated: "Sign in to use the AI assistant.",
@@ -21,9 +22,13 @@ const MESSAGES: Record<FailureReason, string> = {
 };
 
 function toResponse(result: AiResult): AiResponse {
-  return result.ok
-    ? { success: true, text: result.text }
-    : { success: false, reason: result.reason, error: MESSAGES[result.reason], traceId: result.traceId };
+  if (result.ok) return { success: true, text: result.text };
+  // Over the per-minute limit, it's back in a minute, not tomorrow.
+  const error =
+    result.reason === "quota" && result.retryAt.getTime() - Date.now() < 5 * 60_000
+      ? "The AI assistant is busy. Try again in a minute."
+      : MESSAGES[result.reason];
+  return { success: false, reason: result.reason, error, traceId: result.traceId };
 }
 
 /**

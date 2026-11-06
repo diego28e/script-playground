@@ -1,0 +1,12 @@
+# What the student image's build (context: this folder) never needs: secrets, and the tutor's local build output,
+# which the image rebuilds itself.
+.env
+.env.*
+!.env.example
+learning/
+hub/
+tutor/labextension/node_modules/
+tutor/labextension/lib/
+tutor/labextension/tsconfig.tsbuildinfo
+tutor/academia_tutor/labextension/
+**/__pycache__/

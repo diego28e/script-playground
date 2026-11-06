@@ -33,6 +33,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !infra/lab/.env.example
+!infra/lab/learning/.env.example
 !.env.local.example
 
 # vercel
@@ -46,3 +47,14 @@ next-env.d.ts
 
 # course media tried locally before upload (lib/media.ts)
 /public/media/
+
+# The learning service bundle and schema copy, built by pnpm learning:build
+/infra/lab/learning/dist/
+/infra/lab/learning/schema.prisma
+
+# The tutor panel's local build (the student image rebuilds it: infra/lab/Dockerfile)
+/infra/lab/tutor/labextension/node_modules/
+/infra/lab/tutor/labextension/lib/
+/infra/lab/tutor/labextension/tsconfig.tsbuildinfo
+/infra/lab/tutor/academia_tutor/labextension/
+__pycache__/
