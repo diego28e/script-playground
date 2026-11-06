@@ -61,6 +61,17 @@ export function AdminNav() {
                             Videos
                         </Link>
                         <Link
+                            href="/admin/practice"
+                            className={cn(
+                                "transition-colors hover:text-foreground/80",
+                                pathname?.startsWith("/admin/practice")
+                                    ? "text-foreground"
+                                    : "text-foreground/60"
+                            )}
+                        >
+                            Practice
+                        </Link>
+                        <Link
                             href="/admin/lab-access"
                             className={cn(
                                 "transition-colors hover:text-foreground/80",

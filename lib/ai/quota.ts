@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 // limits are per project, so the tutor and the platform's other AI features draw on one pool. This module keeps
 // our own count of requests (the ai_request table) so that:
 //   - a learner gets a clear "the tutor is resting until …" instead of Google's 429;
-//   - the tutor and the other features each keep a share of the day;
+//   - the tutor, the other features and admins' content work (authoring) each keep a share of the day;
 //   - if billing is ever linked, use stays at free-tier levels, which caps the cost.
 // Google remains the final judge (local development uses the same key with a separate database, so the two counts
 // can drift); a 429 from Google still falls through to the next model.
@@ -19,16 +19,21 @@ export const MODEL_LIMITS: Record<string, { rpm: number; rpd: number }> = {
   "gemini-3.6-flash": { rpm: 5, rpd: 20 },
   "gemini-3.1-flash-lite": { rpm: 15, rpd: 500 },
   "gemini-3.5-flash-lite": { rpm: 15, rpd: 500 },
-  // About US$0.50 a day at peak rates for the tutor's usual turn (about 7,000 tokens in, 400 out).
-  "deepseek-flash": { rpm: 60, rpd: 200 },
+  // Our own caps: 200 a day for the tutor (about US$0.50 at peak rates for its usual turn, about 7,000 tokens in and
+  // 400 out) and 300 for authoring (about US$2 for drafting a whole course's skill graph twice over).
+  "deepseek-flash": { rpm: 60, rpd: 500 },
 };
 
-/** What the platform's other features keep of each model's day; the tutor gets the rest (all of DeepSeek's). */
-const PLATFORM_RESERVE: Record<string, number> = {
-  "gemini-3.8-flash": 5,
-  "gemini-3.6-flash": 5,
-  "gemini-3.1-flash-lite": 50,
-  "gemini-3.5-flash-lite": 50,
+/**
+ * What the platform's other features and authoring keep of each model's day; the tutor gets the rest. Authoring
+ * leaves the two Flash models to learners: they allow only 20 requests a day.
+ */
+const SHARES: Record<string, Partial<Record<Exclude<AiPool, "TUTOR">, number>>> = {
+  "gemini-3.8-flash": { PLATFORM: 5 },
+  "gemini-3.6-flash": { PLATFORM: 5 },
+  "gemini-3.1-flash-lite": { PLATFORM: 50, AUTHORING: 100 },
+  "gemini-3.5-flash-lite": { PLATFORM: 50, AUTHORING: 100 },
+  "deepseek-flash": { AUTHORING: 300 },
 };
 
 /** Requests a day for each person, in the platform's other features. The tutor has no per-person count: its share is. */
@@ -75,11 +80,12 @@ export function nextPacificMidnight(at = new Date()): Date {
   return probe;
 }
 
-function poolShare(model: string, pool: AiPool): number {
+export function poolShare(model: string, pool: AiPool): number {
   const limit = MODEL_LIMITS[model];
   if (!limit) return 0;
-  const reserve = Math.min(PLATFORM_RESERVE[model] ?? 0, limit.rpd);
-  return pool === "PLATFORM" ? reserve : limit.rpd - reserve;
+  const shares = SHARES[model] ?? {};
+  if (pool !== "TUTOR") return Math.min(shares[pool] ?? 0, limit.rpd);
+  return Math.max(0, limit.rpd - (shares.PLATFORM ?? 0) - (shares.AUTHORING ?? 0));
 }
 
 export type QuotaCheck = { ok: true } | { ok: false; reason: "minute" | "day" | "person"; retryAt: Date };

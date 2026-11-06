@@ -124,21 +124,24 @@ model Label {
 // Courses are imported from their own repositories (scripts/import-course.ts): modules and lessons are matched by
 // slug on every import and updated in place, so a student's progress survives a re-import.
 model Course {
-  id            String         @id @default(cuid())
-  slug          String         @unique
-  title         String
-  summary       String?
+  id             String              @id @default(cuid())
+  slug           String              @unique
+  title          String
+  summary        String?
   // The language the course's content is written in (BCP 47), e.g. "en".
-  language      String         @default("en")
-  status        CourseStatus   @default(DRAFT)
-  sourceRepoUrl String?
+  language       String              @default("en")
+  status         CourseStatus        @default(DRAFT)
+  sourceRepoUrl  String?
   // The commit the course was last imported from.
-  sourceRef     String?
-  importedAt    DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  modules       CourseModule[]
-  enrollments   Enrollment[]
+  sourceRef      String?
+  importedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  modules        CourseModule[]
+  enrollments    Enrollment[]
+  // The practice engine's skill graph (docs/practice.md).
+  practiceSkills PracticeSkill[]
+  skillGraphs    SkillGraphVersion[]
 
   @@map("course")
 }
@@ -164,7 +167,7 @@ model CourseModule {
 }
 
 model Lesson {
-  id               String           @id @default(cuid())
+  id               String               @id @default(cuid())
   moduleId         String
   slug             String
   position         Int
@@ -176,19 +179,21 @@ model Lesson {
   // Upper bound of estimatedTime, for totals.
   estimatedMinutes Int?
   prerequisites    String?
-  objectives       String[]         @default([])
+  objectives       String[]             @default([])
   // Repository-relative path of the lesson's file. A NOTEBOOK or PROJECT lesson opens it in the lab.
   sourcePath       String?
   // Markdown body of a READING lesson.
   body             String?
   // An lk-core item group with its media timeline, for VIDEO lessons.
   video            Json?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  module           CourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  module           CourseModule         @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress         LessonProgress[]
   videoUploads     VideoUpload[]
   tutorSessions    TutorSession[]
+  practiceSkills   PracticeSkill[]
+  practiceDraft    PracticeLessonDraft?
 
   @@unique([moduleId, slug])
   @@index([moduleId, position])
@@ -287,6 +292,8 @@ enum AiPool {
   TUTOR
   // The platform's other AI features (challenges, translation).
   PLATFORM
+  // Admins' content work: drafting the practice skill graph, and later writing practice tasks.
+  AUTHORING
 }
 
 enum AiRequestStatus {
@@ -621,4 +628,110 @@ model OauthClientAssertion {
   expiresAt DateTime
 
   @@map("oauth_client_assertion")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The practice engine's skill graph (docs/practice.md). An admin drafts each lesson's skills with a model, edits and
+// approves them on /admin/practice, then publishes: a SkillGraphVersion snapshots the approved skills and their
+// prerequisites as an lk-practice graph, which learners' practice is planned against.
+// ---------------------------------------------------------------------------------------------------------------
+
+// lk-practice's two default ladders: declarative (recognise, recall, produce, apply) and procedural (example,
+// complete, write, transfer).
+enum SkillKnowledge {
+  DECLARATIVE
+  PROCEDURAL
+}
+
+// HARD: the skill is locked until the prerequisite is mastered. SOFT: practised first when both are due.
+enum SkillEdgeStrength {
+  HARD
+  SOFT
+}
+
+enum SkillDraftStatus {
+  DRAFTED
+  APPROVED
+}
+
+// A skill in the working graph, taught by one lesson.
+model PracticeSkill {
+  id            String              @id @default(cuid())
+  courseId      String
+  lessonId      String
+  // The graph's id for it: kebab-case, unique in the course, kept across versions so learners' history follows it.
+  key           String
+  labelEs       String
+  labelEn       String
+  descriptionEs String
+  descriptionEn String
+  knowledge     SkillKnowledge
+  // Code tasks can practise it offline: plain Python and the course's packages, no network or API keys. When false,
+  // it gets recall tasks only.
+  runnable      Boolean             @default(true)
+  // How a grader can tell this skill apart in an answer (lk-practice's criteriaHint).
+  criteriaHint  String?
+  // Order within the lesson.
+  position      Int
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  course        Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lesson        Lesson              @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  // Edges where this skill is the prerequisite, and where it needs one.
+  requiredBy    PracticeSkillEdge[] @relation("EdgeFrom")
+  requires      PracticeSkillEdge[] @relation("EdgeTo")
+
+  @@unique([courseId, key])
+  @@index([lessonId, position])
+  @@map("practice_skill")
+}
+
+// `from` must be learned before `to`.
+model PracticeSkillEdge {
+  id        String            @id @default(cuid())
+  fromId    String
+  toId      String
+  strength  SkillEdgeStrength
+  // The drafting model's reason, for the reviewer.
+  reason    String?
+  createdAt DateTime          @default(now())
+  from      PracticeSkill     @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to        PracticeSkill     @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@index([toId])
+  @@map("practice_skill_edge")
+}
+
+// A lesson's place in the review: drafted by a model, then approved by an admin. Only approved lessons are published.
+model PracticeLessonDraft {
+  id           String           @id @default(cuid())
+  lessonId     String           @unique
+  status       SkillDraftStatus @default(DRAFTED)
+  // The model that wrote the draft, and its trace in the logs.
+  model        String?
+  traceId      String?
+  draftedAt    DateTime         @default(now())
+  approvedAt   DateTime?
+  approvedById String?
+  lesson       Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@map("practice_lesson_draft")
+}
+
+// A published graph: the approved skills and prerequisites at that moment, as lk-practice's SkillGraph (version
+// "<course slug>@<version>") plus each skill's labels and lesson. Never edited; the next publish adds a version.
+model SkillGraphVersion {
+  id            String   @id @default(cuid())
+  courseId      String
+  version       Int
+  graph         Json
+  skillCount    Int
+  edgeCount     Int
+  publishedAt   DateTime @default(now())
+  publishedById String?
+  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, version])
+  @@map("skill_graph_version")
 }

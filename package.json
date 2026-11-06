@@ -23,6 +23,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@google/genai": "^1.30.0",
     "@intellectif/lk-core": "1.10.1",
+    "@intellectif/lk-practice": "0.4.0",
     "@intellectif/lk-react": "23.7.2",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
