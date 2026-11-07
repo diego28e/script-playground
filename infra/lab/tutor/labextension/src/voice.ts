@@ -255,9 +255,11 @@ export class SoundBlocked extends Error {
 }
 
 /**
- * Plays a reply aloud as it streams in, piece after piece, through Web Audio. Streamed because the provider takes
- * about half as long to make the audio as it takes to play, but almost a minute for a long reply: the first sound
- * comes in under a second this way. One reading at a time.
+ * Reads a reply aloud as its audio streams in, through Web Audio. The text comes in pieces: all at once (play), or
+ * while the tutor is still writing it (begin, push, close), each piece fetched when the one before has arrived, so
+ * the reading never waits once it has started. Streamed because the provider makes audio about twice as fast as it
+ * plays but takes almost a minute for a long reply whole: the first sound comes in under a second this way. One
+ * reading at a time.
  *
  * Web Audio rather than an <audio> element: once a click has started its AudioContext (unlock()), sound may play at
  * any moment after, which reading a reply aloud when it arrives needs; and its analyser gives the orb the voice's level.
@@ -269,15 +271,25 @@ export class Speaker {
   private readonly sources = new Set<AudioBufferSourceNode>();
   private controller: AbortController | null = null;
   private active = false;
+  private audible = false;
   private token = 0;
+  private queue: string[] = [];
+  private closed = true;
+  private wake: (() => void) | null = null;
 
   constructor(
     private readonly fetchAudio: (text: string, signal: AbortSignal) => Promise<ReadableStream<Uint8Array>>,
-    private readonly hooks: { onStart: () => void; onEnd: () => void }
+    private readonly hooks: { onStart: () => void; onEnd: () => void; onSound?: () => void }
   ) {}
 
+  /** A reading is under way (its text may still be coming). */
   get playing(): boolean {
     return this.active;
+  }
+
+  /** Sound has started: the reading is heard, not just waiting for its first audio. */
+  get sounding(): boolean {
+    return this.active && this.audible;
   }
 
   /** Call from a click (Listen, Talk): browsers let a page make sound only once the learner asked for it. */
@@ -304,17 +316,44 @@ export class Speaker {
     return Math.min(1, Math.sqrt(sum / this.samples.length) * 4);
   }
 
-  /** Reads the pieces aloud, one after another. Resolves when the reading ends or is stopped. */
-  async play(parts: string[]): Promise<void> {
+  /** Reads these pieces aloud, one after another. Resolves when the reading ends or is stopped. */
+  play(parts: string[]): Promise<void> {
+    const done = this.begin();
+    for (const part of parts) this.push(part);
+    this.close();
+    return done;
+  }
+
+  /** Starts a reading whose text comes later (push), ended by close(). Resolves when it has all been read, or stopped. */
+  begin(): Promise<void> {
     this.stop();
     this.unlock();
+    const token = ++this.token;
+    this.controller = new AbortController();
+    this.active = true;
+    this.audible = false;
+    this.queue = [];
+    this.closed = false;
+    this.hooks.onStart();
+    return this.run(token, this.controller);
+  }
+
+  /** More text for the reading under way. */
+  push(text: string): void {
+    if (!this.active || this.closed || !text.trim()) return;
+    this.queue.push(text);
+    this.wake?.();
+  }
+
+  /** No more text: the reading ends once what it has is read. */
+  close(): void {
+    this.closed = true;
+    this.wake?.();
+  }
+
+  private async run(token: number, controller: AbortController): Promise<void> {
     const context = this.context as AudioContext;
     const analyser = this.analyser as AnalyserNode;
-    const token = ++this.token;
-    const controller = new AbortController();
-    this.controller = controller;
-    this.active = true;
-    this.hooks.onStart();
     const timeline = { playhead: 0, last: null as AudioBufferSourceNode | null };
     const schedule = (bytes: Uint8Array) => {
       const count = bytes.length >> 1;
@@ -333,11 +372,23 @@ export class Speaker {
       timeline.last = source;
       this.sources.add(source);
       source.onended = () => this.sources.delete(source);
+      if (!this.audible) {
+        this.audible = true;
+        this.hooks.onSound?.();
+      }
     };
     try {
       if (context.state !== 'running') await Promise.race([context.resume(), wait(500)]);
       if (context.state !== 'running') throw new SoundBlocked();
-      for (const part of parts) {
+      for (;;) {
+        if (token !== this.token) return;
+        const part = this.queue.shift();
+        if (part === undefined) {
+          if (this.closed) break;
+          await new Promise<void>((resolve) => (this.wake = resolve));
+          this.wake = null;
+          continue;
+        }
         const reader = (await this.fetchAudio(part, controller.signal)).getReader();
         let pending: Uint8Array[] = [];
         let size = 0;
@@ -365,7 +416,9 @@ export class Speaker {
         }
       }
       const last = timeline.last;
-      if (last) await new Promise<void>((resolve) => last.addEventListener('ended', () => resolve(), { once: true }));
+      if (last && context.currentTime < timeline.playhead) {
+        await new Promise<void>((resolve) => last.addEventListener('ended', () => resolve(), { once: true }));
+      }
     } catch (error) {
       // Stopped while it was coming in: not a failure.
       if (token !== this.token) return;
@@ -388,12 +441,34 @@ export class Speaker {
       }
     }
     this.sources.clear();
+    this.queue = [];
+    this.closed = true;
+    // A reading waiting for text wakes, sees it was stopped, and ends.
+    this.wake?.();
     this.end();
   }
 
   private end(): void {
     this.controller = null;
     this.active = false;
+    this.audible = false;
     this.hooks.onEnd();
   }
+}
+
+/**
+ * Where a reply still being written can be cut for reading aloud, at or after `from`: the end of the last whole
+ * sentence (. ! ? followed by a space or new line, or : at a line's end; not a numbered list's "1."), or a blank
+ * line, outside a code block. -1 when there is none yet.
+ */
+export function speechCut(markdown: string, from: number): number {
+  const ends = /(?:[^\d\s][.!?…](?=\s)|:(?=\n))\s+|\n\s*\n/g;
+  ends.lastIndex = from;
+  let cut = -1;
+  for (let match = ends.exec(markdown); match; match = ends.exec(markdown)) {
+    const at = match.index + match[0].length;
+    // An odd number of ``` before the cut: it's inside a code block, which is read as a whole once it closes.
+    if ((markdown.slice(0, at).match(/```/g) ?? []).length % 2 === 0) cut = at;
+  }
+  return cut;
 }

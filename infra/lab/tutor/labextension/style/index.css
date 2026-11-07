@@ -158,6 +158,25 @@
   overflow-x: auto;
 }
 
+/* A reply still being written: a soft caret at the end of its last line. */
+.jp-AcademiaTutor-tutor.jp-mod-writing .jp-RenderedMarkdown > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  border-radius: 2px;
+  background: var(--jp-ui-font-color2);
+  vertical-align: text-bottom;
+  animation: jp-academia-caret 1s steps(2) infinite;
+}
+
+@keyframes jp-academia-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
 .jp-AcademiaTutor-offer {
   display: block;
   margin-top: 8px;

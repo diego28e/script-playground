@@ -1,9 +1,9 @@
 import type { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Widget } from '@lumino/widgets';
-import { api, type Detour, type ModelChoice, type Mode, type Offer, type Step } from './api';
+import { api, type Detour, type ModelChoice, type Mode, type Offer, type ReplyEvent, type Step } from './api';
 import { Orb, type OrbState } from './orb';
-import { pieces, SoundBlocked, Speaker, speakable, VoiceStream } from './voice';
+import { pieces, SoundBlocked, Speaker, speakable, speechCut, VoiceStream } from './voice';
 import { activeCellFailed, readCells } from './notebook';
 import { language, t } from './strings';
 
@@ -89,6 +89,8 @@ export class TutorPanel extends Widget {
       if (!this.busy) this.voice?.resume();
       this.renderVoice();
     },
+    // The orb turns from thinking to speaking when the tutor is heard, not when the reading is set up.
+    onSound: () => this.renderVoice(),
   });
 
   constructor(
@@ -182,19 +184,58 @@ export class TutorPanel extends Widget {
     this.setBusy(true);
     this.addMessage('learner', kind === 'ask' ? (message ?? '') : kind === 'explain_error' ? t.explainAsked : t.fixAsked);
     if (kind === 'ask') this.input.value = '';
+    // The reply as the tutor writes it: shown at once, and in a voice conversation read aloud sentence by sentence
+    // while the rest is still coming (docs/voice.md, "Streaming the tutor").
+    const live = { text: '', item: null as HTMLElement | null, render: 0, spoken: 0, reading: false };
+    const aloud = () => spoken && Boolean(this.voice) && this.readAloud;
+    const read = (upTo: number) => {
+      for (const part of pieces(speakable(live.text.slice(live.spoken, upTo), t.codeOmitted), 600)) this.speaker.push(part);
+      live.spoken = upTo;
+    };
+    const onReply = (event: ReplyEvent) => {
+      if (panel !== this.notebook) return;
+      if (event.type === 'reset') {
+        live.text = '';
+        live.spoken = 0;
+        if (live.reading) this.speaker.stop();
+        live.reading = false;
+      } else {
+        live.text += event.text;
+      }
+      if (!live.item) {
+        live.item = this.liveMessage();
+        this.status.textContent = '';
+      }
+      this.renderLive(live);
+      if (event.type !== 'delta' || !aloud()) return;
+      // The first sentence goes as soon as it's whole, to start speaking; after that, a few sentences at a time.
+      const cut = speechCut(live.text, live.spoken);
+      if (cut < 0 || (live.reading && cut - live.spoken < 80)) return;
+      if (!live.reading) {
+        live.reading = true;
+        this.speaker.begin().catch((error) => this.readFailed(error));
+      }
+      read(cut);
+    };
     try {
-      const reply = await api.turn({
-        notebookPath: panel.context.path,
-        kind,
-        message,
-        cells: readCells(panel),
-        activeCell: Math.max(0, panel.content.activeCellIndex),
-        platformLanguage: language,
-        ...(spoken ? { spoken: true } : {}),
-        ...(this.models && this.chosenModel ? { model: this.chosenModel } : {}),
-      });
+      const reply = await api.turn(
+        {
+          notebookPath: panel.context.path,
+          kind,
+          message,
+          cells: readCells(panel),
+          activeCell: Math.max(0, panel.content.activeCellIndex),
+          platformLanguage: language,
+          ...(spoken ? { spoken: true } : {}),
+          ...(this.models && this.chosenModel ? { model: this.chosenModel } : {}),
+        },
+        onReply
+      );
+      window.clearTimeout(live.render);
       if (panel !== this.notebook) return;
       if (!reply.ok) {
+        live.item?.remove();
+        if (live.reading) this.speaker.stop();
         const time = reply.retryAt ? new Date(reply.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
         this.addNotice(reply.reason === 'quota' && time ? t.resting(time) : reply.message || t.failed);
         return;
@@ -203,14 +244,58 @@ export class TutorPanel extends Widget {
       this.mode = reply.mode;
       this.renderMode();
       this.renderGoal(reply.objective, reply.steps, reply.unlocked, reply.detours);
-      const listen = this.addMessage('tutor', reply.reply, reply.practiceOffers, reply.model, reply.chosenModel);
-      // A conversation by voice is answered by voice; the microphone listens again when the reading ends.
-      if (spoken && this.voice && this.readAloud && listen) void this.readReply(reply.reply, listen);
+      const listen = this.addMessage('tutor', reply.reply, reply.practiceOffers, reply.model, reply.chosenModel, live.item);
+      if (live.reading) {
+        // The rest of what was written, then the reading ends on its own; its Listen button stops it meanwhile.
+        read(live.text.length);
+        this.speaker.close();
+        if (listen && this.speaker.playing) {
+          this.speakingButton = listen;
+          this.markSpeaking(listen, true);
+        }
+      } else if (aloud() && listen) {
+        // A conversation by voice is answered by voice; the microphone listens again when the reading ends.
+        void this.readReply(reply.reply, listen);
+      }
     } catch {
+      live.item?.remove();
+      if (live.reading) this.speaker.stop();
       this.addNotice(t.failed);
     } finally {
       this.setBusy(false);
     }
+  }
+
+  /** The tutor's message while it's being written: filled in by renderLive, finished by addMessage. */
+  private liveMessage(): HTMLElement {
+    this.log.querySelector('.jp-AcademiaTutor-notice')?.remove();
+    const item = document.createElement('div');
+    item.className = 'jp-AcademiaTutor-message jp-AcademiaTutor-tutor jp-mod-writing';
+    const who = document.createElement('div');
+    who.className = 'jp-AcademiaTutor-who';
+    who.textContent = t.tutor;
+    const body = document.createElement('div');
+    body.className = 'jp-AcademiaTutor-body';
+    item.append(who, body);
+    this.log.append(item);
+    return item;
+  }
+
+  /** Renders the reply so far, a few times a second at most (Markdown is rendered whole each time). */
+  private renderLive(live: { text: string; item: HTMLElement | null; render: number }): void {
+    if (live.render || !live.item) return;
+    live.render = window.setTimeout(() => {
+      live.render = 0;
+      const body = live.item?.querySelector('.jp-AcademiaTutor-body');
+      if (!body || !live.item?.isConnected) return;
+      const pinned = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 40;
+      const renderer = this.rendermime.createRenderer('text/markdown');
+      void renderer.renderModel(this.rendermime.createModel({ data: { 'text/markdown': live.text } })).then(() => {
+        if (!live.item?.isConnected) return;
+        body.replaceChildren(renderer.node);
+        if (pinned) this.log.scrollTop = this.log.scrollHeight;
+      });
+    }, 80);
   }
 
   /** Re-checks whether the active cell failed, to show or hide the error buttons. */
@@ -371,10 +456,21 @@ export class TutorPanel extends Widget {
     }
   }
 
-  /** Adds a message to the conversation; for the tutor's, returns its Listen button. */
-  private addMessage(role: 'learner' | 'tutor', text: string, offers: Offer[] = [], model?: string, chosenModel?: string | null): HTMLButtonElement | null {
+  /**
+   * Adds a message to the conversation, or finishes the one being written (`into`); for the tutor's, returns its Listen
+   * button.
+   */
+  private addMessage(
+    role: 'learner' | 'tutor',
+    text: string,
+    offers: Offer[] = [],
+    model?: string,
+    chosenModel?: string | null,
+    into?: HTMLElement | null
+  ): HTMLButtonElement | null {
     this.log.querySelector('.jp-AcademiaTutor-notice')?.remove();
-    const item = document.createElement('div');
+    const item = into ?? document.createElement('div');
+    item.replaceChildren();
     item.className = `jp-AcademiaTutor-message jp-AcademiaTutor-${role}`;
     const who = document.createElement('div');
     who.className = 'jp-AcademiaTutor-who';
@@ -401,7 +497,7 @@ export class TutorPanel extends Widget {
       body.textContent = text;
     }
     for (const offer of offers) item.append(this.offerButton(offer));
-    this.log.append(item);
+    if (!item.isConnected) this.log.append(item);
     this.log.scrollTop = this.log.scrollHeight;
     return listen;
   }
@@ -515,8 +611,8 @@ export class TutorPanel extends Widget {
 
   private orbState(): OrbState {
     if (this.connecting) return 'connecting';
-    if (this.speaker.playing) return 'speaking';
-    if (this.busy) return 'thinking';
+    if (this.speaker.sounding) return 'speaking';
+    if (this.busy || this.speaker.playing) return 'thinking';
     return 'listening';
   }
 
@@ -578,9 +674,13 @@ export class TutorPanel extends Widget {
     try {
       await this.speaker.play(parts);
     } catch (error) {
-      const known = (error as { known?: boolean }).known ? (error as Error).message : null;
-      this.addNotice(error instanceof SoundBlocked ? t.listenBlocked : known || t.listenFailed);
+      this.readFailed(error);
     }
+  }
+
+  private readFailed(error: unknown): void {
+    const known = (error as { known?: boolean }).known ? (error as Error).message : null;
+    this.addNotice(error instanceof SoundBlocked ? t.listenBlocked : known || t.listenFailed);
   }
 
   private markSpeaking(button: HTMLButtonElement, speaking: boolean): void {

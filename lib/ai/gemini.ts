@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ApiError, GoogleGenAI, type Content, type FunctionCall, type GenerateContentConfig, type ThinkingLevel } from "@google/genai";
+import { ApiError, GoogleGenAI, type Content, type FunctionCall, type GenerateContentConfig, type GenerateContentResponse, type ThinkingLevel } from "@google/genai";
 import type { AiPool } from "@prisma/client";
 import { checkQuota, finishRequest, startRequest } from "@/lib/ai/quota";
 import { ClaudeError, claudeGenerate } from "@/lib/ai/claude";
@@ -129,6 +129,7 @@ export async function generateWithFallback({
   models = MODEL_CHAIN,
   chosenFirst = false,
   deadline,
+  onText,
 }: {
   feature: AiFeature;
   contents: Content[];
@@ -146,6 +147,11 @@ export async function generateWithFallback({
    * at most the time left, and a model is skipped when less than MIN_ATTEMPT_MS remains.
    */
   deadline?: number;
+  /**
+   * Follows each attempt's answer as it's written (the whole text so far, and which attempt): the model is then asked
+   * to stream. A later attempt starts over, so a caller showing the text drops what an earlier attempt wrote.
+   */
+  onText?: (text: string, attempt: number) => void;
 }): Promise<AiResult> {
   const traceId = randomUUID();
   const started = Date.now();
@@ -222,8 +228,11 @@ export async function generateWithFallback({
     };
     try {
       if (provider === "deepseek" || provider === "anthropic") {
-        const generate = provider === "deepseek" ? deepSeekGenerate : claudeGenerate;
-        const answer = await generate(model, contents, config, AbortSignal.timeout(attemptMs));
+        const signal = AbortSignal.timeout(attemptMs);
+        const answer =
+          provider === "deepseek"
+            ? await deepSeekGenerate(model, contents, config, signal, onText && ((text) => onText(text, index)))
+            : await claudeGenerate(model, contents, config, signal);
         const outcome: Attempt["outcome"] = answer.text ? "ok" : "empty";
         attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted, tokens: answer.tokens });
         await record(outcome === "ok", answer.tokens);
@@ -249,11 +258,8 @@ export async function generateWithFallback({
       // its lowest level instead. @google/genai 1.30's enum predates MINIMAL; the API takes the string as is.
       const thinkingConfig = { thinkingLevel: "MINIMAL" as ThinkingLevel, ...config.thinkingConfig };
       if (minThinking && thinkingConfig.thinkingLevel === ("MINIMAL" as ThinkingLevel)) thinkingConfig.thinkingLevel = minThinking as ThinkingLevel;
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: { ...config, thinkingConfig, abortSignal: AbortSignal.timeout(attemptMs) },
-      });
+      const request = { model, contents, config: { ...config, thinkingConfig, abortSignal: AbortSignal.timeout(attemptMs) } };
+      const response = onText ? await streamGemini(ai, request, (text) => onText(text, index)) : await ai.models.generateContent(request);
       const candidate = response.candidates?.[0];
       const usage = response.usageMetadata;
       // Text parts only: response.text also warns when the reply holds function calls.
@@ -313,4 +319,36 @@ export async function generateWithFallback({
   // Every model skipped for quota (none was even tried): say when the tutor or feature is back.
   if (retryAt && attempts.every((attempt) => attempt.outcome === "quota")) return finish({ ok: false, reason: "quota", retryAt, traceId });
   return finish({ ok: false, reason: "unavailable", traceId });
+}
+
+/**
+ * A Gemini answer streamed, passing on its text as it grows, and returned in the shape of a whole answer: the text in
+ * one part, the function calls, and the last chunk's finish reason, usage and feedback.
+ */
+async function streamGemini(
+  ai: GoogleGenAI,
+  request: Parameters<GoogleGenAI["models"]["generateContentStream"]>[0],
+  onText: (text: string) => void,
+): Promise<Pick<GenerateContentResponse, "candidates" | "usageMetadata" | "promptFeedback" | "functionCalls">> {
+  let text = "";
+  const functionCalls: FunctionCall[] = [];
+  let last: GenerateContentResponse | undefined;
+  for await (const chunk of await ai.models.generateContentStream(request)) {
+    last = chunk;
+    for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+      if (part.thought) continue;
+      if (part.functionCall) functionCalls.push(part.functionCall);
+      if (part.text) {
+        text += part.text;
+        onText(text);
+      }
+    }
+  }
+  const candidate = last?.candidates?.[0];
+  return {
+    candidates: [{ ...candidate, content: { role: "model", parts: text ? [{ text }] : [] } }],
+    usageMetadata: last?.usageMetadata,
+    promptFeedback: last?.promptFeedback,
+    functionCalls,
+  };
 }

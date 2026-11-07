@@ -14,7 +14,8 @@ import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, speakStream, voiceConf
 // it, through the academia_tutor server extension (infra/lab/tutor). Each request carries the token JupyterHub
 // gave that learner's server; the service asks the hub whose token it is, so a learner can only be themselves.
 //
-//   POST /v1/turn       a tutor turn (lib/tutor/harness.ts runTutorTurn)
+//   POST /v1/turn       a tutor turn (lib/tutor/harness.ts runTutorTurn); with "stream": true, lines of JSON as the
+//                       reply is written ({type: delta | reset}), then {type: done, result}
 //   GET  /v1/session    the panel's state on opening: mode, and the session for ?notebookPath=
 //   PUT  /v1/mode       Guide me / Show me
 //   POST /v1/practice   "practise this in a few days" after a detour
@@ -87,7 +88,21 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   if (!learner) return send(response, 401, { ok: false, reason: "unauthenticated", message: "The lab couldn't confirm who you are." });
 
   if (request.method === "POST" && url.pathname === "/v1/turn") {
-    const result = await runTutorTurn(learner.userId, (await readJson(request)) as never);
+    const body = (await readJson(request)) as { stream?: boolean };
+    if (body.stream === true) {
+      // The reply as the model writes it: the panel shows it and reads it aloud as it comes (docs/voice.md).
+      response.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+      const line = (event: unknown) => {
+        if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+      };
+      const result = await runTutorTurn(learner.userId, body as never, line).catch((error: Error) => {
+        logAi("error", { event: "learning.error", path: request.url, error: String(error.stack ?? error).slice(0, 1000) });
+        return { ok: false as const, reason: "unavailable" as const, message: "The tutor had a problem. Try again." };
+      });
+      line({ type: "done", result });
+      return response.end();
+    }
+    const result = await runTutorTurn(learner.userId, body as never);
     const status = result.ok ? 200 : result.reason === "invalid" ? 400 : result.reason === "no-lab-access" ? 403 : result.reason === "quota" ? 429 : 503;
     return send(response, status, result);
   }

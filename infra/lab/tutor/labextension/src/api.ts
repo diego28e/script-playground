@@ -29,6 +29,21 @@ export type TurnReply =
     }
   | { ok: false; reason?: string; message: string; retryAt?: string };
 
+/** While the tutor writes: a new piece of its reply, or "start over" (another model took over the turn). */
+export type ReplyEvent = { type: 'delta'; text: string } | { type: 'reset' };
+
+export type TurnBody = {
+  notebookPath: string;
+  kind: 'ask' | 'explain_error' | 'suggest_fix';
+  message?: string;
+  cells: Cell[];
+  activeCell: number;
+  platformLanguage: 'es' | 'en';
+  /** Said out loud in the voice conversation: the tutor answers briefly, to be heard (docs/voice.md). */
+  spoken?: boolean;
+  model?: string;
+};
+
 export type SessionState = {
   ok: boolean;
   mode: Mode;
@@ -60,17 +75,38 @@ export const api = {
   session: (notebookPath: string) => call<SessionState>('GET', 'session', undefined, `?notebookPath=${encodeURIComponent(notebookPath)}`),
   mode: (mode: Mode) => call<{ ok: boolean }>('PUT', 'mode', { mode }),
   practice: (sessionId: string, offer: Offer) => call<{ ok: boolean }>('POST', 'practice', { sessionId, ...offer }),
-  turn: (body: {
-    notebookPath: string;
-    kind: 'ask' | 'explain_error' | 'suggest_fix';
-    message?: string;
-    cells: Cell[];
-    activeCell: number;
-    platformLanguage: 'es' | 'en';
-    /** Said out loud in the voice conversation: the tutor answers briefly, to be heard (docs/voice.md). */
-    spoken?: boolean;
-    model?: string;
-  }) => call<TurnReply>('POST', 'turn', body),
+  /**
+   * A tutor turn, streamed: `onReply` gets the reply as the tutor writes it, and the promise the whole result once the
+   * turn is saved. The service sends lines of JSON; an older one that answers in one piece works too.
+   */
+  turn: async (body: TurnBody, onReply: (event: ReplyEvent) => void): Promise<TurnReply> => {
+    const url = URLExt.join(settings.baseUrl, 'academia-tutor', 'turn');
+    const response = await ServerConnection.makeRequest(
+      url,
+      { method: 'POST', body: JSON.stringify({ ...body, stream: true }), headers: { 'Content-Type': 'application/json' } },
+      settings
+    );
+    if (!(response.headers.get('Content-Type') ?? '').includes('ndjson') || !response.body) {
+      return (await response.json().catch(() => ({ ok: false, message: '' }))) as TurnReply;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: TurnReply = { ok: false, message: '' };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = done ? '' : (lines.pop() ?? '');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as ReplyEvent | { type: 'done'; result: TurnReply };
+        if (event.type === 'done') result = event.result;
+        else onReply(event);
+      }
+      if (done) return result;
+    }
+  },
   /** A grant for the microphone stream (docs/voice.md). */
   listen: (language: 'es' | 'en') =>
     call<{ ok: true; grant: ListenGrant; maxMinutes: number } | { ok: false; reason?: string; message: string }>('POST', 'voice-listen', {

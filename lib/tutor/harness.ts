@@ -6,6 +6,7 @@ import { labGroups } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import { SYSTEM_PROMPT, buildContext, learnerTurn, type TurnContext } from "@/lib/tutor/prompt";
 import { applyTool, readState, unlockedSteps, type AppliedAction, type MemoryWrite, type TutorState } from "@/lib/tutor/state";
+import { replyStreamer, type ReplyEvent } from "@/lib/tutor/reply-stream";
 import { RESPONSE_SCHEMA, readResponse } from "@/lib/tutor/tools";
 
 // One tutor turn (docs/ai-tutor.md): the learner asks, or presses "Explain this error" / "Suggest a fix", and the
@@ -117,30 +118,39 @@ async function remember(userId: string, sessionId: string, write: MemoryWrite) {
   ]);
 }
 
-export async function runTutorTurn(userId: string, input: TutorRequest): Promise<TutorReply> {
+/**
+ * One turn. With `onReply`, the reply is passed on while the model writes it (the panel shows it and reads it aloud
+ * as it comes); the returned result, after the actions are applied and the exchange saved, is the same either way.
+ */
+export async function runTutorTurn(userId: string, input: TutorRequest, onReply?: (event: ReplyEvent) => void): Promise<TutorReply> {
   const parsed = TutorRequestSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid", message: parsed.error.issues[0]?.message ?? "Invalid request." };
   const request = parsed.data;
   if (request.activeCell >= request.cells.length) return { ok: false, reason: "invalid", message: "The active cell isn't in the notebook." };
   if (request.kind === "ask" && !request.message?.trim()) return { ok: false, reason: "invalid", message: "Write a question for the tutor." };
 
+  // The lookups before the model, at once: each is a round trip to the database, and the learner is waiting. Access
+  // is checked before anything is written (the mode) or sent to a model.
+  const [groups, profile, { lessonId, course, lesson }, recent] = await Promise.all([
+    labGroups(userId),
+    prisma.tutorProfile.findUnique({ where: { userId } }),
+    courseContext(userId, request.notebookPath),
+    prisma.tutorSession.findFirst({
+      where: { userId, notebookPath: request.notebookPath, updatedAt: { gt: new Date(Date.now() - SESSION_IDLE_MS) } },
+      orderBy: { updatedAt: "desc" },
+    }),
+  ]);
   // The tutor is part of the lab: the same people the hub admits.
-  const groups = await labGroups(userId);
   if (!groups.includes("lab")) {
     return { ok: false, reason: "no-lab-access", message: "The tutor is for learners enrolled in a course." };
   }
   const chosenModel = isLabAdmin(groups) && TUTOR_CHAIN.some((entry) => entry.model === request.model) ? request.model! : null;
 
-  const profile = request.mode
-    ? await prisma.tutorProfile.upsert({ where: { userId }, create: { userId, mode: request.mode }, update: { mode: request.mode } })
-    : await prisma.tutorProfile.findUnique({ where: { userId } });
-  const mode: TutorMode = profile?.mode ?? "GUIDE";
+  if (request.mode && request.mode !== profile?.mode) {
+    await prisma.tutorProfile.upsert({ where: { userId }, create: { userId, mode: request.mode }, update: { mode: request.mode } });
+  }
+  const mode: TutorMode = request.mode ?? profile?.mode ?? "GUIDE";
 
-  const { lessonId, course, lesson } = await courseContext(userId, request.notebookPath);
-  const recent = await prisma.tutorSession.findFirst({
-    where: { userId, notebookPath: request.notebookPath, updatedAt: { gt: new Date(Date.now() - SESSION_IDLE_MS) } },
-    orderBy: { updatedAt: "desc" },
-  });
   const session = recent ?? (await prisma.tutorSession.create({ data: { userId, lessonId, notebookPath: request.notebookPath } }));
   let state = readState(session.state);
 
@@ -168,7 +178,14 @@ export async function runTutorTurn(userId: string, input: TutorRequest): Promise
   });
   const said = learnerTurn(request.kind, request.message, request.platformLanguage, request.spoken === true);
   const contents: Content[] = [
-    ...history.reverse().map((message) => ({ role: message.role === "tutor" ? "model" : "user", parts: [{ text: message.content }] })),
+    // The tutor's earlier replies in the shape it answers in: shown as plain text, a model in JSON mode follows the
+    // history rather than the instructions and answers in plain text, which DeepSeek's JSON mode then blanks (an
+    // empty answer, and the chain falls back to slower models). Their actions are in the session state already.
+    ...history.reverse().map((message) =>
+      message.role === "tutor"
+        ? { role: "model", parts: [{ text: JSON.stringify({ actions: [], reply: message.content }) }] }
+        : { role: "user", parts: [{ text: message.content }] },
+    ),
     { role: "user", parts: [{ text: `<context>\n${context}\n</context>` }, { text: said }] },
   ];
 
@@ -179,6 +196,7 @@ export async function runTutorTurn(userId: string, input: TutorRequest): Promise
     chosenFirst: chosenModel !== null,
     userId,
     contents,
+    ...(onReply ? { onText: replyStreamer(onReply) } : {}),
     config: {
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",

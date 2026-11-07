@@ -54,6 +54,29 @@ with `spoken: true`; the tutor is then told the learner will hear its reply, and
 microphone sending silence meanwhile, and listening starts again when the reading ends: a back-and-forth with no
 clicks. Tapping the orb while it speaks cuts the tutor off and listens. A typed message is never read aloud unasked.
 
+**Streaming the tutor.** A turn no longer waits for the whole answer. The panel asks for the turn with `stream: true`;
+the model is asked to stream (DeepSeek's server-sent events, Gemini's `generateContentStream`, through
+`generateWithFallback`'s `onText`); since the tutor answers with one JSON object, `{"actions": [...], "reply": "..."}`,
+`lib/tutor/reply-stream.ts` reads the reply string out of the partial JSON as it grows and passes on each new piece. The
+learning service sends lines of JSON (`{type: "delta"}`, a `reset` when the chain moves to another model mid-answer,
+then `{type: "done", result}` once the actions are applied and the exchange saved); the lab's server extension passes
+them on as they come, like the speech. The panel shows the reply as it's written (a caret while it is), and in a voice
+conversation reads it as it comes: the first whole sentence goes to Deepgram at once, then a few sentences at a time,
+never cutting inside a code block (`speechCut`), each fetched as the one before finishes arriving, into the same
+reading. The orb says "thinking" until the tutor is actually heard.
+
+Measured on 2026-11-06, a spoken question on lesson 00-05 with DeepSeek V4.1 Flash (thinking off, about 11,000 input
+tokens): the reply's first words 1.2 to 2.5 s after the question was sent, the first sentence whole about 0.2 s later,
+the turn saved at 1.9 to 3.1 s; in the panel, the tutor was heard 3.1 s after the question (the turn ended at 3.2 s).
+The model writes its actions before its reply (plan, then write), which costs about a second before the first words.
+
+**Why it was slow before: DeepSeek's empty answers.** The tutor's earlier replies went into the history as plain text,
+while it answers in JSON. From the second turn on, DeepSeek followed the history and answered in plain text, which its
+JSON mode blanks: an empty answer (billed), and the chain fell back to the Gemini models (3.8 Flash busy with a 503,
+then 3.6 Flash, thinking), 10.4 s in all where DeepSeek takes 2 to 3. The history now shows those replies in the shape
+the tutor answers in (`{"actions": [], "reply": ...}`; their actions are in the session state already), and five
+follow-up turns in a row were all answered by DeepSeek on the first try.
+
 **The orb.** The platform's voice-powered orb (a WebGL shader, `ogl` and React in the original) rewritten for plain
 WebGL in `orb.ts`, since the lab's extension has no React. It turns faster and ripples with the voice it follows: the
 learner's microphone level while listening, the tutor's own audio (an analyser on the playback) while speaking; it dims
@@ -97,6 +120,7 @@ for a line on an admin page; the provider can change later by rewriting `lib/voi
 | The daily allowance and its records | `lib/voice/allowance.ts` | Built and tried locally |
 | The learning service's routes, and the lab server's forwarding (the speech streamed through) | `services/learning/server.ts` (`/v1/voice/listen`, `/v1/voice/speak`), `infra/lab/tutor/academia_tutor/handlers.py` | Built and tried locally |
 | The tutor panel: Talk (hands-free), Listen on each reply | `infra/lab/tutor/labextension/src/voice.ts`, `panel.ts`, `api.ts`, `strings.ts`, `style/index.css` | Built and tried locally; in production, Listen failed on long replies (fixed below) |
+| The tutor's turn streamed (the reply shown and read aloud as it's written), and the history in the tutor's JSON shape | `lib/ai/deepseek.ts`, `lib/ai/gemini.ts` (`onText`), `lib/tutor/reply-stream.ts`, `lib/tutor/harness.ts`, `services/learning/server.ts`, `handlers.py`, `api.ts`, `panel.ts`, `voice.ts` (`Speaker.begin/push/close`, `speechCut`) | Built and tried locally against the real learning service and DeepSeek |
 | Streamed speech, replies read aloud in a voice conversation, short spoken replies, the round Talk button and the orb | the files above, `orb.ts`, `lib/voice/deepgram.ts` (`speakStream`), `lib/tutor/prompt.ts` (`spoken`) | Built and tried locally |
 | The lesson page's frame allows the microphone and audio | `components/courses/lab-frame.tsx` | Built |
 

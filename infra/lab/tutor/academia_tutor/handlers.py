@@ -67,8 +67,9 @@ class TutorHandler(APIHandler):
         # JSON unless told otherwise.
         self.finish(response.body or b"{}", set_content_type=response.headers.get("Content-Type", "application/json"))
 
-    async def stream(self, action: str, body: dict):
-        """Passes the learning service's answer on as it arrives: a reply read aloud plays while it's being made."""
+    async def stream(self, action: str, body: dict, timeout: float = SPEAK_TIMEOUT):
+        """Passes the learning service's answer on as it arrives: a reply read aloud plays while it's being made, and a
+        streamed turn shows while the tutor writes it."""
         token = os.environ.get("JUPYTERHUB_API_TOKEN")
         if not token:
             self.set_status(503)
@@ -98,7 +99,7 @@ class TutorHandler(APIHandler):
             method="POST",
             headers={"Authorization": f"token {token}", "Content-Type": "application/json"},
             body=json.dumps(body),
-            request_timeout=SPEAK_TIMEOUT,
+            request_timeout=timeout,
             header_callback=on_header,
             streaming_callback=on_chunk,
         )
@@ -128,6 +129,8 @@ class TutorHandler(APIHandler):
             if solution:
                 body["solution"] = solution
             body["notebookPath"] = course_path(path)
+            if body.get("stream") is True:
+                return await self.stream("turn", body, TURN_TIMEOUT)
             return await self.forward("POST", "turn", body)
         if action == "practice":
             return await self.forward("POST", "practice", body)
