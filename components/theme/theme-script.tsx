@@ -1,5 +1,6 @@
 // Runs before the page paints, so the chosen theme never flashes the other one first.
-// "system" (the default) follows the operating system, live; "light" and "dark" are the viewer's choice.
+// With no stored choice the site follows the operating system, live; a stored "light" or "dark" is the viewer's pick
+// (theme-toggle.tsx stores one only while it differs from the operating system).
 const script = `(() => {
   try {
     const stored = localStorage.getItem("theme");
