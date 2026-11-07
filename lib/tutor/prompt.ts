@@ -144,8 +144,15 @@ export function replyLanguage(message: string | undefined, platformLanguage: "es
   return es > en ? "es" : "en";
 }
 
-export function learnerTurn(kind: "ask" | "explain_error" | "suggest_fix", message: string | undefined, platformLanguage: "es" | "en" = "es"): string {
+/** A voice conversation: the reply is heard, not read, so it has to sound like someone talking. */
+const SPOKEN =
+  "[The learner said this out loud and will hear your reply read aloud. Answer the way a tutor talks: a few short sentences " +
+  "(about 80 words at most), one idea at a time, ending with one question when you need their answer. No headings, tables " +
+  "or long lists. Code still goes in a code block, which is shown but not read aloud: say in a sentence what it does.]";
+
+export function learnerTurn(kind: "ask" | "explain_error" | "suggest_fix", message: string | undefined, platformLanguage: "es" | "en" = "es", spoken = false): string {
   const reply = replyLanguage(kind === "ask" ? message : undefined, platformLanguage) === "es" ? "Spanish" : "English";
+  if (kind === "ask" && spoken) return `${message ?? ""}\n\n${SPOKEN}\n[Reply in ${reply}.]`;
   if (kind === "explain_error") return `[The learner pressed "Explain this error" on the active cell.]${message ? `\n${message}` : ""}\n\n[Reply in ${reply}.]`;
   if (kind === "suggest_fix") return `[The learner pressed "Suggest a fix" on the active cell.]${message ? `\n${message}` : ""}\n\n[Reply in ${reply}.]`;
   return `${message ?? ""}\n\n[Reply in ${reply}.]`;

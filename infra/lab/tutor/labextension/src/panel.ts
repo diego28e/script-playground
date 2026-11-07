@@ -2,11 +2,22 @@ import type { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Widget } from '@lumino/widgets';
 import { api, type Detour, type ModelChoice, type Mode, type Offer, type Step } from './api';
-import { pieces, Speaker, speakable, VoiceStream } from './voice';
+import { Orb, type OrbState } from './orb';
+import { pieces, SoundBlocked, Speaker, speakable, VoiceStream } from './voice';
 import { activeCellFailed, readCells } from './notebook';
 import { language, t } from './strings';
 
 type Kind = 'ask' | 'explain_error' | 'suggest_fix';
+
+// Whether a voice conversation reads the tutor's replies aloud: the learner's choice, per browser (on at first).
+const READ_ALOUD_KEY = 'academia-tutor:read-aloud';
+function storedReadAloud(): boolean {
+  try {
+    return localStorage.getItem(READ_ALOUD_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
 
 // The admin's model choice, per browser: it only reorders the fallback chain, so it needs no account setting.
 const MODEL_KEY = 'academia-tutor:model';
@@ -50,13 +61,23 @@ export class TutorPanel extends Widget {
   private readonly errorBar = document.createElement('div');
   private readonly input = document.createElement('textarea');
   private readonly sendButton = document.createElement('button');
-  // Voice (docs/voice.md): the hands-free conversation, and replies read aloud.
+  private readonly actions = document.createElement('div');
+  // Voice (docs/voice.md): a round Talk button beside Send; while the conversation is on, the box and buttons give way
+  // to the dock: the orb, what it's doing, the words as they're heard, and the conversation's two switches.
   private readonly talkButton = document.createElement('button');
-  private readonly voiceStatus = document.createElement('div');
+  private readonly dock = document.createElement('div');
+  private readonly orbButton = document.createElement('button');
+  private readonly orb = new Orb(() => (this.speaker.playing ? this.speaker.level : this.micLevel));
+  private readonly voiceState = document.createElement('div');
+  private readonly voiceWords = document.createElement('div');
+  private readonly readAloudButton = document.createElement('button');
+  private readonly endButton = document.createElement('button');
   private voice: VoiceStream | null = null;
   private connecting = false;
+  private micLevel = 0;
+  private readAloud = storedReadAloud();
   private speakingButton: HTMLButtonElement | null = null;
-  private readonly speaker = new Speaker((text) => api.speak(text, language), {
+  private readonly speaker = new Speaker((text, signal) => api.speak(text, language, signal), {
     // The microphone mustn't hear the tutor reading aloud.
     onStart: () => {
       this.voice?.pause();
@@ -105,14 +126,40 @@ export class TutorPanel extends Widget {
     this.sendButton.className = 'jp-AcademiaTutor-send jp-mod-styled jp-mod-accept';
     this.sendButton.textContent = t.send;
     this.talkButton.type = 'button';
-    this.talkButton.className = 'jp-AcademiaTutor-talk jp-mod-styled';
-    this.talkButton.addEventListener('click', () => void this.toggleVoice());
-    this.voiceStatus.className = 'jp-AcademiaTutor-voiceStatus';
-    this.voiceStatus.setAttribute('role', 'status');
-    const actions = document.createElement('div');
-    actions.className = 'jp-AcademiaTutor-actions';
-    actions.append(this.talkButton, this.sendButton);
-    form.append(this.voiceStatus, this.input, actions);
+    this.talkButton.className = 'jp-AcademiaTutor-round jp-AcademiaTutor-talk';
+    this.talkButton.setAttribute('aria-label', t.talkLabel);
+    this.talkButton.append(microphoneIcon(16));
+    tip(this.talkButton, t.talk, 'top');
+    this.talkButton.addEventListener('click', () => void this.startVoice());
+    this.actions.className = 'jp-AcademiaTutor-actions';
+    this.actions.append(this.talkButton, this.sendButton);
+
+    this.dock.className = 'jp-AcademiaTutor-dock';
+    this.orbButton.type = 'button';
+    this.orbButton.className = 'jp-AcademiaTutor-orbButton';
+    this.orbButton.append(this.orb.node);
+    // While the tutor reads aloud, the orb is the way to cut in: the reading stops and the microphone listens again.
+    this.orbButton.addEventListener('click', () => {
+      if (this.speaker.playing) this.speaker.stop();
+    });
+    this.voiceState.className = 'jp-AcademiaTutor-voiceState';
+    this.voiceState.setAttribute('role', 'status');
+    this.voiceWords.className = 'jp-AcademiaTutor-words';
+    this.voiceWords.setAttribute('aria-live', 'polite');
+    this.readAloudButton.type = 'button';
+    this.readAloudButton.className = 'jp-AcademiaTutor-round';
+    this.readAloudButton.addEventListener('click', () => this.toggleReadAloud());
+    this.endButton.type = 'button';
+    this.endButton.className = 'jp-AcademiaTutor-round jp-AcademiaTutor-end';
+    this.endButton.setAttribute('aria-label', t.endTalk);
+    this.endButton.append(closeIcon(16));
+    tip(this.endButton, t.endTalk, 'top-center');
+    this.endButton.addEventListener('click', () => this.stopVoice());
+    const switches = document.createElement('div');
+    switches.className = 'jp-AcademiaTutor-switches';
+    switches.append(this.readAloudButton, this.endButton);
+    this.dock.append(this.orbButton, this.voiceState, this.voiceWords, switches);
+    form.append(this.dock, this.input, this.actions);
     this.renderVoice();
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -128,8 +175,8 @@ export class TutorPanel extends Widget {
     void this.follow(tracker.currentWidget);
   }
 
-  /** Asks the tutor, from the box or from the error buttons and commands. */
-  async ask(kind: Kind, message?: string): Promise<void> {
+  /** Asks the tutor, from the box or from the error buttons and commands; `spoken` when it was said out loud. */
+  async ask(kind: Kind, message?: string, spoken = false): Promise<void> {
     const panel = this.notebook;
     if (!panel || this.busy) return;
     this.setBusy(true);
@@ -143,6 +190,7 @@ export class TutorPanel extends Widget {
         cells: readCells(panel),
         activeCell: Math.max(0, panel.content.activeCellIndex),
         platformLanguage: language,
+        ...(spoken ? { spoken: true } : {}),
         ...(this.models && this.chosenModel ? { model: this.chosenModel } : {}),
       });
       if (panel !== this.notebook) return;
@@ -155,7 +203,9 @@ export class TutorPanel extends Widget {
       this.mode = reply.mode;
       this.renderMode();
       this.renderGoal(reply.objective, reply.steps, reply.unlocked, reply.detours);
-      this.addMessage('tutor', reply.reply, reply.practiceOffers, reply.model, reply.chosenModel);
+      const listen = this.addMessage('tutor', reply.reply, reply.practiceOffers, reply.model, reply.chosenModel);
+      // A conversation by voice is answered by voice; the microphone listens again when the reading ends.
+      if (spoken && this.voice && this.readAloud && listen) void this.readReply(reply.reply, listen);
     } catch {
       this.addNotice(t.failed);
     } finally {
@@ -189,8 +239,8 @@ export class TutorPanel extends Widget {
     }
     this.notebook = panel;
     this.sessionId = null;
-    this.stopVoice();
     this.speaker.stop();
+    this.stopVoice();
     this.log.replaceChildren();
     this.goal.replaceChildren();
     this.status.textContent = '';
@@ -321,7 +371,8 @@ export class TutorPanel extends Widget {
     }
   }
 
-  private addMessage(role: 'learner' | 'tutor', text: string, offers: Offer[] = [], model?: string, chosenModel?: string | null): void {
+  /** Adds a message to the conversation; for the tutor's, returns its Listen button. */
+  private addMessage(role: 'learner' | 'tutor', text: string, offers: Offer[] = [], model?: string, chosenModel?: string | null): HTMLButtonElement | null {
     this.log.querySelector('.jp-AcademiaTutor-notice')?.remove();
     const item = document.createElement('div');
     item.className = `jp-AcademiaTutor-message jp-AcademiaTutor-${role}`;
@@ -336,7 +387,8 @@ export class TutorPanel extends Widget {
       which.textContent = ` · ${this.modelLabel(model)}${fallback}`;
       who.append(which);
     }
-    if (role === 'tutor') who.append(this.listenButton(text));
+    const listen = role === 'tutor' ? this.listenButton(text) : null;
+    if (listen) who.append(listen);
     const body = document.createElement('div');
     body.className = 'jp-AcademiaTutor-body';
     item.append(who, body);
@@ -351,6 +403,7 @@ export class TutorPanel extends Widget {
     for (const offer of offers) item.append(this.offerButton(offer));
     this.log.append(item);
     this.log.scrollTop = this.log.scrollHeight;
+    return listen;
   }
 
   private offerButton(offer: Offer): HTMLElement {
@@ -393,31 +446,37 @@ export class TutorPanel extends Widget {
     this.refreshErrorBar();
   }
 
-  /** The microphone on or off: a hands-free conversation, each finished turn sent as a message. */
-  private async toggleVoice(): Promise<void> {
-    if (this.voice || this.connecting) return this.stopVoice();
+  /** Talk: the microphone on, for a hands-free conversation, each finished turn sent as a message. */
+  private async startVoice(): Promise<void> {
+    if (this.voice || this.connecting) return;
+    // Now, inside the click: the browser then lets the replies be read aloud whenever they arrive.
+    this.speaker.unlock();
     this.speaker.stop();
     this.connecting = true;
     this.renderVoice();
     try {
       const answer = await api.listen(language);
       if (!answer.ok) throw Object.assign(new Error(answer.message), { known: true });
-      this.voice = await VoiceStream.open(answer.grant, answer.maxMinutes, {
+      const stream = await VoiceStream.open(answer.grant, answer.maxMinutes, {
         onWords: (text) => {
-          if (!this.busy) this.input.value = text;
+          if (!this.busy) this.showWords(text);
         },
         onTurn: (text) => {
-          if (!this.busy) void this.ask('ask', text);
+          if (!this.busy) void this.ask('ask', text, true);
         },
-        onLevel: (level) => this.talkButton.style.setProperty('--academia-level', String(level)),
+        onLevel: (level) => {
+          this.micLevel = level;
+        },
         onEnd: (reason) => {
           this.voice = null;
-          this.input.value = '';
           this.renderVoice();
           this.addNotice(reason === 'timeout' ? t.talkTimeout : t.talkDropped);
         },
       });
-      if (this.busy) this.voice.pause();
+      // Turned off while it was connecting.
+      if (!this.connecting) return stream.stop();
+      this.voice = stream;
+      if (this.busy || this.speaker.playing) stream.pause();
     } catch (error) {
       const denied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
       const known = (error as { known?: boolean }).known ? (error as Error).message : null;
@@ -432,27 +491,65 @@ export class TutorPanel extends Widget {
     this.voice?.stop();
     this.voice = null;
     this.connecting = false;
-    if (!this.busy) this.input.value = '';
+    this.micLevel = 0;
+    // Ending the conversation ends its reading too.
+    this.speaker.stop();
     this.renderVoice();
+  }
+
+  private toggleReadAloud(): void {
+    this.readAloud = !this.readAloud;
+    try {
+      localStorage.setItem(READ_ALOUD_KEY, this.readAloud ? 'on' : 'off');
+    } catch {
+      // Storage can be blocked; the choice then lasts until the page reloads.
+    }
+    if (!this.readAloud && this.speaker.playing) this.speaker.stop();
+    this.renderVoice();
+  }
+
+  private showWords(text: string): void {
+    this.voiceWords.textContent = text || t.voiceHint;
+    this.voiceWords.classList.toggle('jp-mod-hint', !text);
+  }
+
+  private orbState(): OrbState {
+    if (this.connecting) return 'connecting';
+    if (this.speaker.playing) return 'speaking';
+    if (this.busy) return 'thinking';
+    return 'listening';
   }
 
   private renderVoice(): void {
     const on = Boolean(this.voice) || this.connecting;
-    this.talkButton.textContent = on ? t.talkStop : t.talk;
-    this.talkButton.prepend(microphoneIcon());
-    tip(this.talkButton, on ? t.talkStopHelp : t.talkHelp);
-    this.talkButton.setAttribute('aria-pressed', String(on));
-    this.talkButton.classList.toggle('jp-mod-active', on);
-    // While the microphone writes in it, the box is read-only: turn it off to type.
-    this.input.readOnly = on;
-    this.voiceStatus.textContent = this.connecting
-      ? t.talkConnecting
-      : !this.voice
-        ? ''
-        : this.busy || this.speaker.playing
-          ? t.talkWaiting
-          : t.talkListening;
-    this.voiceStatus.hidden = !this.voiceStatus.textContent;
+    this.dock.hidden = !on;
+    this.input.hidden = on;
+    this.actions.hidden = on;
+    this.node.classList.toggle('jp-mod-talking', on);
+    if (!on) {
+      this.orb.stop();
+      return;
+    }
+    this.orb.start();
+    const state = this.orbState();
+    this.orb.set(state);
+    this.orbButton.dataset.state = state;
+    this.voiceState.textContent = { connecting: t.talkConnecting, listening: t.voiceListening, thinking: t.thinking, speaking: t.voiceSpeaking }[state];
+    if (state === 'speaking') {
+      tip(this.orbButton, t.interrupt, 'top-center');
+      this.orbButton.setAttribute('aria-label', t.interrupt);
+      this.orbButton.disabled = false;
+    } else {
+      untip(this.orbButton);
+      this.orbButton.removeAttribute('aria-label');
+      this.orbButton.disabled = true;
+    }
+    if (state !== 'listening') this.voiceWords.textContent = '';
+    else if (!this.voiceWords.textContent) this.showWords('');
+    this.readAloudButton.replaceChildren(this.readAloud ? speakerIcon(16) : speakerOffIcon(16));
+    this.readAloudButton.setAttribute('aria-pressed', String(this.readAloud));
+    this.readAloudButton.setAttribute('aria-label', t.readAloud);
+    tip(this.readAloudButton, this.readAloud ? t.readAloudOn : t.readAloudOff, 'top-center');
   }
 
   /** "Listen" on a tutor reply: its prose read aloud; pressed again, it stops. */
@@ -461,21 +558,29 @@ export class TutorPanel extends Widget {
     button.type = 'button';
     button.className = 'jp-AcademiaTutor-listen';
     this.markSpeaking(button, false);
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       if (this.speakingButton === button) return this.speaker.stop();
-      const parts = pieces(speakable(markdown, t.codeOmitted), 1800);
-      if (!parts.length) return;
-      this.speaker.stop();
-      this.speakingButton = button;
-      this.markSpeaking(button, true);
-      this.renderVoice();
-      try {
-        await this.speaker.play(parts);
-      } catch {
-        this.addNotice(t.listenFailed);
-      }
+      // Inside the click, before anything is awaited: what lets the page make sound.
+      this.speaker.unlock();
+      void this.readReply(markdown, button);
     });
     return button;
+  }
+
+  /** Reads a reply aloud (code left out), marking its Listen button while it plays. */
+  private async readReply(markdown: string, button: HTMLButtonElement): Promise<void> {
+    // Pieces small enough that each starts at once and finishes well within the server's limits.
+    const parts = pieces(speakable(markdown, t.codeOmitted), 600);
+    if (!parts.length) return;
+    this.speaker.stop();
+    this.speakingButton = button;
+    this.markSpeaking(button, true);
+    try {
+      await this.speaker.play(parts);
+    } catch (error) {
+      const known = (error as { known?: boolean }).known ? (error as Error).message : null;
+      this.addNotice(error instanceof SoundBlocked ? t.listenBlocked : known || t.listenFailed);
+    }
   }
 
   private markSpeaking(button: HTMLButtonElement, speaking: boolean): void {
@@ -491,16 +596,25 @@ export class TutorPanel extends Widget {
  * The panel's tooltip, drawn by style/index.css ([data-tip]): never the browser's `title`, whose look and timing are
  * the operating system's. The text is also the element's accessible description.
  */
-function tip(element: HTMLElement, text: string): void {
+function tip(element: HTMLElement, text: string, side: 'below' | 'top' | 'top-center' = 'below'): void {
   element.dataset.tip = text;
+  // Above, for what sits at the bottom of the panel, where a tip below would be cut off.
+  if (side === 'below') delete element.dataset.tipSide;
+  else element.dataset.tipSide = side;
   element.setAttribute('aria-description', text);
 }
 
-function svgIcon(path: string): SVGSVGElement {
+function untip(element: HTMLElement): void {
+  delete element.dataset.tip;
+  delete element.dataset.tipSide;
+  element.removeAttribute('aria-description');
+}
+
+function svgIcon(path: string, size = 14): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '14');
-  svg.setAttribute('height', '14');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
   svg.setAttribute('fill', 'none');
   svg.setAttribute('stroke', 'currentColor');
   svg.setAttribute('stroke-width', '2');
@@ -510,5 +624,7 @@ function svgIcon(path: string): SVGSVGElement {
   svg.innerHTML = path;
   return svg;
 }
-const microphoneIcon = () => svgIcon('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/>');
-const speakerIcon = () => svgIcon('<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>');
+const microphoneIcon = (size?: number) => svgIcon('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/>', size);
+const speakerIcon = (size?: number) => svgIcon('<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>', size);
+const speakerOffIcon = (size?: number) => svgIcon('<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>', size);
+const closeIcon = (size?: number) => svgIcon('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>', size);

@@ -1,10 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { z } from "zod";
 import { logAi } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/lib/tutor/harness";
 import { canListen, canSpeak, LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
-import { listenGrant, speak, SPEAK_MAX_CHARS, voiceConfigured } from "@/lib/voice/deepgram";
+import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, speakStream, voiceConfigured } from "@/lib/voice/deepgram";
 
 // The learning service: the AI tutor's backend, beside the lab hub on the server (docs/ai-tutor.md). It is not
 // published to the internet: it listens on the lab's Docker network, and only the learners' Jupyter servers call
@@ -16,7 +19,7 @@ import { listenGrant, speak, SPEAK_MAX_CHARS, voiceConfigured } from "@/lib/voic
 //   PUT  /v1/mode       Guide me / Show me
 //   POST /v1/practice   "practise this in a few days" after a detour
 //   POST /v1/voice/listen   a temporary grant for the panel's microphone stream (docs/voice.md)
-//   POST /v1/voice/speak    a reply read aloud: MP3
+//   POST /v1/voice/speak    a reply read aloud: raw PCM (SPEAK_SAMPLE_RATE), streamed as Deepgram makes it
 //   GET  /healthz       for Docker's healthcheck
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -119,10 +122,17 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     const parsed = SpeakSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
     if (!(await canSpeak(learner.userId, parsed.data.text.length))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
-    const audio = Buffer.from(await speak(parsed.data.text, parsed.data.language));
+    // The listener stopping (or leaving) closes this response, which stops Deepgram too.
+    const listener = new AbortController();
+    response.on("close", () => listener.abort());
+    const audio = await speakStream(parsed.data.text, parsed.data.language, listener.signal);
     await recordSpeak(learner.userId, parsed.data.text.length, "tutor-voice");
-    response.writeHead(200, { "Content-Type": "audio/mpeg", "Content-Length": audio.length, "Cache-Control": "no-store" });
-    return response.end(audio);
+    // X-Accel-Buffering: nginx in front of the lab passes the audio on as it comes instead of collecting it.
+    response.writeHead(200, { "Content-Type": `audio/pcm;rate=${SPEAK_SAMPLE_RATE}`, "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+    await pipeline(Readable.fromWeb(audio as NodeReadableStream<Uint8Array>), response).catch(() => {
+      // Stopped by the listener, or Deepgram's stream broke off: what was sent was played.
+    });
+    return;
   }
   return send(response, 404, { ok: false, message: "Not found." });
 }

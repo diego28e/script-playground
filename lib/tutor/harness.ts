@@ -31,6 +31,8 @@ export const TutorRequestSchema = z.object({
   mode: z.enum(["GUIDE", "SHOW"]).optional(),
   // The model to start the chain at (the panel's model list, which only admins get). Ignored for anyone else.
   model: z.string().max(100).optional(),
+  // The learner said this out loud in the panel's voice conversation, and will hear the reply read aloud (docs/voice.md).
+  spoken: z.boolean().optional(),
 });
 export type TutorRequest = z.input<typeof TutorRequestSchema>;
 
@@ -164,7 +166,7 @@ export async function runTutorTurn(userId: string, input: TutorRequest): Promise
     memory,
     platformLanguage: request.platformLanguage,
   });
-  const said = learnerTurn(request.kind, request.message, request.platformLanguage);
+  const said = learnerTurn(request.kind, request.message, request.platformLanguage, request.spoken === true);
   const contents: Content[] = [
     ...history.reverse().map((message) => ({ role: message.role === "tutor" ? "model" : "user", parts: [{ text: message.content }] })),
     { role: "user", parts: [{ text: `<context>\n${context}\n</context>` }, { text: said }] },

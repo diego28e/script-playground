@@ -67,6 +67,8 @@ export const api = {
     cells: Cell[];
     activeCell: number;
     platformLanguage: 'es' | 'en';
+    /** Said out loud in the voice conversation: the tutor answers briefly, to be heard (docs/voice.md). */
+    spoken?: boolean;
     model?: string;
   }) => call<TurnReply>('POST', 'turn', body),
   /** A grant for the microphone stream (docs/voice.md). */
@@ -75,18 +77,21 @@ export const api = {
       mode: 'conversation',
       language,
     }),
-  /** A piece of a reply read aloud: MP3. Throws with the service's message when it can't. */
-  speak: async (text: string, language: 'es' | 'en'): Promise<Blob> => {
+  /**
+   * A piece of a reply read aloud: raw 16-bit PCM at 24 kHz, streamed as it's made (voice.ts Speaker plays it as it
+   * comes). Throws with the service's message, marked `known`, when it says why it can't.
+   */
+  speak: async (text: string, language: 'es' | 'en', signal: AbortSignal): Promise<ReadableStream<Uint8Array>> => {
     const url = URLExt.join(settings.baseUrl, 'academia-tutor', 'voice-speak');
     const response = await ServerConnection.makeRequest(
       url,
-      { method: 'POST', body: JSON.stringify({ text, language }), headers: { 'Content-Type': 'application/json' } },
+      { method: 'POST', body: JSON.stringify({ text, language }), headers: { 'Content-Type': 'application/json' }, signal },
       settings
     );
-    if (!response.ok || !(response.headers.get('Content-Type') ?? '').startsWith('audio/')) {
+    if (!response.ok || !response.body || !(response.headers.get('Content-Type') ?? '').startsWith('audio/')) {
       const body = (await response.json().catch(() => ({}))) as { message?: string };
-      throw new Error(body.message || 'The reply could not be read aloud.');
+      throw Object.assign(new Error(body.message || 'The reply could not be read aloud.'), { known: Boolean(body.message) });
     }
-    return response.blob();
+    return response.body;
   },
 };

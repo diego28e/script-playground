@@ -9,7 +9,8 @@ as a practice task, by voice or in writing.
 |---|---|
 | Where | The lab's tutor panel (also inside the lesson page's Notebook tab), and a new practice task: **Explain in your words**. |
 | How speaking works in the tutor | **Hands-free conversation**: the learner turns the microphone on, speaks, and the message sends itself when they finish speaking; the microphone stays on for the next one until they turn it off. Their words appear as they talk. |
-| Voice replies | **On request**: a speaker button on each tutor reply reads its prose aloud. |
+| Voice replies | **On request**: a speaker button on each tutor reply reads its prose aloud. **In a voice conversation, automatically** (added after the first try in production): what's said out loud is answered out loud, and the tutor answers briefly, the way a tutor talks. The learner can turn it off. |
+| The look | A round microphone button beside Send (tooltip "Talk"); pressed, the box gives way to an **orb** that follows the voice (the platform's voice-powered orb design). |
 
 ## Engine: Deepgram
 
@@ -44,6 +45,20 @@ gets it through the frame's `allow="microphone"`.
 longer than a word, and links left out, with a short "code omitted" where code was) with an Aura-2 voice in the
 platform's language: Selena (Latin American, switches to English for terms) for Spanish, Thalia for English. Pressing
 it again stops it. Turning the microphone on stops any reading.
+
+**The conversation, by voice both ways.** The Talk button is a round microphone icon beside Send. Pressed, the message
+box and buttons give way to the dock: the orb, what it's doing (listening, thinking, speaking), the words as they're
+heard, a switch for replies read aloud (on at first, remembered per browser), and End. A message said out loud is sent
+with `spoken: true`; the tutor is then told the learner will hear its reply, and answers in a few short sentences (about
+80 words), code still in a code block that's shown but not read. The reply is read aloud as soon as it arrives, the
+microphone sending silence meanwhile, and listening starts again when the reading ends: a back-and-forth with no
+clicks. Tapping the orb while it speaks cuts the tutor off and listens. A typed message is never read aloud unasked.
+
+**The orb.** The platform's voice-powered orb (a WebGL shader, `ogl` and React in the original) rewritten for plain
+WebGL in `orb.ts`, since the lab's extension has no React. It turns faster and ripples with the voice it follows: the
+learner's microphone level while listening, the tutor's own audio (an analyser on the playback) while speaking; it dims
+and turns steadily while thinking, and shifts from violet and cyan to pink while it speaks. Without WebGL a CSS sphere in
+the same colours swells with the voice; with reduced motion it turns slowly and barely ripples.
 
 **Explain in your words.** A new practice task form, `explain`, for the declarative ladder's top stages (produce and
 apply) and the procedural ladder's transfer: "Explain, as you would to a colleague, why … / what happens when …". The
@@ -80,8 +95,9 @@ for a line on an admin page; the provider can change later by rewriting `lib/voi
 |---|---|---|
 | The provider: temporary grants (Flux for conversation, Nova-3 for dictation, with the course's key terms), Aura-2 speech, the balance | `lib/voice/deepgram.ts` | Built and tried locally |
 | The daily allowance and its records | `lib/voice/allowance.ts` | Built and tried locally |
-| The learning service's routes, and the lab server's forwarding (MP3 passed through) | `services/learning/server.ts` (`/v1/voice/listen`, `/v1/voice/speak`), `infra/lab/tutor/academia_tutor/handlers.py` | Built and tried locally |
-| The tutor panel: Talk (hands-free), Listen on each reply | `infra/lab/tutor/labextension/src/voice.ts`, `panel.ts`, `api.ts`, `strings.ts`, `style/index.css` | Built and tried locally |
+| The learning service's routes, and the lab server's forwarding (the speech streamed through) | `services/learning/server.ts` (`/v1/voice/listen`, `/v1/voice/speak`), `infra/lab/tutor/academia_tutor/handlers.py` | Built and tried locally |
+| The tutor panel: Talk (hands-free), Listen on each reply | `infra/lab/tutor/labextension/src/voice.ts`, `panel.ts`, `api.ts`, `strings.ts`, `style/index.css` | Built and tried locally; in production, Listen failed on long replies (fixed below) |
+| Streamed speech, replies read aloud in a voice conversation, short spoken replies, the round Talk button and the orb | the files above, `orb.ts`, `lib/voice/deepgram.ts` (`speakStream`), `lib/tutor/prompt.ts` (`spoken`) | Built and tried locally |
 | The lesson page's frame allows the microphone and audio | `components/courses/lab-frame.tsx` | Built |
 
 **How the panel does it.** The microphone goes through an AudioWorklet that resamples to 16 kHz 16-bit PCM in 100 ms
@@ -90,7 +106,19 @@ WebSocket the grant names (`["bearer", token]` as subprotocols). Flux's `TurnInf
 message box (read-only while the microphone is on); its `EndOfTurn` sends them. While the tutor answers or a reply is
 read aloud, the stream sends silence, so it stays open without hearing anything. Listen turns the reply's Markdown
 into prose (code blocks become "code omitted", short inline code is read, links keep their text), splits it at sentence
-ends into pieces under 1,900 characters, and plays them one after another, fetching the next while one plays.
+ends into pieces under 600 characters, and plays them one after another.
+
+**Why the speech is streamed.** The first version asked Aura-2 for a whole MP3 per piece of up to 1,900 characters. In
+production, Listen failed on the tutor's long replies: Aura makes a long text slowly (1,568 characters took 56 s to
+finish) and the learning service gave up after 20 s. It starts at once, though: streamed, the first audio arrives in
+about 0.7 s and the rest about twice as fast as it plays (124 s of speech in 55 s). So the speech is now raw 16-bit PCM
+at 24 kHz (`encoding=linear16&container=none`), passed straight through: Deepgram, the learning service (`pipeline`,
+with `X-Accel-Buffering: no` for nginx), the lab server's extension (tornado's `streaming_callback`, writing and
+flushing each chunk), and the panel, which reads the response body as it comes and schedules it on a Web Audio
+timeline in fifths of a second. Only the start is timed (15 s); stopping closes the request back to Deepgram. Web Audio
+rather than an `<audio>` element because an AudioContext started by a click (Talk or Listen) may play later without
+another one, which reading a reply when it arrives needs (browsers block sound a page starts on its own, more so in a
+frame), and because its analyser gives the orb the tutor's voice.
 
 Tried on 2026-11-06. From a script: a token in about half a second; Aura-2 (Selena) spoke a Spanish sentence with
 English terms; streamed to Flux in real time, the words arrived every quarter second and the turn ended about a quarter
@@ -102,3 +130,12 @@ datos?" by itself when the sentence ended, the microphone staying on; Listen rea
 code block, and no message was sent while it read. The allowance recorded a stream and a reading and refused a
 character past the day's limit. Two fixes from that run: Jupyter's API handler labels every answer as JSON unless told
 (the MP3 is now passed with its own type), and the sentence splitter dropped Spanish's opening "¿".
+
+Tried again on 2026-11-06 after the redesign, in the same local setup (headless Chromium, the stand-in service now
+streaming and answering briefly when `spoken`). Talk: the round button showed its tooltip, the orb came up (WebGL) and
+listened; the spoken question was sent by itself with `spoken: true`; the reply (225 characters) began playing about
+0.75 s after it arrived, with the orb's level following the tutor's voice, and the microphone listened again when it
+ended, with one message sent (it didn't hear itself). Tapping the orb mid-reading stopped it and went back to
+listening. Listen on a long typed reply with emoji (the case that failed in production) streamed in two pieces (549
+characters in 17 s, 116 in 3 s), playing from the first second; Stop mid-reading ended it cleanly. A typed reply wasn't
+read aloud unasked.

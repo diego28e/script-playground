@@ -239,14 +239,40 @@ export function pieces(text: string, max: number): string[] {
   return result.filter(Boolean);
 }
 
-/** Plays a reply aloud, piece after piece, fetching the next while the current one plays. One at a time. */
+/** What the panel's server sends for a reply read aloud: raw 16-bit little-endian PCM, mono, at this rate. */
+const SPEAK_RATE = 24_000;
+/** Audio is scheduled about a fifth of a second at a time: soon enough to start at once, long enough not to stutter. */
+const SCHEDULE_BYTES = (SPEAK_RATE * 2) / 5;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** The browser wouldn't let the page make sound: the learner hasn't pressed anything that asked for it yet. */
+export class SoundBlocked extends Error {
+  constructor() {
+    super('The browser blocked the sound.');
+    this.name = 'SoundBlocked';
+  }
+}
+
+/**
+ * Plays a reply aloud as it streams in, piece after piece, through Web Audio. Streamed because the provider takes
+ * about half as long to make the audio as it takes to play, but almost a minute for a long reply: the first sound
+ * comes in under a second this way. One reading at a time.
+ *
+ * Web Audio rather than an <audio> element: once a click has started its AudioContext (unlock()), sound may play at
+ * any moment after, which reading a reply aloud when it arrives needs; and its analyser gives the orb the voice's level.
+ */
 export class Speaker {
-  private audio: HTMLAudioElement | null = null;
+  private context: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private samples: Uint8Array<ArrayBuffer> | null = null;
+  private readonly sources = new Set<AudioBufferSourceNode>();
+  private controller: AbortController | null = null;
   private active = false;
   private token = 0;
 
   constructor(
-    private readonly fetchAudio: (text: string) => Promise<Blob>,
+    private readonly fetchAudio: (text: string, signal: AbortSignal) => Promise<ReadableStream<Uint8Array>>,
     private readonly hooks: { onStart: () => void; onEnd: () => void }
   ) {}
 
@@ -254,43 +280,119 @@ export class Speaker {
     return this.active;
   }
 
+  /** Call from a click (Listen, Talk): browsers let a page make sound only once the learner asked for it. */
+  unlock(): void {
+    if (!this.context) {
+      this.context = new AudioContext();
+      this.analyser = this.context.createAnalyser();
+      this.analyser.fftSize = 512;
+      this.analyser.connect(this.context.destination);
+    }
+    if (this.context.state === 'suspended') void this.context.resume().catch(() => undefined);
+  }
+
+  /** How loud the reading is right now, 0..1 (for the orb). */
+  get level(): number {
+    if (!this.active || !this.analyser) return 0;
+    if (!this.samples) this.samples = new Uint8Array(this.analyser.fftSize);
+    this.analyser.getByteTimeDomainData(this.samples);
+    let sum = 0;
+    for (const value of this.samples) {
+      const sample = (value - 128) / 128;
+      sum += sample * sample;
+    }
+    return Math.min(1, Math.sqrt(sum / this.samples.length) * 4);
+  }
+
+  /** Reads the pieces aloud, one after another. Resolves when the reading ends or is stopped. */
   async play(parts: string[]): Promise<void> {
     this.stop();
+    this.unlock();
+    const context = this.context as AudioContext;
+    const analyser = this.analyser as AnalyserNode;
     const token = ++this.token;
+    const controller = new AbortController();
+    this.controller = controller;
     this.active = true;
     this.hooks.onStart();
+    const timeline = { playhead: 0, last: null as AudioBufferSourceNode | null };
+    const schedule = (bytes: Uint8Array) => {
+      const count = bytes.length >> 1;
+      if (!count) return;
+      const buffer = context.createBuffer(1, count, SPEAK_RATE);
+      const channel = buffer.getChannelData(0);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, count * 2);
+      for (let i = 0; i < count; i++) channel[i] = view.getInt16(i * 2, true) / 0x8000;
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(analyser);
+      // Behind (the first audio, or the network was slow): a moment from now rather than in the past.
+      const at = Math.max(timeline.playhead, context.currentTime + 0.06);
+      source.start(at);
+      timeline.playhead = at + buffer.duration;
+      timeline.last = source;
+      this.sources.add(source);
+      source.onended = () => this.sources.delete(source);
+    };
     try {
-      let next = parts.length ? this.fetchAudio(parts[0]) : null;
-      for (let i = 0; i < parts.length && next; i++) {
-        const blob = await next;
-        if (token !== this.token) return;
-        next = i + 1 < parts.length ? this.fetchAudio(parts[i + 1]) : null;
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        this.audio = audio;
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => resolve();
-          audio.onerror = () => reject(new Error('The audio could not play.'));
-          audio.play().catch(reject);
-        }).finally(() => URL.revokeObjectURL(url));
-        if (token !== this.token) return;
+      if (context.state !== 'running') await Promise.race([context.resume(), wait(500)]);
+      if (context.state !== 'running') throw new SoundBlocked();
+      for (const part of parts) {
+        const reader = (await this.fetchAudio(part, controller.signal)).getReader();
+        let pending: Uint8Array[] = [];
+        let size = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (token !== this.token) return;
+          if (value) {
+            pending.push(value);
+            size += value.length;
+          }
+          if (size >= SCHEDULE_BYTES || (done && size)) {
+            const bytes = new Uint8Array(size);
+            let at = 0;
+            for (const chunk of pending) {
+              bytes.set(chunk, at);
+              at += chunk.length;
+            }
+            // An odd byte waits for its other half in the next chunk.
+            const even = size & ~1;
+            schedule(bytes.subarray(0, even));
+            pending = even < size ? [bytes.slice(even)] : [];
+            size -= even;
+          }
+          if (done) break;
+        }
       }
+      const last = timeline.last;
+      if (last) await new Promise<void>((resolve) => last.addEventListener('ended', () => resolve(), { once: true }));
+    } catch (error) {
+      // Stopped while it was coming in: not a failure.
+      if (token !== this.token) return;
+      throw error;
     } finally {
-      // Ended on its own (or failed): stop() handles the case where it was stopped.
       if (token === this.token && this.active) this.end();
     }
   }
 
-  /** Stops whatever is playing or being fetched. */
+  /** Stops whatever is playing or still coming in. */
   stop(): void {
     if (!this.active) return;
     this.token++;
-    this.audio?.pause();
+    this.controller?.abort();
+    for (const source of this.sources) {
+      try {
+        source.stop();
+      } catch {
+        // Not started yet, or already ended.
+      }
+    }
+    this.sources.clear();
     this.end();
   }
 
   private end(): void {
-    this.audio = null;
+    this.controller = null;
     this.active = false;
     this.hooks.onEnd();
   }

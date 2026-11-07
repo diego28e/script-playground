@@ -84,16 +84,34 @@ export async function listenGrant(mode: ListenMode, language: VoiceLanguage): Pr
   return { protocol: mode === "conversation" ? "flux" : "nova", url, protocols: ["bearer", token], encoding: "linear16", sampleRate: 16000, expiresIn };
 }
 
-/** Reads `text` aloud: MP3 audio. At most SPEAK_MAX_CHARS characters (the caller splits longer text). */
-export async function speak(text: string, language: VoiceLanguage): Promise<ArrayBuffer> {
-  const response = await fetch(`${API}/v1/speak?model=${VOICES[language]}&encoding=mp3`, {
-    method: "POST",
-    headers: { Authorization: `Token ${key()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ text: text.slice(0, SPEAK_MAX_CHARS) }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`Deepgram couldn't speak it (${response.status}: ${(await response.text().catch(() => "")).slice(0, 200)})`);
-  return response.arrayBuffer();
+/**
+ * The audio Aura sends a browser: raw 16-bit little-endian PCM, mono, at this rate, streamed as it's made. Streamed
+ * because Aura makes a whole reply slowly (1,568 characters took 56 s to finish, 2026-11-06) but starts at once:
+ * the first sound arrives in about 0.7 s, and the rest comes about twice as fast as it plays.
+ */
+export const SPEAK_SAMPLE_RATE = 24_000;
+
+/**
+ * Reads `text` aloud: the audio as Deepgram makes it, to pass straight on. At most SPEAK_MAX_CHARS characters (the
+ * caller splits longer text). `signal` stops it, when the listener stops or leaves.
+ */
+export async function speakStream(text: string, language: VoiceLanguage, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  // Only the start is timed: once the audio flows, a long reading takes as long as it takes.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  signal?.addEventListener("abort", () => controller.abort(), { once: true });
+  try {
+    const response = await fetch(`${API}/v1/speak?model=${VOICES[language]}&encoding=linear16&sample_rate=${SPEAK_SAMPLE_RATE}&container=none`, {
+      method: "POST",
+      headers: { Authorization: `Token ${key()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, SPEAK_MAX_CHARS) }),
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.body) throw new Error(`Deepgram couldn't speak it (${response.status}: ${(await response.text().catch(() => "")).slice(0, 200)})`);
+    return response.body;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** What's left of the account's credit, for the admin page (needs a key that can read the project: admin or owner). */
