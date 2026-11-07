@@ -2,6 +2,7 @@ import type { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Widget } from '@lumino/widgets';
 import { api, type Detour, type ModelChoice, type Mode, type Offer, type Step } from './api';
+import { pieces, Speaker, speakable, VoiceStream } from './voice';
 import { activeCellFailed, readCells } from './notebook';
 import { language, t } from './strings';
 
@@ -49,6 +50,25 @@ export class TutorPanel extends Widget {
   private readonly errorBar = document.createElement('div');
   private readonly input = document.createElement('textarea');
   private readonly sendButton = document.createElement('button');
+  // Voice (docs/voice.md): the hands-free conversation, and replies read aloud.
+  private readonly talkButton = document.createElement('button');
+  private readonly voiceStatus = document.createElement('div');
+  private voice: VoiceStream | null = null;
+  private connecting = false;
+  private speakingButton: HTMLButtonElement | null = null;
+  private readonly speaker = new Speaker((text) => api.speak(text, language), {
+    // The microphone mustn't hear the tutor reading aloud.
+    onStart: () => {
+      this.voice?.pause();
+      this.renderVoice();
+    },
+    onEnd: () => {
+      if (this.speakingButton) this.markSpeaking(this.speakingButton, false);
+      this.speakingButton = null;
+      if (!this.busy) this.voice?.resume();
+      this.renderVoice();
+    },
+  });
 
   constructor(
     tracker: INotebookTracker,
@@ -84,7 +104,16 @@ export class TutorPanel extends Widget {
     this.sendButton.type = 'submit';
     this.sendButton.className = 'jp-AcademiaTutor-send jp-mod-styled jp-mod-accept';
     this.sendButton.textContent = t.send;
-    form.append(this.input, this.sendButton);
+    this.talkButton.type = 'button';
+    this.talkButton.className = 'jp-AcademiaTutor-talk jp-mod-styled';
+    this.talkButton.addEventListener('click', () => void this.toggleVoice());
+    this.voiceStatus.className = 'jp-AcademiaTutor-voiceStatus';
+    this.voiceStatus.setAttribute('role', 'status');
+    const actions = document.createElement('div');
+    actions.className = 'jp-AcademiaTutor-actions';
+    actions.append(this.talkButton, this.sendButton);
+    form.append(this.voiceStatus, this.input, actions);
+    this.renderVoice();
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const message = this.input.value.trim();
@@ -160,6 +189,8 @@ export class TutorPanel extends Widget {
     }
     this.notebook = panel;
     this.sessionId = null;
+    this.stopVoice();
+    this.speaker.stop();
     this.log.replaceChildren();
     this.goal.replaceChildren();
     this.status.textContent = '';
@@ -305,6 +336,7 @@ export class TutorPanel extends Widget {
       which.textContent = ` · ${this.modelLabel(model)}${fallback}`;
       who.append(which);
     }
+    if (role === 'tutor') who.append(this.listenButton(text));
     const body = document.createElement('div');
     body.className = 'jp-AcademiaTutor-body';
     item.append(who, body);
@@ -354,7 +386,104 @@ export class TutorPanel extends Widget {
     this.sendButton.disabled = busy;
     this.status.textContent = busy ? t.thinking : '';
     this.node.classList.toggle('jp-mod-busy', busy);
+    // The microphone waits while the tutor answers, so it never sends a second message over the first.
+    if (busy) this.voice?.pause();
+    else if (!this.speaker.playing) this.voice?.resume();
+    this.renderVoice();
     this.refreshErrorBar();
+  }
+
+  /** The microphone on or off: a hands-free conversation, each finished turn sent as a message. */
+  private async toggleVoice(): Promise<void> {
+    if (this.voice || this.connecting) return this.stopVoice();
+    this.speaker.stop();
+    this.connecting = true;
+    this.renderVoice();
+    try {
+      const answer = await api.listen(language);
+      if (!answer.ok) throw Object.assign(new Error(answer.message), { known: true });
+      this.voice = await VoiceStream.open(answer.grant, answer.maxMinutes, {
+        onWords: (text) => {
+          if (!this.busy) this.input.value = text;
+        },
+        onTurn: (text) => {
+          if (!this.busy) void this.ask('ask', text);
+        },
+        onLevel: (level) => this.talkButton.style.setProperty('--academia-level', String(level)),
+        onEnd: (reason) => {
+          this.voice = null;
+          this.input.value = '';
+          this.renderVoice();
+          this.addNotice(reason === 'timeout' ? t.talkTimeout : t.talkDropped);
+        },
+      });
+      if (this.busy) this.voice.pause();
+    } catch (error) {
+      const denied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+      const known = (error as { known?: boolean }).known ? (error as Error).message : null;
+      this.addNotice(denied ? t.talkDenied : known || t.talkFailed);
+    } finally {
+      this.connecting = false;
+      this.renderVoice();
+    }
+  }
+
+  private stopVoice(): void {
+    this.voice?.stop();
+    this.voice = null;
+    this.connecting = false;
+    if (!this.busy) this.input.value = '';
+    this.renderVoice();
+  }
+
+  private renderVoice(): void {
+    const on = Boolean(this.voice) || this.connecting;
+    this.talkButton.textContent = on ? t.talkStop : t.talk;
+    this.talkButton.prepend(microphoneIcon());
+    tip(this.talkButton, on ? t.talkStopHelp : t.talkHelp);
+    this.talkButton.setAttribute('aria-pressed', String(on));
+    this.talkButton.classList.toggle('jp-mod-active', on);
+    // While the microphone writes in it, the box is read-only: turn it off to type.
+    this.input.readOnly = on;
+    this.voiceStatus.textContent = this.connecting
+      ? t.talkConnecting
+      : !this.voice
+        ? ''
+        : this.busy || this.speaker.playing
+          ? t.talkWaiting
+          : t.talkListening;
+    this.voiceStatus.hidden = !this.voiceStatus.textContent;
+  }
+
+  /** "Listen" on a tutor reply: its prose read aloud; pressed again, it stops. */
+  private listenButton(markdown: string): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'jp-AcademiaTutor-listen';
+    this.markSpeaking(button, false);
+    button.addEventListener('click', async () => {
+      if (this.speakingButton === button) return this.speaker.stop();
+      const parts = pieces(speakable(markdown, t.codeOmitted), 1800);
+      if (!parts.length) return;
+      this.speaker.stop();
+      this.speakingButton = button;
+      this.markSpeaking(button, true);
+      this.renderVoice();
+      try {
+        await this.speaker.play(parts);
+      } catch {
+        this.addNotice(t.listenFailed);
+      }
+    });
+    return button;
+  }
+
+  private markSpeaking(button: HTMLButtonElement, speaking: boolean): void {
+    button.textContent = speaking ? t.listenStop : t.listen;
+    button.prepend(speakerIcon());
+    button.setAttribute('aria-pressed', String(speaking));
+    button.classList.toggle('jp-mod-active', speaking);
+    tip(button, t.listenHelp);
   }
 }
 
@@ -366,3 +495,20 @@ function tip(element: HTMLElement, text: string): void {
   element.dataset.tip = text;
   element.setAttribute('aria-description', text);
 }
+
+function svgIcon(path: string): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '14');
+  svg.setAttribute('height', '14');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = path;
+  return svg;
+}
+const microphoneIcon = () => svgIcon('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/>');
+const speakerIcon = () => svgIcon('<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>');

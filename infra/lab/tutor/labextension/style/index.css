@@ -264,3 +264,63 @@
     transition: opacity 1ms 300ms;
   }
 }
+
+/* Voice (docs/voice.md): the microphone beside Send, its state above the box, and Listen on each reply. */
+.jp-AcademiaTutor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.jp-AcademiaTutor-talk {
+  --academia-level: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.jp-AcademiaTutor-talk.jp-mod-active {
+  background: var(--jp-error-color1);
+  border-color: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color0);
+  /* A ring that grows with the voice: the learner sees the microphone hears them. */
+  box-shadow: 0 0 0 calc(2px + var(--academia-level) * 6px) color-mix(in srgb, var(--jp-error-color1) 30%, transparent);
+  transition: box-shadow 90ms linear;
+}
+
+.jp-AcademiaTutor-voiceStatus {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-AcademiaTutor-input[readonly] {
+  background: var(--jp-layout-color2);
+}
+
+.jp-AcademiaTutor-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  cursor: pointer;
+}
+
+.jp-AcademiaTutor-listen:hover,
+.jp-AcademiaTutor-listen.jp-mod-active {
+  color: var(--jp-ui-font-color0);
+  border-color: var(--jp-ui-font-color2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jp-AcademiaTutor-talk.jp-mod-active {
+    transition: none;
+  }
+}

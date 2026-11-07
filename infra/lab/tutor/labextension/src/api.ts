@@ -1,5 +1,6 @@
 import { URLExt } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
+import type { ListenGrant } from './voice';
 
 // Calls to the tutor's server extension (academia_tutor, in this Jupyter server), which forwards to the learning
 // service. ServerConnection adds Jupyter's own authentication, as for any JupyterLab request.
@@ -68,4 +69,24 @@ export const api = {
     platformLanguage: 'es' | 'en';
     model?: string;
   }) => call<TurnReply>('POST', 'turn', body),
+  /** A grant for the microphone stream (docs/voice.md). */
+  listen: (language: 'es' | 'en') =>
+    call<{ ok: true; grant: ListenGrant; maxMinutes: number } | { ok: false; reason?: string; message: string }>('POST', 'voice-listen', {
+      mode: 'conversation',
+      language,
+    }),
+  /** A piece of a reply read aloud: MP3. Throws with the service's message when it can't. */
+  speak: async (text: string, language: 'es' | 'en'): Promise<Blob> => {
+    const url = URLExt.join(settings.baseUrl, 'academia-tutor', 'voice-speak');
+    const response = await ServerConnection.makeRequest(
+      url,
+      { method: 'POST', body: JSON.stringify({ text, language }), headers: { 'Content-Type': 'application/json' } },
+      settings
+    );
+    if (!response.ok || !(response.headers.get('Content-Type') ?? '').startsWith('audio/')) {
+      const body = (await response.json().catch(() => ({}))) as { message?: string };
+      throw new Error(body.message || 'The reply could not be read aloud.');
+    }
+    return response.blob();
+  },
 };

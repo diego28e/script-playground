@@ -3,6 +3,8 @@ import { z } from "zod";
 import { logAi } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/lib/tutor/harness";
+import { canListen, canSpeak, LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
+import { listenGrant, speak, SPEAK_MAX_CHARS, voiceConfigured } from "@/lib/voice/deepgram";
 
 // The learning service: the AI tutor's backend, beside the lab hub on the server (docs/ai-tutor.md). It is not
 // published to the internet: it listens on the lab's Docker network, and only the learners' Jupyter servers call
@@ -13,6 +15,8 @@ import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/l
 //   GET  /v1/session    the panel's state on opening: mode, and the session for ?notebookPath=
 //   PUT  /v1/mode       Guide me / Show me
 //   POST /v1/practice   "practise this in a few days" after a detour
+//   POST /v1/voice/listen   a temporary grant for the panel's microphone stream (docs/voice.md)
+//   POST /v1/voice/speak    a reply read aloud: MP3
 //   GET  /healthz       for Docker's healthcheck
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -69,6 +73,8 @@ function send(response: ServerResponse, status: number, body: unknown) {
 
 const PracticeSchema = z.object({ sessionId: z.string().min(1), skill: z.string().min(1).max(200), evidence: z.enum(["PASSED", "SKIPPED"]) });
 const ModeSchema = z.object({ mode: z.enum(["GUIDE", "SHOW"]) });
+const ListenSchema = z.object({ mode: z.enum(["conversation", "dictation"]).default("conversation"), language: z.enum(["es", "en"]).default("es") });
+const SpeakSchema = z.object({ text: z.string().trim().min(1).max(SPEAK_MAX_CHARS), language: z.enum(["es", "en"]).default("es") });
 
 async function handle(request: IncomingMessage, response: ServerResponse) {
   const url = new URL(request.url ?? "/", "http://learning");
@@ -98,6 +104,25 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     if (!parsed.success) return send(response, 400, { ok: false, message: "sessionId, skill and evidence are required." });
     const result = await recordPractice(learner.userId, parsed.data.sessionId, parsed.data.skill, parsed.data.evidence);
     return send(response, result.ok ? 200 : 404, result);
+  }
+  if (request.method === "POST" && url.pathname === "/v1/voice/listen") {
+    if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
+    const parsed = ListenSchema.safeParse(await readJson(request));
+    if (!parsed.success) return send(response, 400, { ok: false, message: "mode and language are invalid." });
+    if (!(await canListen(learner.userId))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's microphone time." });
+    const grant = await listenGrant(parsed.data.mode, parsed.data.language);
+    await recordListen(learner.userId, parsed.data.mode, "tutor-voice");
+    return send(response, 200, { ok: true, grant, maxMinutes: LISTEN_MAX_MINUTES });
+  }
+  if (request.method === "POST" && url.pathname === "/v1/voice/speak") {
+    if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
+    const parsed = SpeakSchema.safeParse(await readJson(request));
+    if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
+    if (!(await canSpeak(learner.userId, parsed.data.text.length))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
+    const audio = Buffer.from(await speak(parsed.data.text, parsed.data.language));
+    await recordSpeak(learner.userId, parsed.data.text.length, "tutor-voice");
+    response.writeHead(200, { "Content-Type": "audio/mpeg", "Content-Length": audio.length, "Cache-Control": "no-store" });
+    return response.end(audio);
   }
   return send(response, 404, { ok: false, message: "Not found." });
 }

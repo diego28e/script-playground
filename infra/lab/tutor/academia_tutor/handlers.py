@@ -61,7 +61,9 @@ class TutorHandler(APIHandler):
             self.set_status(503)
             return self.finish(json.dumps({"ok": False, "message": "The tutor isn't reachable right now. Try again in a minute."}))
         self.set_status(response.code if response.code != 599 else 503)
-        self.finish(response.body or b"{}")
+        # JSON for most answers; a reply read aloud comes back as MP3 (voice/speak). APIHandler.finish sets the type,
+        # JSON unless told otherwise.
+        self.finish(response.body or b"{}", set_content_type=response.headers.get("Content-Type", "application/json"))
 
     @tornado.web.authenticated
     async def post(self, action: str):
@@ -76,6 +78,11 @@ class TutorHandler(APIHandler):
             return await self.forward("POST", "turn", body)
         if action == "practice":
             return await self.forward("POST", "practice", body)
+        # Voice (docs/voice.md): a grant for the microphone stream, and a reply read aloud.
+        if action == "voice-listen":
+            return await self.forward("POST", "voice/listen", body)
+        if action == "voice-speak":
+            return await self.forward("POST", "voice/speak", body)
         self.set_status(404)
         self.finish(json.dumps({"ok": False}))
 
@@ -97,5 +104,5 @@ class TutorHandler(APIHandler):
 
 def setup_handlers(web_app):
     web_app.settings["academia_tutor_url"] = LEARNING_URL
-    pattern = url_path_join(web_app.settings["base_url"], "academia-tutor", "(turn|session|mode|practice)")
+    pattern = url_path_join(web_app.settings["base_url"], "academia-tutor", "(turn|session|mode|practice|voice-listen|voice-speak)")
     web_app.add_handlers(".*$", [(pattern, TutorHandler)])

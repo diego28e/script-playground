@@ -155,8 +155,9 @@ function Frame({ src, fullLab, title, t }: { src: string; fullLab: string; title
           ref={frame}
           src={src}
           title={title}
-          // JupyterLab copies and pastes cells through the clipboard; full screen is the button above.
-          allow="clipboard-read; clipboard-write; fullscreen"
+          // JupyterLab copies and pastes cells through the clipboard; full screen is the button above; the tutor's voice
+          // conversation needs the microphone, and reads replies aloud (docs/voice.md).
+          allow="clipboard-read; clipboard-write; fullscreen; microphone; autoplay"
           className={cn("size-full border-0 bg-background transition-opacity duration-300", covered ? "opacity-0" : "opacity-100")}
         />
         {covered && (
