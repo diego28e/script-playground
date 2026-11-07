@@ -77,6 +77,16 @@ then 3.6 Flash, thinking), 10.4 s in all where DeepSeek takes 2 to 3. The histor
 the tutor answers in (`{"actions": [], "reply": ...}`; their actions are in the session state already), and five
 follow-up turns in a row were all answered by DeepSeek on the first try.
 
+**DeepSeek's empty answers, the second cause.** In production a second spoken turn still went empty and fell back
+(DeepSeek empty, Gemini 3.8 Flash timed out, 3.6 Flash answered: 19.8 s). Reproduced locally (1 in 8 turns, first
+turns too), and DeepSeek's raw answers showed why: the spoken-turn instruction ("Answer the way a tutor talks…") made it
+drop the JSON and answer in prose 2 times in 10, about 105 tokens each, the size of the empty answer; JSON mode blanks
+prose. Three changes: the instruction now says it shapes the "reply" text inside the usual JSON (20 of 20 answers were
+JSON after); if DeepSeek still answers blank in JSON mode, it is asked again at once without JSON mode
+(`deepSeekGenerate`'s `acceptProse`, the tutor only; the log line says `"retried": "without-json-mode"`), and a prose
+answer is the reply, as `readResponse` already showed it; and prose (or fenced JSON) streams like JSON. After: ten
+turns in five fresh two-message conversations, all answered by DeepSeek first try, 2.1 to 3.6 s.
+
 **The orb.** The platform's voice-powered orb (a WebGL shader, `ogl` and React in the original) rewritten for plain
 WebGL in `orb.ts`, since the lab's extension has no React. It turns faster and ripples with the voice it follows: the
 learner's microphone level while listening, the tutor's own audio (an analyser on the playback) while speaking; it dims

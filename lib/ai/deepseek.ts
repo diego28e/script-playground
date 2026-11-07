@@ -16,7 +16,13 @@ export class DeepSeekError extends Error {
   }
 }
 
-export type DeepSeekResult = { text: string; finishReason: string | null; tokens: { input: number; output: number; thoughts: number; total: number } };
+export type DeepSeekResult = {
+  text: string;
+  finishReason: string | null;
+  tokens: { input: number; output: number; thoughts: number; total: number };
+  /** The first answer came back blank in JSON mode and this is the retry without it (acceptProse). */
+  retried?: boolean;
+};
 
 function systemText(config: GenerateContentConfig): string {
   const system = config.systemInstruction;
@@ -33,7 +39,37 @@ export async function deepSeekGenerate(
   contents: Content[],
   config: GenerateContentConfig,
   signal: AbortSignal,
-  /** Follows the answer as it's written (the whole text so far): the request is then streamed. */
+  options: {
+    /** Follows the answer as it's written (the whole text so far): the request is then streamed. */
+    onText?: (text: string) => void;
+    /**
+     * The caller takes a prose answer when JSON was asked for (the tutor shows it as the reply). JSON mode blanks an
+     * answer that isn't JSON; with this, a blank one is asked again at once without JSON mode, rather than counted as
+     * no answer and sent down the chain to slower models.
+     */
+    acceptProse?: boolean;
+  } = {},
+): Promise<DeepSeekResult> {
+  const json = config.responseMimeType === "application/json";
+  const answer = await complete(model, contents, config, signal, json, options.onText);
+  if (!json || !options.acceptProse || answer.text) return answer;
+  const retry = await complete(model, contents, config, signal, false, options.onText);
+  // Both were billed.
+  const tokens = {
+    input: answer.tokens.input + retry.tokens.input,
+    output: answer.tokens.output + retry.tokens.output,
+    thoughts: 0,
+    total: answer.tokens.total + retry.tokens.total,
+  };
+  return { ...retry, tokens, retried: true };
+}
+
+async function complete(
+  model: string,
+  contents: Content[],
+  config: GenerateContentConfig,
+  signal: AbortSignal,
+  json: boolean,
   onText?: (text: string) => void,
 ): Promise<DeepSeekResult> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -46,7 +82,6 @@ export async function deepSeekGenerate(
       content: (item.parts ?? []).map((part) => part.text ?? "").join("\n\n"),
     })),
   ];
-  const json = config.responseMimeType === "application/json";
   const response = await fetch(`${BASE_URL}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },

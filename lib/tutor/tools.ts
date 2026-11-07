@@ -71,7 +71,8 @@ const ResponseSchema = z.object({
 /** Reads the model's JSON; a reply that isn't valid JSON is shown as is, with no actions. */
 export function readResponse(text: string): { actions: { tool: string; args: Record<string, unknown> }[]; reply: string } {
   try {
-    const parsed = ResponseSchema.parse(JSON.parse(text));
+    // Without JSON mode a model may fence its JSON (```json ... ```).
+    const parsed = ResponseSchema.parse(JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")));
     return {
       actions: parsed.actions.map(({ tool, ...args }) => ({ tool, args })),
       reply: parsed.reply,

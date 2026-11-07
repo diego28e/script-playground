@@ -196,6 +196,8 @@ export async function runTutorTurn(userId: string, input: TutorRequest, onReply?
     chosenFirst: chosenModel !== null,
     userId,
     contents,
+    // A prose answer is shown as the reply (readResponse), so DeepSeek retries a blanked one at once (lib/ai/deepseek.ts).
+    acceptProse: true,
     ...(onReply ? { onText: replyStreamer(onReply) } : {}),
     config: {
       systemInstruction: SYSTEM_PROMPT,

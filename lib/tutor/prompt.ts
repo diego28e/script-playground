@@ -145,10 +145,13 @@ export function replyLanguage(message: string | undefined, platformLanguage: "es
 }
 
 /** A voice conversation: the reply is heard, not read, so it has to sound like someone talking. */
+// Worded as a rule for the "reply" field only: an earlier wording ("Answer the way a tutor talks") made DeepSeek drop
+// the JSON and answer in prose about one time in five, which its JSON mode turns into an empty answer.
 const SPOKEN =
-  "[The learner said this out loud and will hear your reply read aloud. Answer the way a tutor talks: a few short sentences " +
-  "(about 80 words at most), one idea at a time, ending with one question when you need their answer. No headings, tables " +
-  "or long lists. Code still goes in a code block, which is shown but not read aloud: say in a sentence what it does.]";
+  '[The learner said this out loud and will hear your "reply" read aloud. Respond with the JSON object as always; only the ' +
+  '"reply" text changes: write it the way a tutor talks, a few short sentences (about 80 words at most), one idea at a time, ' +
+  "ending with one question when you need their answer. No headings, tables or long lists in it. Code still goes in a code " +
+  "block inside the reply, which is shown but not read aloud: say in a sentence what it does.]";
 
 export function learnerTurn(kind: "ask" | "explain_error" | "suggest_fix", message: string | undefined, platformLanguage: "es" | "en" = "es", spoken = false): string {
   const reply = replyLanguage(kind === "ask" ? message : undefined, platformLanguage) === "es" ? "Spanish" : "English";

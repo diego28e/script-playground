@@ -130,6 +130,7 @@ export async function generateWithFallback({
   chosenFirst = false,
   deadline,
   onText,
+  acceptProse = false,
 }: {
   feature: AiFeature;
   contents: Content[];
@@ -152,6 +153,8 @@ export async function generateWithFallback({
    * to stream. A later attempt starts over, so a caller showing the text drops what an earlier attempt wrote.
    */
   onText?: (text: string, attempt: number) => void;
+  /** The caller takes a prose answer when it asked for JSON (deepSeekGenerate's acceptProse). */
+  acceptProse?: boolean;
 }): Promise<AiResult> {
   const traceId = randomUUID();
   const started = Date.now();
@@ -231,7 +234,7 @@ export async function generateWithFallback({
         const signal = AbortSignal.timeout(attemptMs);
         const answer =
           provider === "deepseek"
-            ? await deepSeekGenerate(model, contents, config, signal, onText && ((text) => onText(text, index)))
+            ? await deepSeekGenerate(model, contents, config, signal, { onText: onText && ((text) => onText(text, index)), acceptProse })
             : await claudeGenerate(model, contents, config, signal);
         const outcome: Attempt["outcome"] = answer.text ? "ok" : "empty";
         attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted, tokens: answer.tokens });
@@ -244,6 +247,7 @@ export async function generateWithFallback({
           model,
           outcome,
           finishReason: answer.finishReason,
+          ...("retried" in answer && answer.retried ? { retried: "without-json-mode" } : {}),
           latencyMs: Date.now() - attemptStarted,
           userId,
           tokens: answer.tokens,
