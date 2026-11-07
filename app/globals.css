@@ -365,3 +365,19 @@
 @media (prefers-reduced-motion: reduce) {
   .tip-content[data-side] { animation: none; }
 }
+
+/* A scroll area inside the page (the lesson outline): a thin bar in the palette, not the system's grey one. */
+.scrollbar-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent;
+}
+
+/* While the lesson outline is being resized: frames (the notebook) can't take the pointer, text isn't selected, and
+   the cursor stays the resize one wherever it goes. */
+:root[data-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+:root[data-resizing] iframe {
+  pointer-events: none;
+}

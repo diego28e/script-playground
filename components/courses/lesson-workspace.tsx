@@ -13,7 +13,6 @@ import {
     CircleDashed,
     ExternalLink,
     FolderKanban,
-    ListTree,
     NotebookPen,
     PlayCircle,
     Repeat,
@@ -27,6 +26,8 @@ import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { Tip } from "@/components/ui/tip";
 import { InlineCode } from "@/components/courses/inline-code";
 import { LabFrame } from "@/components/courses/lab-frame";
+import { LessonSidebar, MobileOutline } from "@/components/courses/lesson-outline";
+import type { OutlinePreference } from "@/lib/outline-preference";
 import { LessonVideo } from "@/components/courses/lesson-video";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
@@ -39,6 +40,10 @@ export type LessonWorkspaceData = Omit<WorkspaceResult, "lesson"> & { lesson: Om
 const COPY = {
     es: {
         outline: "Contenido del curso",
+        collapse: "Ocultar el contenido",
+        expand: "Mostrar el contenido del curso",
+        resize: "Ancho del contenido del curso",
+        resizeHint: "Arrastra para cambiar el ancho; doble clic para volver al original",
         module: "Módulo",
         lesson: (index: number, total: number) => `Lección ${index} de ${total}`,
         kinds: { NOTEBOOK: "Notebook", READING: "Lectura", PROJECT: "Proyecto", VIDEO: "Video", PRACTICE: "Práctica" } as Record<LessonKind, string>,
@@ -70,6 +75,10 @@ const COPY = {
     },
     en: {
         outline: "Course outline",
+        collapse: "Hide the outline",
+        expand: "Show the course outline",
+        resize: "Course outline width",
+        resizeHint: "Drag to resize; double-click to reset",
         module: "Module",
         lesson: (index: number, total: number) => `Lesson ${index} of ${total}`,
         kinds: { NOTEBOOK: "Notebook", READING: "Reading", PROJECT: "Project", VIDEO: "Video", PRACTICE: "Practice" } as Record<LessonKind, string>,
@@ -116,9 +125,22 @@ type Props = {
     reading?: ReactNode;
     /** The lesson's video, with URLs the browser can load (app/(main)/courses/[slug]/[module]/[lesson]/page.tsx). */
     video?: LessonVideoData | null;
+    /** The outline's saved width and whether it's folded (lesson-outline.tsx), read from a cookie by the page. */
+    outline: OutlinePreference;
 };
 
-export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
+/** Lesson Markdown in a line (objectives, prerequisites): code spans styled, links to a new tab. */
+const INLINE_MARKDOWN = {
+    p: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 transition-colors hover:decoration-foreground">
+            {children}
+        </a>
+    ),
+};
+const CODE_SPANS = "[&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em]";
+
+export function LessonWorkspace({ data, signedIn, reading, video, outline }: Props) {
     const { language } = useLanguage();
     const t = COPY[language];
     const router = useRouter();
@@ -187,6 +209,8 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
     // never load the frame, which starts the learner's lab server). A lesson opened at ?tab=notebook mounts it right
     // after the page comes alive in the browser.
     const [notebookOpened, setNotebookOpened] = useState(false);
+    // Each opening of the Notebook tab folds the outline to its rail, for the notebook's room (lesson-outline.tsx).
+    const [notebookOpenings, setNotebookOpenings] = useState(tabInAddress === "notebook" ? 1 : 0);
     useEffect(() => {
         if (!showNotebook) return;
         // A timer, not an animation frame: those don't run while the page is in a background tab.
@@ -194,6 +218,7 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
         return () => window.clearTimeout(timer);
     }, [showNotebook]);
     const selectTab = (next: "lesson" | "notebook") => {
+        if (next === "notebook" && tab !== "notebook") setNotebookOpenings((count) => count + 1);
         setTab(next);
         if (next === "notebook") {
             setNotebookOpened(true);
@@ -206,11 +231,24 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
         window.history.replaceState(window.history.state, "", url);
     };
 
+    const outlineProps = { data, progress, currentHref: here, t };
     return (
-        <div className={cn("container mx-auto grid gap-8 px-4 py-8 lg:gap-12 lg:py-10", showNotebook ? "lg:grid-cols-1" : "lg:grid-cols-[300px_minmax(0,1fr)]")}>
-            {/* The notebook takes the whole width: the outline steps aside while it's open. */}
-            {!showNotebook && <LessonOutline data={data} progress={progress} currentHref={here} t={t} />}
-
+        // The page's full width: the outline on its left edge, the lesson in the rest at a readable width (the notebook
+        // takes all of it).
+        <div className="flex w-full flex-1">
+            <LessonSidebar
+                {...outlineProps}
+                initial={outline}
+                roomForNotebook={showNotebook}
+                notebookOpenings={notebookOpenings}
+                previousHref={previous ? lessonPath(course.slug, previous.moduleSlug, previous.slug) : null}
+                previousTitle={previous?.title ?? null}
+                nextHref={next ? lessonPath(course.slug, next.moduleSlug, next.slug) : null}
+                nextTitle={next?.title ?? null}
+            />
+            <div className="min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10 xl:px-14">
+            <div className={cn("mx-auto w-full", showNotebook ? "max-w-none" : "max-w-6xl")}>
+            <MobileOutline {...outlineProps} />
             <article className="min-w-0">
                 <header className="border-b border-border pb-8">
                     <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -329,7 +367,7 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                 >
 
                 {(lesson.objectives.length > 0 || lesson.prerequisites) && (
-                    <section className="grid gap-6 border-b border-border py-8 md:grid-cols-2">
+                    <section className="grid gap-6 py-8 md:grid-cols-2">
                         {lesson.objectives.length > 0 && (
                             <div className={cn(!lesson.prerequisites && "md:col-span-2")}>
                                 <h2 className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -339,8 +377,8 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                                     {lesson.objectives.map((objective, index) => (
                                         <li key={index} className="flex gap-2.5">
                                             <Check className="mt-1 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                                            <span className="[&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em]">
-                                                <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{objective}</ReactMarkdown>
+                                            <span className={CODE_SPANS}>
+                                                <ReactMarkdown components={INLINE_MARKDOWN}>{objective}</ReactMarkdown>
                                             </span>
                                         </li>
                                     ))}
@@ -350,14 +388,16 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                         {lesson.prerequisites && (
                             <div>
                                 <h2 className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{t.prerequisites}</h2>
-                                <p className="text-sm leading-relaxed text-muted-foreground">{lesson.prerequisites}</p>
+                                <p className={cn("text-sm leading-relaxed text-muted-foreground", CODE_SPANS)}>
+                                    <ReactMarkdown components={INLINE_MARKDOWN}>{lesson.prerequisites}</ReactMarkdown>
+                                </p>
                             </div>
                         )}
                     </section>
                 )}
 
                 {video && (
-                    <section className="border-b border-border py-8">
+                    <section className="border-t border-border py-8 first:border-t-0">
                         <LessonVideo
                             // A new lesson is a new player, with its own state.
                             key={lesson.id}
@@ -372,13 +412,13 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                         />
                     </section>
                 )}
-                {lesson.kind === "READING" && reading && <section className="py-8">{reading}</section>}
+                {lesson.kind === "READING" && reading && <section className="border-t border-border py-8 first:border-t-0">{reading}</section>}
                 {((lesson.kind === "VIDEO" && !video) || lesson.kind === "PRACTICE") && (
                     <p className="my-8 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-sm text-muted-foreground">{t.unavailable}</p>
                 )}
                 </div>
 
-                <nav aria-label={`${t.previous} / ${t.next}`} className="mt-8 grid gap-3 border-t border-border pt-8 sm:grid-cols-2">
+                <nav aria-label={`${t.previous} / ${t.next}`} className="grid gap-3 border-t border-border pt-8 sm:grid-cols-2">
                     {previous ? (
                         <NeighbourLink href={lessonPath(course.slug, previous.moduleSlug, previous.slug)} label={t.previous} lesson={previous} direction="previous" />
                     ) : (
@@ -387,6 +427,8 @@ export function LessonWorkspace({ data, signedIn, reading, video }: Props) {
                     {next && <NeighbourLink href={lessonPath(course.slug, next.moduleSlug, next.slug)} label={t.next} lesson={next} direction="next" />}
                 </nav>
             </article>
+            </div>
+            </div>
         </div>
     );
 }
@@ -420,114 +462,5 @@ function NeighbourLink({
                 <InlineCode text={lesson.title} />
             </span>
         </Link>
-    );
-}
-
-function LessonOutline({
-    data,
-    progress,
-    currentHref,
-    t,
-}: {
-    data: LessonWorkspaceData;
-    progress: Record<string, LessonStatus>;
-    currentHref: string;
-    t: (typeof COPY)["es"];
-}) {
-    const { course } = data;
-    const total = data.position.total;
-    const done = Object.values(progress).filter((value) => value === "COMPLETED").length;
-
-    const modules = (
-        <ol className="flex flex-col gap-1">
-            {course.modules.map((courseModule) => {
-                const current = courseModule.slug === data.module.slug;
-                const finished = courseModule.lessons.filter((lesson) => progress[lesson.id] === "COMPLETED").length;
-                return (
-                    <li key={courseModule.id}>
-                        <details open={current} className="group/module">
-                            <summary className="flex list-none items-start gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                                <span className="mt-0.5 w-6 shrink-0 font-mono text-[11px] text-muted-foreground">{String(courseModule.position).padStart(2, "0")}</span>
-                                <span className={cn("min-w-0 flex-1 leading-snug", current && "font-medium")}>{courseModule.title}</span>
-                                <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground">
-                                    {finished}/{courseModule.lessons.length}
-                                </span>
-                            </summary>
-                            <ol className="mb-2 ml-4 flex flex-col border-l border-border pl-2">
-                                {courseModule.lessons.map((lesson) => {
-                                    const href = lessonPath(course.slug, courseModule.slug, lesson.slug);
-                                    const active = href === currentHref;
-                                    const state = progress[lesson.id];
-                                    return (
-                                        <li key={lesson.id}>
-                                            <Link
-                                                href={href}
-                                                aria-current={active ? "page" : undefined}
-                                                className={cn(
-                                                    "flex items-start gap-2 rounded-md px-2 py-1.5 text-[13px] leading-snug transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                                    active ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
-                                                )}
-                                            >
-                                                <span className="mt-0.5 shrink-0" aria-label={state ? t.status[state] : undefined}>
-                                                    {state === "COMPLETED" ? (
-                                                        <Check className="size-3.5 text-foreground" strokeWidth={2.5} />
-                                                    ) : state === "IN_PROGRESS" ? (
-                                                        <CircleDashed className="size-3.5" />
-                                                    ) : (
-                                                        <span className="mt-1 ml-1 block size-1.5 rounded-full bg-border" />
-                                                    )}
-                                                </span>
-                                                <span className="min-w-0 flex-1">
-                                                    <InlineCode text={lesson.title} />
-                                                </span>
-                                            </Link>
-                                        </li>
-                                    );
-                                })}
-                            </ol>
-                        </details>
-                    </li>
-                );
-            })}
-        </ol>
-    );
-
-    const heading = (
-        <div className="flex flex-col gap-2 px-2 pb-3">
-            <Link href={`/courses/${course.slug}`} className="text-sm font-semibold leading-snug hover:underline hover:underline-offset-4">
-                {course.title}
-            </Link>
-            {data.enrolled && (
-                <div>
-                    <div className="h-1 overflow-hidden rounded-full bg-muted">
-                        <div className="h-full rounded-full bg-primary" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
-                    </div>
-                    <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
-                        {done}/{total}
-                    </p>
-                </div>
-            )}
-        </div>
-    );
-
-    return (
-        <aside className="lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:self-start lg:overflow-y-auto lg:pr-2">
-            {/* Phones get the outline folded above the lesson; wide screens keep it beside. */}
-            <details className="rounded-2xl border border-border bg-card p-2 shadow-[var(--shadow-tile)] lg:hidden">
-                <summary className="flex list-none items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                    <ListTree className="size-4 text-muted-foreground" aria-hidden="true" />
-                    {t.outline}
-                </summary>
-                <div className="pt-2">
-                    {heading}
-                    {modules}
-                </div>
-            </details>
-            <nav aria-label={t.outline} className="hidden lg:block">
-                <p className="mb-3 px-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.outline}</p>
-                {heading}
-                {modules}
-            </nav>
-        </aside>
     );
 }

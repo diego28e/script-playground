@@ -1,10 +1,11 @@
 import { Metadata } from "next";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { lessonPath } from "@/lib/lab";
 import { getLessonWorkspace } from "@/actions/lessons";
 import { LessonWorkspace } from "@/components/courses/lesson-workspace";
+import { OUTLINE_COOKIE, readOutlinePreference } from "@/lib/outline-preference";
 import { LessonMarkdown } from "@/components/courses/lesson-markdown";
 import { parseLessonVideo, type LessonVideo } from "@/lib/lesson-video";
 import { resolveMediaUrls } from "@/lib/media";
@@ -63,5 +64,8 @@ export default async function LessonPage({ params }: Props) {
         );
     }
 
-    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} video={video} />;
+    // The outline's width and fold, as the learner left them: rendered so from the start, with no jump.
+    const outline = readOutlinePreference((await cookies()).get(OUTLINE_COOKIE)?.value);
+
+    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} video={video} outline={outline} />;
 }

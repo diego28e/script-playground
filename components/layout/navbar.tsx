@@ -28,10 +28,12 @@ export function Navbar() {
     const { language } = useLanguage();
     const t = COPY[language];
     const signedIn = Boolean(session && !error);
+    const fullWidth = /^\/courses\/[^/]+\/[^/]+\/[^/]+/.test(pathname);
 
     return (
         <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-xl">
-            <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
+            {/* A lesson page uses the window's full width, its outline on the left edge: the bar lines up with it. */}
+            <div className={cn("mx-auto flex h-16 items-center justify-between gap-4 px-4", fullWidth ? "w-full" : "container")}>
                 <div className="flex items-center gap-6">
                     <Link href="/" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <BrandMark />
