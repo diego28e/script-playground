@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { Editor } from "@monaco-editor/react";
-import { ArrowLeft, ArrowRight, Check, Flame, Layers, Lightbulb, Map as MapIcon, Play, RotateCcw, ScanSearch, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Flame, GraduationCap, Layers, Lightbulb, ListOrdered, Map as MapIcon, Play, RotateCcw, ScanSearch, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   askPracticeHint,
   getPracticeToday,
   preparePracticeDiscovery,
+  revealPracticeRecipe,
   runPracticeCode,
   runPracticeDiagnosis,
   submitPracticeAnswer,
@@ -19,6 +20,7 @@ import {
 import { PRACTICE_ANSWERED } from "@/components/practice/practice-nav-link";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { defineAcademiaTheme } from "@/lib/monaco-theme";
 import type { DiscoveryNote } from "@/lib/practice/discovery";
@@ -72,6 +74,13 @@ const COPY = {
     map: "Ver mi mapa",
     probe: "Comprobación",
     found: "Base",
+    tutor: "De tu tutor",
+    tutorHint: "Pediste practicar esto con el tutor del laboratorio.",
+    recipe: "Receta",
+    recipeIntro: "Los pasos, en palabras. La sintaxis la pones tú.",
+    showRecipe: "Ver la receta",
+    showRecipeHint: "Cuenta como una pista: un acierto con la receta cuenta un poco menos.",
+    recipeLoading: "Abriendo la receta…",
     probeHint: "Una comprobación rápida: nos dice si te falta algo de base. No cuenta para tu progreso.",
     searching: "Este tema te está costando. Estamos viendo si te falta algo de base…",
     checksAdded: (count: number) => (count === 1 ? "Añadimos una pregunta de comprobación al final de tu práctica." : `Añadimos ${count} preguntas de comprobación al final de tu práctica.`),
@@ -128,6 +137,13 @@ const COPY = {
     map: "See my map",
     probe: "Check",
     found: "Groundwork",
+    tutor: "From your tutor",
+    tutorHint: "You asked the lab's tutor to practise this.",
+    recipe: "Recipe",
+    recipeIntro: "The steps, in words. The syntax is yours to write.",
+    showRecipe: "Show the recipe",
+    showRecipeHint: "It counts as a hint: a right answer with the recipe counts a little less.",
+    recipeLoading: "Opening the recipe…",
     probeHint: "A quick check: it tells us whether something underneath is missing. It doesn't count towards your progress.",
     searching: "This one is giving you trouble. We're looking at whether something underneath is missing…",
     checksAdded: (count: number) => (count === 1 ? "We added a check question at the end of today's practice." : `We added ${count} check questions at the end of today's practice.`),
@@ -460,6 +476,22 @@ function TaskCard({
 
   const ready = item.form === "choice" ? choice !== null : isCode ? code.trim().length > 0 : text.trim().length > 0;
 
+  // The recipe (lib/practice/recipes.ts): open at the skill's first stages; later, shown on request, counted as a hint.
+  const [revealed, setRevealed] = useState<{ es: string[]; en: string[] } | null>(null);
+  const [revealing, setRevealing] = useState(false);
+  const recipe = item.recipe?.open ? item.recipe : revealed;
+  const showRecipe = async () => {
+    if (revealing || recipe) return;
+    setRevealing(true);
+    const result = await revealPracticeRecipe(courseSlug, sessionId, item.id).catch(() => null);
+    setRevealing(false);
+    if (!result?.success) {
+      toast.error(result?.error ?? t.error);
+      return;
+    }
+    setRevealed({ es: result.es, en: result.en });
+  };
+
   // Hints (lib/practice/hints.ts): written for the attempt so far, at most item.maxHints, before answering.
   const [hinting, setHinting] = useState(false);
   const askHint = async () => {
@@ -540,13 +572,19 @@ function TaskCard({
             <ScanSearch className="size-3" aria-hidden="true" /> {t.probe}
           </span>
         )}
-        {item.isFound && (
+        {item.isFound && !item.isTutor && (
           <span className="inline-flex items-center gap-1 rounded-full bg-ring/15 px-2 py-0.5 text-xs font-medium text-ring">
             <Layers className="size-3" aria-hidden="true" /> {t.found}
           </span>
         )}
+        {item.isTutor && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-spark/15 px-2 py-0.5 text-xs font-medium text-spark">
+            <GraduationCap className="size-3" aria-hidden="true" /> {t.tutor}
+          </span>
+        )}
       </header>
       {item.isProbe && !answer && <p className="px-6 pt-2 text-sm text-muted-foreground md:px-8">{t.probeHint}</p>}
+      {item.isTutor && !answer && <p className="px-6 pt-2 text-sm text-muted-foreground md:px-8">{t.tutorHint}</p>}
 
       <div className={cn("px-6 pt-4 md:px-8", MARKDOWN)}>
         <ReactMarkdown>{es ? item.promptEs : item.promptEn}</ReactMarkdown>
@@ -605,6 +643,24 @@ function TaskCard({
           />
         )}
 
+        {recipe && (
+          <section aria-label={t.recipe} className="mb-4 rounded-2xl border border-border bg-muted/40 px-4 py-3">
+            <h3 className="flex items-center gap-2 text-sm font-medium">
+              <ListOrdered className="size-4 text-muted-foreground" aria-hidden="true" /> {t.recipe}
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t.recipeIntro}</p>
+            <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed marker:text-muted-foreground [&_code]:rounded [&_code]:bg-background [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em]">
+              {(es ? recipe.es : recipe.en).map((step, at) => (
+                <li key={at} className="pl-1">
+                  <ReactMarkdown allowedElements={["p", "code", "em", "strong"]} unwrapDisallowed components={{ p: ({ children }) => <>{children}</> }}>
+                    {step}
+                  </ReactMarkdown>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
         {isCode && (
           <div className="overflow-hidden rounded-2xl border border-code-border">
             <div className="h-72 bg-code-panel md:h-80">
@@ -652,6 +708,14 @@ function TaskCard({
         {!answer && (
           <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
             {previousButton}
+            {item.recipe?.open === false && !recipe && (
+              <Tip content={t.showRecipeHint}>
+                <Button variant="outline" onClick={() => void showRecipe()} disabled={revealing || sending}>
+                  {revealing ? <DotLoader className="mr-2" /> : <ListOrdered className="mr-2 size-4" />}
+                  {revealing ? t.recipeLoading : t.showRecipe}
+                </Button>
+              </Tip>
+            )}
             {item.hints.length < item.maxHints ? (
               <Button variant="outline" onClick={() => void askHint()} disabled={hinting || sending}>
                 {hinting ? <DotLoader className="mr-2" /> : <Lightbulb className="mr-2 size-4" />}

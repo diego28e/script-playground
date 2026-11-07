@@ -75,7 +75,7 @@ function send(response: ServerResponse, status: number, body: unknown) {
   response.end(JSON.stringify(body));
 }
 
-const PracticeSchema = z.object({ sessionId: z.string().min(1), skill: z.string().min(1).max(200), evidence: z.enum(["PASSED", "SKIPPED"]) });
+const PracticeSchema = z.object({ sessionId: z.string().min(1), skill: z.string().min(1).max(200), evidence: z.enum(["PASSED", "SKIPPED", "REQUESTED"]) });
 const ModeSchema = z.object({ mode: z.enum(["GUIDE", "SHOW"]) });
 const ListenSchema = z.object({ mode: z.enum(["conversation", "dictation"]).default("conversation"), language: z.enum(["es", "en"]).default("es") });
 const SpeakSchema = z.object({ text: z.string().trim().min(1).max(SPEAK_MAX_CHARS), language: z.enum(["es", "en"]).default("es") });

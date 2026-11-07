@@ -8,7 +8,7 @@ import type { ListenGrant } from './voice';
 export type Mode = 'GUIDE' | 'SHOW';
 export type Step = { text: string; status: 'todo' | 'stuck' | 'done' };
 export type Detour = { skill: string; stage: string };
-export type Offer = { skill: string; evidence: 'PASSED' | 'SKIPPED' };
+export type Offer = { skill: string; evidence: 'PASSED' | 'SKIPPED' | 'REQUESTED' };
 export type Cell = { type: 'code' | 'markdown'; source: string; output?: string };
 /** A model the tutor can start at: only admins get the list (SessionState.models). */
 export type ModelChoice = { id: string; label: string };

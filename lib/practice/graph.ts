@@ -28,6 +28,17 @@ export function skillForms(knowledge: "DECLARATIVE" | "PROCEDURAL", runnable: bo
   };
 }
 
+/**
+ * The forms of a skill made from a tutor's request (lib/practice/tutor-requests.ts): code first, as the learner asked
+ * for code practice. Writing and fixing code wherever the stage allows it, predicting output now and then; multiple
+ * choice only where a stage is about telling things apart. Not runnable: the course's usual forms.
+ */
+export function tutorSkillForms(knowledge: "DECLARATIVE" | "PROCEDURAL", runnable: boolean): Record<string, string[]> {
+  if (!runnable) return skillForms(knowledge, runnable);
+  if (knowledge === "DECLARATIVE") return { recognise: ["choice"], recall: ["predict"], produce: ["code", "predict"], apply: ["code", "debug"] };
+  return { example: ["code", "predict"], complete: ["debug", "code"], write: ["code"], transfer: ["code", "debug"] };
+}
+
 /** What a version stores: the graph lk-practice reads, and what the platform shows of each skill. */
 export type PublishedGraph = {
   graph: SkillGraph;

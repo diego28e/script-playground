@@ -15,6 +15,7 @@ export const ACTION_TOOLS = [
   "detour_attempt",
   "end_detour",
   "request_review",
+  "offer_practice",
   "remember",
 ] as const;
 
@@ -27,6 +28,7 @@ export const ACTIONS_GUIDE = `- set_steps {objective, steps[]}: the current obje
 - detour_attempt {}: the learner tried the challenge and did not pass yet.
 - end_detour {outcome: passed|skipped}: the learner passed the challenge, or chose to skip it.
 - request_review {skill, evidence: passed|skipped}: only when the learner asks in words to practise a skill later.
+- offer_practice {skill, reason}: the learner asks for more practice, exercises or challenges on something (outside a detour that is ending now). Record it in the reply that gives the practice: the panel then offers a button to practise it again in a few days, in their spaced practice, as code tasks. Name the narrow skill ("use min() to find the binding limit of several capacities"), not the lesson's topic; reason says in one sentence what they want to master.
 - remember {kind: preference|misconception|strength|struggle, subject, fact, skill?}: something lasting about this learner; a newer fact on the same subject replaces the old one.`;
 
 /** The response schema: the actions first (plan, then write), then the reply. */

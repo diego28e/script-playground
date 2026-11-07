@@ -386,14 +386,23 @@ enum MemoryKind {
 
 // A skill the learner agreed to practise after a detour; the practice engine (milestone 10) schedules it.
 model PracticeRequest {
-  id        String           @id @default(cuid())
-  userId    String
-  skill     String
-  evidence  PracticeEvidence
-  lessonId  String?
-  sessionId String?
-  createdAt DateTime         @default(now())
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String           @id @default(cuid())
+  userId       String
+  skill        String
+  evidence     PracticeEvidence
+  lessonId     String?
+  sessionId    String?
+  // What the tutor and the learner said around it (the detour's challenge, the last messages): what the practice
+  // skill and its tasks are written from (lib/practice/tutor-requests.ts).
+  detail       Json?
+  // Resolved on the learner's next practice visit: to a course skill ("course"), a skill made for it ("found"), or
+  // nothing that fits ("none"); the skill's key.
+  resolution   String?
+  resolvedKey  String?
+  resolvedAt   DateTime?
+  resolveTries Int              @default(0)
+  createdAt    DateTime         @default(now())
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@map("practice_request")
@@ -404,6 +413,8 @@ enum PracticeEvidence {
   PASSED
   // The learner skipped the detour ("I know this").
   SKIPPED
+  // The learner asked for more practice on it (the tutor's offer_practice), outside a detour's end.
+  REQUESTED
 }
 
 enum Role {
@@ -898,7 +909,7 @@ model PracticeDiagnosis {
 // A skill the course doesn't teach that a diagnosis named (key "found.<name>"), shared by the course's learners so
 // its tasks are written once.
 model PracticeFoundSkill {
-  id            String         @id @default(cuid())
+  id            String           @id @default(cuid())
   courseId      String
   key           String
   labelEs       String
@@ -906,16 +917,25 @@ model PracticeFoundSkill {
   descriptionEs String
   descriptionEn String
   knowledge     SkillKnowledge
-  runnable      Boolean        @default(true)
+  runnable      Boolean          @default(true)
   // lk-practice's SkillNode for it, as hypotheses carry it (its content is part of their ids).
   node          Json
   // The lesson of the skill it was first found for: where the map and the task writer place it.
   lessonId      String
-  createdAt     DateTime       @default(now())
-  course        Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // Who found it: a practice diagnosis, or the tutor (a detour or a learner asking for practice).
+  origin        FoundSkillOrigin @default(DIAGNOSIS)
+  // For a tutor's skill, what the tutor's challenge looked like: its tasks are written in the same spirit.
+  context       String?
+  createdAt     DateTime         @default(now())
+  course        Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@unique([courseId, key])
   @@map("practice_found_skill")
+}
+
+enum FoundSkillOrigin {
+  DIAGNOSIS
+  TUTOR
 }
 
 enum DiscoveredEdgeStatus {

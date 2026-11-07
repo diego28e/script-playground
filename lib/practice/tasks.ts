@@ -40,7 +40,7 @@ const FORM_RULES: Record<TaskForm, string> = {
   predict:
     "predict: code is a Python snippet of at most 20 lines that prints something deterministic (no randomness, time, network, set or dict-order tricks, object ids). expectedOutput is exactly what it prints; wrongOutput is the most likely wrong prediction. The prompt asks what it prints and shows nothing of the output.",
   code:
-    "code: code is the starter the learner edits (imports, a function signature with a docstring, and `raise NotImplementedError`). tests holds 2 to 5 functions named test_* that use plain assert with a short English message, are deterministic, print nothing and run in under 5 seconds. solution is a correct full replacement of the starter; wrongSolution is a plausible wrong one (a typical mistake) that fails at least one test.",
+    "code: code is the starter the learner edits (imports, a function signature with a docstring, and `raise NotImplementedError`). tests holds 2 to 5 functions named test_* that use plain assert with a short English message, are deterministic, print nothing and run in under 5 seconds. solution is a correct full replacement of the starter; wrongSolution is a plausible wrong one (a typical mistake) that fails at least one test. recipeEs and recipeEn are the same 3 to 7 steps (one string each, in the same order in both languages) a learner can follow to write the solution themselves, like a teacher's recipe: what to compute, in what order, and what to call each result. Plain words only: no code, no function calls, no operators or expressions; a step may name a variable, parameter or function in backticks (`max_budget`), never show how to write it. Precise enough to follow, leaving every bit of Python to the learner.",
   debug:
     "debug: code is a short program (at most 25 lines) with exactly one realistic bug. tests holds 2 to 5 functions named test_* (plain assert, short English message) that fail on the bug and pass when it is fixed. solution is the fixed program. The prompt says what the code should do and that it has a bug, without saying where.",
 };
@@ -83,6 +83,9 @@ const TaskSchema = z.object({
   tests: z.string().optional(),
   solution: z.string().optional(),
   wrongSolution: z.string().optional(),
+  // Code tasks: the steps to the solution in plain words (docs/practice.md, "Recipes").
+  recipeEs: z.array(z.string().min(1)).optional(),
+  recipeEn: z.array(z.string().min(1)).optional(),
 });
 export type TaskContent = z.infer<typeof TaskSchema>;
 
@@ -104,6 +107,8 @@ export const RESPONSE_SCHEMA: Schema = {
     tests: { type: Type.STRING },
     solution: { type: Type.STRING },
     wrongSolution: { type: Type.STRING },
+    recipeEs: { type: Type.ARRAY, items: { type: Type.STRING } },
+    recipeEn: { type: Type.ARRAY, items: { type: Type.STRING } },
     explanationEs: { type: Type.STRING },
     explanationEn: { type: Type.STRING },
   },
@@ -124,10 +129,34 @@ export const RESPONSE_SCHEMA: Schema = {
     "tests",
     "solution",
     "wrongSolution",
+    "recipeEs",
+    "recipeEn",
     "explanationEs",
     "explanationEn",
   ],
 };
+
+/** The fields of each form, beside the ones every task has. */
+const FORM_FIELDS: Record<TaskForm, (keyof TaskContent)[]> = {
+  choice: ["optionsEs", "optionsEn", "answerIndex"],
+  fill: ["answers"],
+  predict: ["code", "expectedOutput", "wrongOutput"],
+  code: ["code", "tests", "solution", "wrongSolution", "recipeEs", "recipeEn"],
+  debug: ["code", "tests", "solution"],
+};
+
+/**
+ * The response schema for one form: only its fields, all required. The form is chosen before the model is asked, and a
+ * schema of every form's fields, mostly optional, is more than Claude's structured outputs take ("Schema is too
+ * complex", once code tasks gained their recipe).
+ */
+export function schemaFor(form: TaskForm): Schema {
+  const keep = new Set<string>(["form", "difficulty", "expectedSeconds", "promptEs", "promptEn", ...FORM_FIELDS[form], "explanationEs", "explanationEn"]);
+  const properties = Object.fromEntries(Object.entries(RESPONSE_SCHEMA.properties ?? {}).filter(([key]) => keep.has(key)));
+  properties.form = { type: Type.STRING, enum: [form] };
+  const ordering = (RESPONSE_SCHEMA.propertyOrdering ?? []).filter((key) => keep.has(key));
+  return { type: Type.OBJECT, properties, required: ordering, propertyOrdering: ordering };
+}
 
 /** The fields each form needs, and its shape rules. Null when the task is complete. */
 function shapeProblem(task: TaskContent): string | null {
@@ -149,10 +178,39 @@ function shapeProblem(task: TaskContent): string | null {
     case "predict":
       return need(["code", "expectedOutput", "wrongOutput"]) ? "predict without code, expectedOutput or wrongOutput" : null;
     case "code":
-      return need(["code", "tests", "solution", "wrongSolution"]) ? "code without code, tests, solution or wrongSolution" : null;
+      if (need(["code", "tests", "solution", "wrongSolution"])) return "code without code, tests, solution or wrongSolution";
+      return recipeProblem(task);
     case "debug":
       return need(["code", "tests", "solution"]) ? "debug without code, tests or solution" : null;
   }
+}
+
+/**
+ * A code task's recipe (docs/practice.md, "Recipes"): 3 to 7 steps, the same number in both languages, each a short
+ * plain sentence. It may name things in backticks (a variable, a parameter, a function) but never show code: no code
+ * block, no backticked call, operator or expression, and no line of the solution.
+ */
+export function recipeProblem(task: Pick<TaskContent, "recipeEs" | "recipeEn" | "solution">): string | null {
+  const es = task.recipeEs ?? [];
+  const en = task.recipeEn ?? [];
+  if (!es.length || !en.length) return "code without a recipe (recipeEs and recipeEn)";
+  if (es.length !== en.length) return "the recipe has a different number of steps in Spanish and English";
+  if (en.length < 3 || en.length > 7) return "the recipe needs 3 to 7 steps";
+  const solutionLines = (task.solution ?? "")
+    .split("\n")
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter((line) => line.length >= 12 && !/^(#|def |"""|'''|from |import )/.test(line));
+  for (const step of [...es, ...en]) {
+    if (step.length > 280) return "a recipe step is longer than 280 characters";
+    if (step.includes("```")) return "a recipe step holds a code block";
+    for (const span of step.match(/`[^`]*`/g) ?? []) {
+      // A name (`max_budget`), a short quoted value the task asks for (`'buffer'`), or a number: not code.
+      if (!/^`([A-Za-z_][\w.]*|(['"])[^'"`]{0,30}\2|-?\d+(\.\d+)?)`$/.test(span)) return `a recipe step shows code (${span.slice(0, 40)})`;
+    }
+    const flat = step.replace(/\s+/g, " ");
+    if (solutionLines.some((line) => flat.includes(line))) return "a recipe step repeats a line of the solution";
+  }
+  return null;
 }
 
 /** Printed output compared line by line, ignoring trailing spaces and blank lines at the end. */
@@ -262,14 +320,18 @@ async function skillFor(courseId: string, skillKey: string) {
   let node: SkillNode | undefined = published.graph.skills.find((skill) => skill.id === skillKey);
   let meta: { lessonId: string } | undefined = published.skills[skillKey];
   // A skill a diagnosis found, which the course doesn't teach (docs/practice.md, "Missing prerequisites").
-  let found: { forLabel: string } | null = null;
+  let found: { forLabel: string; tutor: boolean; context: string | null } | null = null;
   if (!node || !meta) {
     const row = await prisma.practiceFoundSkill.findUnique({ where: { courseId_key: { courseId, key: skillKey } } });
     if (row) {
       node = row.node as unknown as SkillNode;
       meta = { lessonId: row.lessonId };
       const edge = await prisma.practiceDiscoveredEdge.findFirst({ where: { courseId, fromKey: row.key }, orderBy: { createdAt: "asc" }, select: { toKey: true } });
-      found = { forLabel: (edge && published.graph.skills.find((skill) => skill.id === edge.toKey)?.label) ?? "a later skill" };
+      found = {
+        forLabel: (edge && published.graph.skills.find((skill) => skill.id === edge.toKey)?.label) ?? "a later skill",
+        tutor: row.origin === "TUTOR",
+        context: row.context,
+      };
     }
   }
   if (!node || !meta) return { error: "This skill isn't in the published graph yet: approve its lesson and publish." } as const;
@@ -287,9 +349,11 @@ async function taskContext(skill: Exclude<Awaited<ReturnType<typeof skillFor>>, 
     `# Skill: ${node.label} (key ${node.id})\n${node.description ?? ""}\nKind: ${node.knowledge}. Ladder: ${ladder.join(" → ")}.${node.criteriaHint ? `\nWhat shows the skill: ${node.criteriaHint}` : ""}`,
     `# Stage: ${stage}\n${STAGES[stage] ?? stage}`,
     `# Form: ${form}\n${FORM_RULES[form]}`,
-    found
-      ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, in plain Python where possible, without the course's libraries unless the skill is about them.`
-      : "",
+    found?.tutor
+      ? `# A skill a learner asked their tutor to practise\nIt came up while working on "${found.forLabel}" (a detour, or the learner asking for more practice). The tutor's challenge looked like this: ${found.context ?? "(not kept)"}\nWrite the task in the same spirit: a small realistic scenario (calling AI models, rate limits, costs, tokens, audio, data) with concrete numbers, where this skill is the heart of the solution. Plain Python; the course's libraries only if the skill is about them.`
+      : found
+        ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, in plain Python where possible, without the course's libraries unless the skill is about them.`
+        : "",
     lesson ? `# ${found ? "Where the learner met the gap: lesson" : "From lesson"} ${lesson.code ?? ""}: ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
   ].filter(Boolean);
 }
@@ -424,7 +488,7 @@ export async function generateTask(input: {
     config: {
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
+      responseSchema: schemaFor(form),
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
       maxOutputTokens: 8192,
     },
@@ -485,7 +549,7 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
     config: {
       systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
+      responseSchema: schemaFor(form),
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
       maxOutputTokens: 8192,
     },

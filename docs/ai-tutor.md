@@ -77,8 +77,10 @@ When the diagnosis is a missing prerequisite (the learner is calling Groq and ha
    hint and another try; after two failed tries, it shows a worked solution to the challenge, then asks for a
    similar one.
 5. **Offer a review.** When a detour closes, the panel shows a "Practise this in a few days" button for its skill;
-   one click records it for the practice engine (milestone 10), with no model call. A learner who asks in words
-   gets the same through the `request_review` action.
+   one click records it for the practice engine (milestone 10), with no model call, along with the last messages
+   (the detour's explanation and challenge). A learner who asks in words gets the same through the `request_review`
+   action; one who asks for more practice or challenges on something gets the button in that reply
+   (`offer_practice`). What practice makes of it: docs/practice.md, "Practice from the tutor".
 6. **Resume** exactly where the main task stopped: restate the step and continue.
 
 Detours stack (a detour inside a detour), at most two deep; the learner can skip one ("I know this, it was a
@@ -180,6 +182,7 @@ third nested detour, a step that doesn't exist); refusals are logged as `tutor.r
 | `give_hint {step, level}` | A hint level given, one level up at a time; Show me unlocks for a step at level 3 |
 | `start_detour`, `detour_challenge`, `detour_attempt`, `end_detour` | The detour stages, pushed and popped on the goal stack (two deep at most); closing one makes the panel offer practice |
 | `request_review {skill, evidence}` | The learner asked in words for practice: queued for the practice engine |
+| `offer_practice {skill, reason}` | The learner asked for more practice or challenges on something: the panel offers the practice button in that reply (evidence `REQUESTED`) |
 | `remember {kind, subject, fact, skill?}` | A learner fact: `preference`, `misconception`, `strength` or `struggle`; supersedes an older fact on the same subject |
 
 ### Data

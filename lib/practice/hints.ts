@@ -109,14 +109,15 @@ export async function askHint(input: { userId: string; sessionId: string; taskId
       learnerId: true,
       learner: { select: { userId: true } },
       answers: { where: { taskId: input.taskId }, select: { id: true } },
-      hints: { where: { taskId: input.taskId }, orderBy: { number: "asc" }, select: { number: true, text: true } },
+      // Hint 0 is a recipe shown (lib/practice/recipes.ts): it counts in the evidence, not among the three hints.
+      hints: { where: { taskId: input.taskId, number: { gt: 0 } }, orderBy: { number: "asc" }, select: { number: true, text: true } },
     },
   });
   if (!session || session.learner.userId !== input.userId) return { ok: false, error: es ? "Esta sesión de práctica no es tuya." : "This practice session isn't yours." };
   if (!(session.items as unknown as SessionItem[]).some((item) => item.taskId === input.taskId)) return { ok: false, error: es ? "Esa tarea no está en tu práctica." : "That task isn't in your practice." };
   if (session.answers.length) return { ok: false, error: es ? "Ya respondiste esta tarea." : "You've already answered this task." };
   if (session.hints.length >= MAX_HINTS) return { ok: false, error: es ? "Ya usaste todas las pistas de esta tarea." : "You've used every hint for this task." };
-  const today = await prisma.practiceHint.count({ where: { session: { learnerId: session.learnerId }, createdAt: { gte: new Date(Date.now() - 86_400_000) } } });
+  const today = await prisma.practiceHint.count({ where: { session: { learnerId: session.learnerId }, number: { gt: 0 }, createdAt: { gte: new Date(Date.now() - 86_400_000) } } });
   if (today >= DAILY_HINTS) return { ok: false, error: es ? "Por hoy no quedan más pistas. Vuelve mañana." : "No more hints today. Come back tomorrow." };
 
   const task = await prisma.practiceTask.findUnique({ where: { id: input.taskId }, select: { content: true } });

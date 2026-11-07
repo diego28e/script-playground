@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { composeGraph, type DiscoveryExtension, type Evidence, type PracticeEvent, type PracticeItem, type PracticeState, type ReviewLogEntry, type SkillGraph, type SkillNode } from "@intellectif/lk-practice";
+import { composeGraph, type DiscoveryExtension, type Evidence, type GraphExtension, type PracticeEvent, type PracticeItem, type PracticeState, type ReviewLogEntry, type SkillGraph, type SkillNode } from "@intellectif/lk-practice";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
@@ -48,13 +48,16 @@ function loggedHypothesisNodes(entries: readonly ReviewLogEntry[]): SkillNode[] 
   return entries.flatMap((entry) => (entry.kind === "host" && entry.action.kind === "open-hypothesis" && entry.action.hypothesis.skill ? [entry.action.hypothesis.skill] : []));
 }
 
+/** What a learner's graph adds to the course's: confirmed prerequisites, and skills the tutor asked them to practise. */
+export type LearnerExtension = DiscoveryExtension | GraphExtension;
+
 /**
  * The published graph composed with the learner's confirmed prerequisites (lk-practice's composeGraph), plus the new
  * skills their hypotheses name, without edges, so nothing waits on them. An extension that no longer composes (its
  * edge or skill has joined the course's own graph) is dropped.
  */
-export function composeLearnerGraph(base: SkillGraph, extensions: readonly DiscoveryExtension[], nodes: readonly SkillNode[]) {
-  let kept: DiscoveryExtension[] = [];
+export function composeLearnerGraph(base: SkillGraph, extensions: readonly LearnerExtension[], nodes: readonly SkillNode[]) {
+  let kept: LearnerExtension[] = [];
   let graph = base;
   for (const extension of extensions) {
     const composed = composeGraph(base, [...kept, extension], practice.config);
@@ -104,7 +107,7 @@ export async function loadLearner(userId: string, courseId: string) {
       update: {},
     });
   }
-  const stored = (learner.extensions ?? []) as unknown as DiscoveryExtension[];
+  const stored = (learner.extensions ?? []) as unknown as LearnerExtension[];
   let state = learner.state as unknown as PracticeState;
   let { graph, extensions } = composeLearnerGraph(base, stored, hypothesisNodes(state));
   if (learner.graphVersion !== latest.version || state.graphVersion !== graph.version || extensions.length !== stored.length) {
@@ -144,7 +147,12 @@ function words(text: string): Set<string> {
 export async function focusSkills(userId: string, courseId: string, published: LearnerGraph): Promise<string[]> {
   const [done, requests] = await Promise.all([
     prisma.lessonProgress.findMany({ where: { userId, status: "COMPLETED", lesson: { module: { courseId } } }, select: { lessonId: true } }),
-    prisma.practiceRequest.findMany({ where: { userId, lessonId: { not: null } }, select: { skill: true, lessonId: true }, orderBy: { createdAt: "desc" }, take: 100 }),
+    prisma.practiceRequest.findMany({
+      where: { userId, lessonId: { not: null } },
+      select: { skill: true, lessonId: true, resolution: true, resolvedKey: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
   ]);
   const lessons = new Set(done.map((row) => row.lessonId));
   // Found skills come through their hypotheses (probes, then lk-practice's own planning), never as new skills.
@@ -154,6 +162,13 @@ export async function focusSkills(userId: string, courseId: string, published: L
       .map(([key]) => key),
   );
   for (const request of requests) {
+    // Resolved (lib/practice/tutor-requests.ts): the skill it names, a course skill or one made for it.
+    if (request.resolvedKey) {
+      if (published.skills[request.resolvedKey]) focus.add(request.resolvedKey);
+      continue;
+    }
+    if (request.resolution === "none") continue;
+    // Not resolved yet (the learner hasn't visited practice since): the lesson skill with the most words in common.
     const asked = words(request.skill);
     let best: { key: string; score: number } | null = null;
     for (const [key, meta] of Object.entries(published.skills)) {
@@ -199,7 +214,8 @@ export async function progressMap(userId: string, courseId: string) {
   for (const [key, meta] of Object.entries(published.skills)) {
     const skill = byKey.get(key);
     // A found skill shows once it's confirmed for the learner (then it has an edge in their graph), not while probed.
-    if (meta.found && !published.graph.edges.some((edge) => edge.from === key)) continue;
+    // (A tutor's skill hangs from the lesson skill that uses it: an edge into it.)
+    if (meta.found && !published.graph.edges.some((edge) => edge.from === key || edge.to === key)) continue;
     // "ready" means lk-practice would start it: only for skills the learner has reached (their lesson, or the tutor).
     const status = !skill ? "locked" : skill.status === "ready" && !focus.has(key) ? "upcoming" : skill.status;
     const entry: SkillProgress = {

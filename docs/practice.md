@@ -341,6 +341,69 @@ it was proven by DeepSeek and retired the original; moving the right-option mark
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built
 with (nodejs20.x, 22.x or 24.x).
 
+## Practice from the tutor
+
+Decided with the admin on 2026-11-07: practice the tutor asks for starts right away for that learner, with no approval;
+its tasks are code first; code tasks carry a recipe, open at a skill's first stages and earned at later ones.
+
+**In the lab.** The tutor's panel offers "Practise «skill» in a few days" when a detour closes, and when the learner
+asks for more practice or challenges on something (the tutor's `offer_practice` action, docs/ai-tutor.md). One click
+stores a practice request: the skill in the tutor's words, the lesson, how it came (`PASSED` or `SKIPPED` a detour,
+`REQUESTED` more practice) and the last six messages, which hold the detour's explanation and the challenge.
+
+**Resolved on the next practice visit** (`lib/practice/tutor-requests.ts`), one request per call of the page's
+background step, once. Before, a request was matched by shared words to a skill of its lesson: "finding binding
+capacity constraints with min" went to `compute-free-tier-capacity`, the lesson's arithmetic, not the `min()` syntax the
+learner wanted, and a request with no words in common was dropped. Now Claude Sonnet reads the request and the
+conversation with the course's skills and the found ones, and answers:
+
+- a course skill or found skill, when it is that same narrow skill (not a broader one that uses it): practised as is;
+- otherwise a new narrow skill ("use `min()` to find the binding limit among several capacities"), with labels and a
+  description in both languages, its kind, whether plain Python practises it, what a right answer shows, the lesson
+  skill it is part of (the anchor), and a few sentences on what the tutor's challenge looked like.
+
+A new skill is stored as a found skill of the course (origin `TUTOR`, with that context), so a second learner who asks
+for the same thing gets the same skill and its tasks. It joins the learner's graph as lk-practice's goal extension: the
+lesson skill *encompasses* it (an edge into the new skill, so nothing waits on it, and practising the lesson skill
+counts a little for it), checked by `checkDecomposition` and admitted by the learner (`admitExtension`, `by: learner`),
+then composed into their graph with a replay of their log, like a confirmed prerequisite. It also appears among the
+course's discoveries ("From the tutor: …"), where the admin can add it to the course for everyone. A request no model
+can resolve in three tries is set aside (`none`).
+
+**Code first.** A tutor's skill gets code-first forms (`tutorSkillForms`): procedural, the usual case, writes code from
+its first stage (example: code or predict; complete: debug or code; write: code; transfer: code or debug); declarative
+keeps multiple choice only to recognise. The task writer is told what the tutor's challenge looked like and writes in
+the same spirit: a small realistic scenario with concrete numbers where the skill is the heart of the solution.
+
+**In the learner's practice.** The skill is in their focus from the day after the request. The page's background step
+(`prepareDiscovery`) adds it to the day's set when lk-practice hasn't started it yet, and again when it's due; when its
+stage has no proven task, one is written and proven there and then (about 10 to 15 seconds for code, on the grader),
+so no admin batch is needed. From there lk-practice schedules it like any skill. Its tasks show "From your tutor".
+
+## Recipes
+
+A code task carries a recipe: three to seven steps in plain words, in both languages, that walk a learner from the
+starter to a solution (what to compute, in what order, what to call each result), like the tutor's step-by-step
+challenges. It never shows code: `recipeProblem` refuses a step with a code block, a backticked call, operator or
+expression (a backticked name is fine), or a line of the solution, before the task is proven. Every new code task has
+one; an admin can edit it ("one step per line") with the task's other fields. The model writing a task gets a schema of that form's fields only, all
+required (`schemaFor`): with the recipe, the schema of every form's fields at once was more than Claude's structured
+outputs accept ("Schema is too complex"), which showed as Sonnet timing out and DeepSeek writing the task instead.
+
+Tried locally on 2026-11-07 with the `min()` detour replayed as a request (the tutor's audio-chunks challenge in its
+messages): Sonnet resolved it in 6 s to a new skill, "Use min() to find the binding limit among several capacities",
+anchored to `compute-free-tier-capacity`; lk-practice admitted it into the learner's graph; the next day's set got a
+code task for it, written by Sonnet in 14 s and proven on the grader (three limits per minute: requests, tokens and
+audio seconds, with a six-step recipe); the page showed it with "From your tutor" and the recipe open at its first
+stage; a right answer started the skill, next review the following day. Two DeepSeek tasks written earlier were
+rejected by their proofs (one recipe quoted a value, since allowed; one reference solution failed its own test).
+
+On the practice page (`lib/practice/recipes.ts`) the recipe is open at a skill's first stages (recognise, recall,
+produce, example, complete), guiding the learner. At later stages (write, apply, transfer) recall is the point: the
+recipe waits behind "Show the recipe", the page gets its steps only once it's shown, and showing it is recorded as hint
+0 of the task: it counts in the answer's evidence like a hint (a right answer with it counts a little less), without
+using one of the three written hints.
+
 ## Roadmap
 
 - "Explain in your words" by voice, once speech-to-text is in the platform: graded by a model against a rubric.

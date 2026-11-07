@@ -5,6 +5,8 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { afterAnswer, prepareDiscovery, runDiagnosis, type DiscoveryNote } from "@/lib/practice/discovery";
+import { RECIPE_HINT_NUMBER, recipeView, revealRecipe } from "@/lib/practice/recipes";
+import { pendingTutorRequests, tutorRequestedSkills } from "@/lib/practice/tutor-requests";
 import { askHint, MAX_HINTS } from "@/lib/practice/hints";
 import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
@@ -46,6 +48,7 @@ function itemView(
   confirmed: Set<string>,
   answer?: { answer: unknown; result: unknown },
   hints: string[] = [],
+  recipeShown = false,
 ) {
   const meta = published.skills[item.skillKey];
   return {
@@ -56,6 +59,10 @@ function itemView(
     // A check on a prerequisite that may be missing, and practice on one that was found missing.
     isProbe: Boolean(item.probe),
     isFound: !item.probe && (item.kind === "discovered" || confirmed.has(item.skillKey)),
+    // Practice the learner asked their tutor for (lib/practice/tutor-requests.ts).
+    isTutor: item.kind === "tutor",
+    // A code task's steps in plain words: open at the skill's first stages, earned later (lib/practice/recipes.ts).
+    recipe: recipeView(content, item.stage, recipeShown || Boolean(answer)),
     // Hints asked for before answering, oldest first, and how many more there may be.
     hints,
     maxHints: MAX_HINTS,
@@ -85,10 +92,14 @@ export async function getPracticeToday(courseSlug: string, timeZone: string, ext
     prisma.practiceTask.findMany({ where: { id: { in: items.map((item) => item.taskId) } }, select: { id: true, content: true } }),
     prisma.practiceAnswer.findMany({ where: { sessionId: session.id }, select: { taskId: true, answer: true, result: true } }),
     prisma.practiceSession.findMany({ where: { learnerId: loaded.learner.id, day }, select: { answers: { select: { passed: true } } } }),
-    prisma.practiceHint.findMany({ where: { sessionId: session.id }, orderBy: { number: "asc" }, select: { taskId: true, text: true } }),
+    prisma.practiceHint.findMany({ where: { sessionId: session.id }, orderBy: { number: "asc" }, select: { taskId: true, text: true, number: true } }),
   ]);
   const hintsByTask = new Map<string, string[]>();
-  for (const hint of hintRows) hintsByTask.set(hint.taskId, [...(hintsByTask.get(hint.taskId) ?? []), hint.text]);
+  const recipesShown = new Set<string>();
+  for (const hint of hintRows) {
+    if (hint.number === RECIPE_HINT_NUMBER) recipesShown.add(hint.taskId);
+    else hintsByTask.set(hint.taskId, [...(hintsByTask.get(hint.taskId) ?? []), hint.text]);
+  }
   const byId = new Map(tasks.map((task) => [task.id, task.content as unknown as TaskContent]));
   const answered = new Map(answers.map((answer) => [answer.taskId, answer]));
   const doneToday = daySessions.flatMap((entry) => entry.answers);
@@ -103,10 +114,13 @@ export async function getPracticeToday(courseSlug: string, timeZone: string, ext
     course: who.course,
     sessionId: session.id,
     extra: session.extra,
-    items: items.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed, answered.get(item.taskId), hintsByTask.get(item.taskId))),
+    items: items
+      .filter((item) => byId.has(item.taskId))
+      .map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed, answered.get(item.taskId), hintsByTask.get(item.taskId), recipesShown.has(item.taskId))),
     today: { answered: doneToday.length, right: doneToday.filter((answer) => answer.passed).length },
     streak: await practiceStreak(loaded.learner.id, day),
-    discoveryWaiting: discoveryWaiting && !session.extra,
+    // Also practice the tutor asked for: requests to resolve, and its skills' tasks to write (prepareDiscovery).
+    discoveryWaiting: (discoveryWaiting || (await hasTutorPractice(who.userId, who.course.id))) && !session.extra,
   };
 }
 export type PracticeToday = Extract<Awaited<ReturnType<typeof getPracticeToday>>, { success: true; ready: true }>;
@@ -213,6 +227,19 @@ export async function preparePracticeDiscovery(courseSlug: string, sessionId: st
     items: prepared.added.filter((item) => byId.has(item.taskId)).map((item) => itemView(item, byId.get(item.taskId)!, loaded.published, confirmed)),
     more: prepared.more,
   };
+}
+
+/** Shows a code task's earned recipe (lib/practice/recipes.ts); it counts like a hint in the answer's evidence. */
+export async function revealPracticeRecipe(courseSlug: string, sessionId: string, taskId: string): Promise<Result<{ es: string[]; en: string[] }>> {
+  const who = await learnerFor(courseSlug);
+  if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
+  const shown = await revealRecipe(who.userId, sessionId, taskId);
+  return "error" in shown ? { success: false, error: shown.error } : { success: true, ...shown };
+}
+
+/** Whether the learner has practice from their tutor: requests waiting, or skills it asked them to practise. */
+async function hasTutorPractice(userId: string, courseId: string) {
+  return (await pendingTutorRequests(userId, courseId)) > 0 || (await tutorRequestedSkills(userId, courseId)).length > 0;
 }
 
 /** The next hint for an open task (lib/practice/hints.ts), written for the learner's attempt so far. */

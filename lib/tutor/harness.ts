@@ -47,8 +47,9 @@ export type TutorReply =
       steps: TutorState["steps"];
       unlocked: number[];
       detours: { skill: string; stage: string }[];
-      // Detours closed in this turn: the panel offers "practise this in a few days" for each (recordPractice).
-      practiceOffers: { skill: string; evidence: "PASSED" | "SKIPPED" }[];
+      // Detours closed in this turn, and practice the learner asked for: the panel offers "practise this in a few
+      // days" for each (recordPractice).
+      practiceOffers: { skill: string; evidence: "PASSED" | "SKIPPED" | "REQUESTED" }[];
       actions: AppliedAction[];
       // The model that answered, and the one the admin chose to start at, if any (the panel shows both).
       model: string;
@@ -240,7 +241,18 @@ export async function runTutorTurn(userId: string, input: TutorRequest, onReply?
       data: { sessionId: session.id, role: "tutor", kind: "reply", content: reply, actions: actions as unknown as Prisma.InputJsonArray, model: result.model, traceId: result.traceId },
     }),
     prisma.tutorSession.update({ where: { id: session.id }, data: { state: state as unknown as Prisma.InputJsonObject, lessonId: session.lessonId ?? lessonId } }),
-    ...practice.map((entry) => prisma.practiceRequest.create({ data: { userId, skill: entry.skill, evidence: entry.evidence, lessonId, sessionId: session.id } })),
+    ...practice.map((entry) =>
+      prisma.practiceRequest.create({
+        data: {
+          userId,
+          skill: entry.skill,
+          evidence: entry.evidence,
+          lessonId,
+          sessionId: session.id,
+          detail: { notebookPath: request.notebookPath, messages: [{ role: "learner", content: shownToLearner(request).slice(0, 1500) }, { role: "tutor", content: reply.slice(0, 1500) }] },
+        },
+      }),
+    ),
   ]);
   for (const write of memoryWrites) await remember(userId, session.id, write);
 
@@ -253,7 +265,7 @@ export async function runTutorTurn(userId: string, input: TutorRequest, onReply?
     steps: state.steps,
     unlocked: unlockedSteps(state),
     detours: state.detours.map((detour) => ({ skill: detour.skill, stage: detour.stage })),
-    practiceOffers: actions.flatMap((action) => (action.applied && action.effect?.ended ? [action.effect.ended] : [])),
+    practiceOffers: actions.flatMap((action) => (action.applied ? [action.effect?.ended, action.effect?.offered].filter((offer) => offer !== undefined) : [])),
     actions,
     model: result.model,
     chosenModel,
@@ -262,11 +274,26 @@ export async function runTutorTurn(userId: string, input: TutorRequest, onReply?
 }
 
 /** The learner pressed "practise this in a few days" after a detour: queued for the practice engine (milestone 10). */
-export async function recordPractice(userId: string, sessionId: string, skill: string, evidence: "PASSED" | "SKIPPED") {
-  const session = await prisma.tutorSession.findFirst({ where: { id: sessionId, userId }, select: { id: true, lessonId: true } });
+export async function recordPractice(userId: string, sessionId: string, skill: string, evidence: "PASSED" | "SKIPPED" | "REQUESTED") {
+  const session = await prisma.tutorSession.findFirst({ where: { id: sessionId, userId }, select: { id: true, lessonId: true, notebookPath: true } });
   if (!session || !skill.trim()) return { ok: false as const };
-  await prisma.practiceRequest.create({ data: { userId, skill: skill.trim().slice(0, 200), evidence, lessonId: session.lessonId, sessionId } });
+  await prisma.practiceRequest.create({
+    data: { userId, skill: skill.trim().slice(0, 200), evidence, lessonId: session.lessonId, sessionId, detail: await requestDetail(session.id, session.notebookPath) },
+  });
   return { ok: true as const };
+}
+
+/**
+ * What a practice request keeps of the conversation (docs/practice.md, "Practice from the tutor"): the notebook and the
+ * last messages, which hold the detour's explanation and challenge. The practice skill and its tasks are written from
+ * it, so they look like what the learner asked for.
+ */
+async function requestDetail(sessionId: string, notebookPath: string): Promise<Prisma.InputJsonObject> {
+  const messages = await prisma.tutorMessage.findMany({ where: { sessionId }, orderBy: { createdAt: "desc" }, take: 6, select: { role: true, content: true } });
+  return {
+    notebookPath,
+    messages: messages.reverse().map((message) => ({ role: message.role, content: message.content.slice(0, 1500) })),
+  };
 }
 
 /**

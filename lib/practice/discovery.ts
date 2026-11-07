@@ -4,7 +4,6 @@ import {
   discoveryExtension,
   prerequisiteReport,
   prerequisiteRequest,
-  type DiscoveryExtension,
   type Evidence,
   type PracticeEvent,
   type PracticeItem,
@@ -20,8 +19,9 @@ import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
 import { normaliseKey } from "@/lib/practice/draft";
 import { skillForms } from "@/lib/practice/graph";
-import { composeLearnerGraph, latestGraph, loadLearner, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
+import { composeLearnerGraph, latestGraph, loadLearner, type Answer, type Feedback, type LearnerExtension, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import { generateTask, type TaskContent } from "@/lib/practice/tasks";
+import { pendingTutorRequests, resolveNextTutorRequest, tutorRequestedSkills } from "@/lib/practice/tutor-requests";
 
 // Missing prerequisites (docs/practice.md, "Missing prerequisites"). When a learner fails a skill twice in a row at its
 // stage, lk-practice suggests a diagnosis; a model names up to two prerequisites that may be missing (a course skill,
@@ -105,8 +105,8 @@ async function admit(userId: string, courseId: string, learnerId: string, state:
     return;
   }
   const learner = await prisma.practiceLearner.findUnique({ where: { id: learnerId }, select: { extensions: true } });
-  const stored = (learner?.extensions ?? []) as unknown as DiscoveryExtension[];
-  if (stored.some((extension) => extension.hypothesisId === hypothesisId)) return;
+  const stored = (learner?.extensions ?? []) as unknown as LearnerExtension[];
+  if (stored.some((extension) => "hypothesisId" in extension && extension.hypothesisId === hypothesisId)) return;
   await prisma.practiceLearner.update({ where: { id: learnerId }, data: { extensions: [...stored, admission.extension] as unknown as Prisma.InputJsonArray } });
   await loadLearner(userId, courseId);
 }
@@ -422,16 +422,27 @@ async function openHypotheses(userId: string, courseId: string, hypotheses: read
  * most one per call, by `deadline`). Returns the items added and whether calling again may add more.
  */
 export async function prepareDiscovery(userId: string, courseId: string, sessionId: string, deadline: number): Promise<{ added: SessionItem[]; more: boolean } | null> {
+  const owned = await prisma.practiceSession.findFirst({ where: { id: sessionId, learner: { userId, courseId } }, select: { id: true, extra: true } });
+  if (!owned) return null;
+  // Practice the tutor asked for (lib/practice/tutor-requests.ts): one waiting request resolved per call, while there's
+  // time for a model to answer; the page calls again while there's more.
+  let resolvedMore = false;
+  if (!owned.extra && deadline - Date.now() > 20_000 && (await pendingTutorRequests(userId, courseId)) > 0) {
+    await resolveNextTutorRequest(userId, courseId, deadline - 8_000).catch((error) =>
+      console.error(JSON.stringify({ event: "practice.tutor_request_failed", error: error instanceof Error ? error.message : String(error) })),
+    );
+    resolvedMore = (await pendingTutorRequests(userId, courseId)) > 0;
+  }
   const loaded = await loadLearner(userId, courseId);
   if (!loaded) return null;
-  const session = await prisma.practiceSession.findFirst({ where: { id: sessionId, learnerId: loaded.learner.id }, select: { id: true, items: true } });
+  const session = await prisma.practiceSession.findFirst({ where: { id: sessionId, learnerId: loaded.learner.id }, select: { id: true, items: true, createdAt: true, extra: true } });
   if (!session) return null;
   const items = [...(session.items as unknown as SessionItem[])];
   const { graph } = loaded.published;
   const nodeOf = (key: string) => graph.skills.find((skill) => skill.id === key);
   const hypotheses = Object.values(loaded.state.hypotheses ?? {}).filter((hypothesis) => !hypothesis.closedAt);
 
-  const needs: { skillKey: string; stage: string; kind: "probe" | "discovered"; probe?: string; count: number }[] = [];
+  const needs: { skillKey: string; stage: string; kind: "probe" | "discovered" | "tutor"; probe?: string; count: number }[] = [];
   for (const hypothesis of hypotheses) {
     const node = nodeOf(hypothesis.skillId);
     if (!node) continue;
@@ -445,7 +456,23 @@ export async function prepareDiscovery(userId: string, courseId: string, session
       }
     }
   }
-  if (!needs.length) return { added: [], more: false };
+  // Skills the tutor asked this learner to practise, from the day after the request: started when lk-practice hasn't
+  // started them yet, and practised again when they're due. A task is written for them when the pool has none.
+  if (!session.extra) {
+    const now = Date.now();
+    const status = new Map(practice.status(loaded.state, graph, now).skills.map((skill) => [skill.skillId, skill]));
+    for (const requested of await tutorRequestedSkills(userId, courseId)) {
+      const node = nodeOf(requested.key);
+      if (!node || requested.requestedAt >= session.createdAt) continue;
+      if (items.some((item) => item.skillKey === requested.key) || needs.some((need) => need.skillKey === requested.key)) continue;
+      const skill = status.get(requested.key);
+      const started = Boolean(loaded.state.skills[requested.key]?.stage);
+      if (started && !(skill?.due !== undefined && skill.due !== null && skill.due <= now)) continue;
+      if (skill?.status === "suspended" || skill?.status === "locked") continue;
+      needs.push({ skillKey: requested.key, stage: loaded.state.skills[requested.key]?.stage ?? ladderOf(node)[0], kind: "tutor", count: 1 });
+    }
+  }
+  if (!needs.length) return { added: [], more: resolvedMore };
 
   const taken = new Set(items.map((item) => item.taskId));
   const added: SessionItem[] = [];
@@ -468,7 +495,7 @@ export async function prepareDiscovery(userId: string, courseId: string, session
     await prisma.practiceSession.update({ where: { id: session.id }, data: { items: [...(current.items as unknown as SessionItem[]), ...fresh] as unknown as Prisma.InputJsonArray } });
   };
   await save();
-  if (!toWrite || deadline - Date.now() < 20_000) return { added, more: false };
+  if (!toWrite || deadline - Date.now() < 20_000) return { added, more: resolvedMore || Boolean(toWrite) };
 
   const written = await generateTask({ courseId, skillKey: toWrite.skillKey, stage: toWrite.stage, userId, deadline });
   if (!written.ok) {
@@ -508,7 +535,7 @@ export async function courseDiscoveries(courseId: string) {
     for (const learner of learners) {
       const state = learner.state as unknown as PracticeState;
       if (!Object.keys(state.hypotheses ?? {}).length) continue;
-      const { graph } = composeLearnerGraph(latest.published.graph, (learner.extensions ?? []) as unknown as DiscoveryExtension[], []);
+      const { graph } = composeLearnerGraph(latest.published.graph, (learner.extensions ?? []) as unknown as LearnerExtension[], []);
       try {
         for (const entry of prerequisiteReport(state, graph, practice.config)) {
           const key = `${entry.skillId}>${entry.forSkillId}`;

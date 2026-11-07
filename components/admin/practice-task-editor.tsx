@@ -363,6 +363,28 @@ export function TaskEditor({
                   />
                 </Field>
               )}
+              {form === "code" &&
+                (["Es", "En"] as const).map((language) => (
+                  <Field
+                    key={language}
+                    label={`Recipe (${language === "Es" ? "Spanish" : "English"}), one step per line`}
+                    hint="3 to 7 steps in plain words, the same number in both languages. Names in backticks are fine; code, calls and expressions aren't."
+                  >
+                    <Area
+                      value={(draft[`recipe${language}`] ?? []).join("\n")}
+                      onChange={(value) =>
+                        set(
+                          `recipe${language}`,
+                          value
+                            .split("\n")
+                            .map((line) => line.trim())
+                            .filter(Boolean),
+                        )
+                      }
+                      minRows={4}
+                    />
+                  </Field>
+                ))}
             </>
           )}
 

@@ -50,6 +50,8 @@ export type AppliedAction =
         memory?: MemoryWrite;
         // A detour closed: the panel offers to schedule practice on its skill (one click, no model call).
         ended?: { skill: string; evidence: "PASSED" | "SKIPPED" };
+        // The learner asked for more practice on something: the panel offers to schedule it, like a closed detour.
+        offered?: { skill: string; evidence: "REQUESTED" };
       };
     }
   | { tool: string; applied: false; refused: string };
@@ -128,6 +130,11 @@ export function applyTool(state: TutorState, name: string, args: Record<string, 
       const evidence = args.evidence === "skipped" ? "SKIPPED" : "PASSED";
       if (!skill) return refuse("no skill");
       return ok(state, { practice: { skill, evidence } });
+    }
+    case "offer_practice": {
+      const skill = str(args.skill);
+      if (!skill) return refuse("no skill");
+      return ok(state, { offered: { skill: skill.slice(0, 200), evidence: "REQUESTED" } });
     }
     case "remember": {
       const kind = str(args.kind).toUpperCase();
