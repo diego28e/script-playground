@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, Captions, Check, Film, ImageIcon, Plus, Trash2, Upload, X } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Captions, Check, FileText, Film, ImageIcon, Plus, Trash2, Upload, X } from "lucide-react";
 import {
   markUploadFailed,
   refreshUpload,
@@ -173,6 +174,13 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
           {upload && <UploadStatus upload={upload} />}
         </div>
         <div className="col-start-2 flex flex-wrap gap-2 md:col-start-3 md:justify-end">
+          {/* What the session that makes this lesson's video reads (lib/video-brief.ts). */}
+          <Button variant="ghost" size="sm" asChild>
+            <Link href={`/admin/videos/brief/${lesson.id}`}>
+              <FileText className="mr-1.5 h-4 w-4" />
+              Video brief
+            </Link>
+          </Button>
           {lesson.video && (
             <Button variant="ghost" size="sm" onClick={remove} loading={removing} loadingLabel="Removing…" disabled={busy}>
               <Trash2 className="mr-1.5 h-4 w-4" />
