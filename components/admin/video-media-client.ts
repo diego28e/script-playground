@@ -6,17 +6,19 @@ import { TRANSLATION_BATCH } from "@/lib/caption-limits";
 
 type Cue = { start: number; end: number; text: string };
 export type CaptionRun = { ok: true; labels: string[] } | { ok: false; error: string };
+/** Where a caption run is: what it is doing, and how far along overall (null while that can't be measured). */
+export type CaptionStep = { detail: string; percent: number | null };
 
 /** Batches translated at the same time: fast, without asking every model at once. */
 const PARALLEL = 3;
 
 /**
  * English captions from the video's narration, Spanish translated from them, saved on the video. `onStep` hears what
- * is happening, for the page to show.
+ * is happening, for the page to show: transcribing has no measure, translating runs from 10% to 90%, saving is the rest.
  */
-export async function generateCaptions(partId: string, onStep: (step: string) => void): Promise<CaptionRun> {
+export async function generateCaptions(partId: string, onStep: (step: CaptionStep) => void): Promise<CaptionRun> {
   const unreachable = { success: false as const, error: "We couldn't reach the server. Try again." };
-  onStep("Transcribing the narration");
+  onStep({ detail: "Transcribing the narration", percent: null });
   const heard = await transcribeVideo(partId).catch(() => unreachable);
   if (!heard.success) return { ok: false, error: heard.error };
   const english = heard.cues;
@@ -25,7 +27,8 @@ export async function generateCaptions(partId: string, onStep: (step: string) =>
   for (let at = 0; at < english.length; at += TRANSLATION_BATCH) batches.push(at);
   const spanish: (string | undefined)[] = new Array(english.length);
   let done = 0;
-  onStep(`Translating to Spanish: 0 of ${english.length} lines`);
+  const translating = () => onStep({ detail: `Translating ${done} of ${english.length} lines`, percent: 10 + (80 * done) / english.length });
+  translating();
   const translate = async (at: number) => {
     const lines = english.slice(at, at + TRANSLATION_BATCH).map((cue) => cue.text);
     const context = english.slice(Math.max(0, at - 3), at).map((cue) => cue.text);
@@ -35,7 +38,7 @@ export async function generateCaptions(partId: string, onStep: (step: string) =>
     if (!result.success) throw new Error(result.error);
     result.lines.forEach((line, index) => (spanish[at + index] = line));
     done += lines.length;
-    onStep(`Translating to Spanish: ${done} of ${english.length} lines`);
+    translating();
   };
   try {
     const queue = [...batches];
@@ -48,7 +51,7 @@ export async function generateCaptions(partId: string, onStep: (step: string) =>
     return { ok: false, error: `The Spanish translation failed: ${(error as Error).message}` };
   }
 
-  onStep("Saving the captions");
+  onStep({ detail: "Saving the captions", percent: 95 });
   const es: Cue[] = english.map((cue, index) => ({ ...cue, text: spanish[index] ?? cue.text }));
   const saved = await saveCaptions(partId, { en: english, es }).catch(() => unreachable);
   return saved.success ? { ok: true, labels: saved.labels } : { ok: false, error: saved.error };

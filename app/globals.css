@@ -397,3 +397,14 @@
     animation: none;
   }
 }
+
+/* Progress (components/admin/video-progress.tsx): while a step's share isn't known yet, a short segment sweeps along
+   its track; the fill itself eases to each new value. */
+@keyframes progress-sweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(330%); }
+}
+.progress-sweep { animation: progress-sweep 1.5s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .progress-sweep { animation: none; transform: none; width: 100%; opacity: 0.3; }
+}

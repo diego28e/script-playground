@@ -17,13 +17,13 @@ import {
   type VideoTarget,
 } from "@/actions/videos";
 import { setVideoPoster, startPosterChange } from "@/actions/video-media";
-import { frameToJpeg, generateCaptions, imageToJpeg, put } from "@/components/admin/video-media-client";
+import { frameToJpeg, generateCaptions, imageToJpeg, put, type CaptionStep } from "@/components/admin/video-media-client";
+import { VideoProgress } from "@/components/admin/video-progress";
 import { Tip } from "@/components/ui/tip";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DotLoader } from "@/components/ui/dot-loader";
 import { cn } from "@/lib/utils";
 
 type Lesson = VideoLessonList["courses"][number]["modules"][number]["lessons"][number];
@@ -110,18 +110,30 @@ function UploadStatus({ upload, label }: { upload: UploadSummary; label: string 
       </p>
     );
   }
+  // MediaConvert reports 0% for a while before it measures anything: the encode sweeps until then.
+  const encodeShare = upload.percent ? upload.percent : null;
   return (
-    <p className="flex items-center gap-2 text-xs text-muted-foreground">
-      <DotLoader size={12} />
-      {upload.status === "UPLOADING" ? "Waiting for the upload to finish" : `Encoding ${upload.percent ?? 0}%`} · {label} · {upload.fileName}
-    </p>
+    <VideoProgress
+      title={label}
+      subtitle={upload.fileName}
+      steps={[
+        upload.status === "UPLOADING"
+          ? { label: "Upload", state: "active", percent: null, detail: "Waiting for the upload to finish" }
+          : { label: "Upload", state: "done" },
+        upload.status === "ENCODING"
+          ? { label: "Encode", state: "active", percent: encodeShare, detail: encodeShare ? "Encoding" : "Starting the encode" }
+          : { label: "Encode", state: "waiting" },
+        ...(upload.ownCaptions ? [] : [{ label: "Captions", state: "waiting" as const }]),
+      ]}
+    />
   );
 }
 
 /** What is open under the lesson: the uploader (replacing one of its videos, or adding one), or a video's poster. */
 type Opened = { kind: "replace"; part: Part } | { kind: "add" } | { kind: "poster"; part: Part } | null;
 
-type Captioning = { step: string } | { error: string };
+/** A caption run on one of the lesson's videos: where it is (and whether it follows an upload), or why it stopped. */
+type Captioning = { step: CaptionStep; afterUpload: boolean } | { error: string };
 
 function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean }) {
   const router = useRouter();
@@ -132,10 +144,10 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
   // Caption runs on this lesson's videos, by video id: the step each is on, or why it stopped.
   const [captioning, setCaptioning] = useState<Record<string, Captioning>>({});
   const runCaptions = useCallback(
-    async (partId: string) => {
+    async (partId: string, afterUpload = false) => {
       const show = (state: Captioning) => setCaptioning((all) => ({ ...all, [partId]: state }));
-      show({ step: "Starting" });
-      const result = await generateCaptions(partId, (step) => show({ step }));
+      show({ step: { detail: "Starting", percent: null }, afterUpload });
+      const result = await generateCaptions(partId, (step) => show({ step, afterUpload }));
       if (!result.ok) {
         show({ error: result.error });
         toast.error("The captions couldn't be made. The reason is under the video.");
@@ -180,7 +192,7 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
       });
       setUploads(next.filter((upload) => upload.status !== "READY"));
       if (changed) router.refresh();
-      for (const partId of toCaption) void runCaptions(partId);
+      for (const partId of toCaption) void runCaptions(partId, true);
     }, POLL_MS);
     return () => clearTimeout(timer);
   }, [uploads, router, labelOf, runCaptions]);
@@ -290,15 +302,9 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
                     </span>
                   )}
                 </div>
-                {captioning[part.id] &&
-                  ("step" in captioning[part.id] ? (
-                    <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-                      <DotLoader size={12} />
-                      Captions: {(captioning[part.id] as { step: string }).step}…
-                    </p>
-                  ) : (
-                    <p className="text-xs text-destructive">Captions failed: {(captioning[part.id] as { error: string }).error}</p>
-                  ))}
+                {captioning[part.id] && "error" in captioning[part.id] && (
+                  <p className="text-xs text-destructive">Captions failed: {(captioning[part.id] as { error: string }).error}</p>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <Tip content="Move up">
@@ -343,6 +349,20 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
                   Remove
                 </Button>
               </div>
+              {(() => {
+                const run = captioning[part.id];
+                if (!run || !("step" in run)) return null;
+                const captions = { label: "Captions", state: "active" as const, percent: run.step.percent, detail: run.step.detail };
+                return (
+                  <div className="basis-full pb-1 pt-1.5">
+                    <VideoProgress
+                      title={run.afterUpload ? part.title : "English captions and Spanish subtitles"}
+                      subtitle={run.afterUpload ? "English captions and Spanish subtitles, made from the narration" : part.title}
+                      steps={run.afterUpload ? [{ label: "Upload", state: "done" }, { label: "Encode", state: "done" }, captions] : [captions]}
+                    />
+                  </div>
+                );
+              })()}
             </li>
           ))}
         </ol>
@@ -361,7 +381,12 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
       {opened?.kind === "add" && (
         <AddVideo
           lesson={lesson}
-          onStarted={(summary) => setUploads((list) => [summary, ...list])}
+          onStarted={(summary) =>
+            setUploads((list) => [
+              summary,
+              ...list.filter((upload) => upload.partId !== null || upload.skillKey !== summary.skillKey || upload.titleEn !== summary.titleEn),
+            ])
+          }
           onDone={() => setOpened(null)}
         />
       )}
@@ -654,6 +679,7 @@ function Uploader({
         partId: "partId" in target ? target.partId : null,
         skillKey: "skillKey" in target ? target.skillKey : null,
         titleEn: "titleEn" in target ? target.titleEn : null,
+        ownCaptions: captions.length > 0,
       });
       toast.error(`The upload failed: ${message}`);
       return;
@@ -825,12 +851,22 @@ function Uploader({
             <Check className="mr-1.5 h-4 w-4" />
             Upload and encode
           </Button>
-          {stage === "Uploading" && file && (
-            <span className="text-xs text-muted-foreground">
-              {megabytes(sent)} of {megabytes(file.size)}
-            </span>
-          )}
         </div>
+        {uploading && file && (
+          <VideoProgress
+            title={heading}
+            subtitle={file.name}
+            steps={[
+              stage === "Uploading"
+                ? { label: "Upload", state: "active", percent: (sent / file.size) * 100, detail: `Uploading ${megabytes(sent)} of ${megabytes(file.size)}` }
+                : stage === "Preparing…"
+                  ? { label: "Upload", state: "active", percent: null, detail: "Preparing" }
+                  : { label: "Upload", state: "done" },
+              stage === "Starting the encode…" ? { label: "Encode", state: "active", percent: null, detail: "Starting the encode" } : { label: "Encode", state: "waiting" },
+              ...(captions.length ? [] : [{ label: "Captions", state: "waiting" as const }]),
+            ]}
+          />
+        )}
       </div>
     </div>
   );

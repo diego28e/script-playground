@@ -81,6 +81,7 @@ function describeUpload(upload: {
   partId: string | null;
   skillKey: string | null;
   titleEn: string | null;
+  captions?: unknown;
 }) {
   return {
     id: upload.id,
@@ -92,6 +93,8 @@ function describeUpload(upload: {
     partId: upload.partId,
     skillKey: upload.skillKey,
     titleEn: upload.titleEn,
+    // Caption files came with the upload, so none are made for it.
+    ownCaptions: Array.isArray(upload.captions) && upload.captions.length > 0,
   };
 }
 export type UploadSummary = ReturnType<typeof describeUpload>;
@@ -141,10 +144,12 @@ export async function listVideoLessons() {
         ...courseModule,
         lessons: courseModule.lessons.map(({ videos, practiceSkills, videoUploads, ...lesson }) => {
           const skillLabel = new Map(practiceSkills.map((skill) => [skill.key, skill.labelEn]));
-          // Per target (a video, or a new one for a skill or a title), only its latest upload, and only while not done.
+          // Per target (a skill, a video, or a new one with its own title), only its latest upload, and only while not
+          // done: a retry hides the failure before it. An upload for a skill gets the video's id once attached, so the
+          // skill, not the id, is its target.
           const latest = new Map<string, (typeof videoUploads)[number]>();
           for (const upload of videoUploads) {
-            const target = upload.partId ?? `new:${upload.skillKey ?? upload.titleEn ?? ""}`;
+            const target = upload.skillKey ? `skill:${upload.skillKey}` : upload.partId ? `video:${upload.partId}` : `title:${upload.titleEn ?? ""}`;
             if (!latest.has(target)) latest.set(target, upload);
           }
           return {
