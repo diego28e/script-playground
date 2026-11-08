@@ -19,7 +19,13 @@ const PARALLEL = 3;
 export async function generateCaptions(partId: string, onStep: (step: CaptionStep) => void): Promise<CaptionRun> {
   const unreachable = { success: false as const, error: "We couldn't reach the server. Try again." };
   onStep({ detail: "Transcribing the narration", percent: null });
-  const heard = await transcribeVideo(partId).catch(() => unreachable);
+  let heard = await transcribeVideo(partId).catch(() => unreachable);
+  // A first try can run out of time while the media host fetches a new file for Deepgram (seen: 25 s, then 7 s once
+  // cached), so it is tried once more.
+  if (!heard.success) {
+    onStep({ detail: "Transcribing the narration (second try)", percent: null });
+    heard = await transcribeVideo(partId).catch(() => unreachable);
+  }
   if (!heard.success) return { ok: false, error: heard.error };
   const english = heard.cues;
 

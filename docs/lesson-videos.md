@@ -56,7 +56,10 @@ Spanish subtitles** as tracks, and each learner picks one in the player (lk-reac
 Español, or a second language under the first), or turns them off.
 
 - **Made for you** (`lib/captions.ts`, `actions/video-media.ts`): **Deepgram Nova-3** transcribes the video's
-  narration from its signed URL, with word timings and smart formatting (numbers as digits), and the words become
+  narration, sent as bytes: the encode's audio-only copy (`video-audio.mp4`, about 3 MB for 7 minutes; 2 to 3 s every
+  time), or the video itself for one encoded before that copy existed. Deepgram fetching a file by its URL sometimes
+  hung past 40 s for the same file that took 7 s a moment later, so the address is only used for a video over 200 MB.
+  It returns word timings and smart formatting (numbers as digits), and the words become
   cues of at most two lines of about 42 characters and 7 seconds, ending at a sentence or a comma where possible.
   The authoring models (Claude Sonnet first) translate the cues to Latin American Spanish **line for line**, so both
   tracks share the same timings; code, product names and the technical terms developers say in English stay as they
@@ -64,7 +67,9 @@ Español, or a second language under the first), or turns them off.
   new keys each time, since media files are cached for good) and replace the video's English and Spanish tracks.
   Each step is one request, because Amplify stops a request after about 30 s: the admin page runs them in turn
   (transcribe, translate in batches of 24 lines, three at a time, then save). Tried on 00.07's first video (6:54): the
-  transcript differed from the script only in formatting; a 20-line video took about 9 s in all.
+  transcript differed from the script only in formatting; a 20-line video took about 9 s in all. A model name the
+  narration spells out ("GPT six Luna" for GPT-6 Luna) is written as heard: Deepgram's key terms are the course's
+  general ones, not each lesson's.
 - **When:** automatically when an upload finishes encoding without caption files of its own (the admin page that
   follows the encode starts it), and from a video's **Captions** button at any time (with a confirmation when it
   already has tracks). Uploading your own WebVTT files with a video still works and skips the automatic captions.
@@ -72,3 +77,23 @@ Español, or a second language under the first), or turns them off.
   1920 px); for a video already on the lesson, its **Poster** button does the same, the frame taken from the stored
   video (the media host's CORS allows it). A new poster gets a new key in the video's folder.
 - **Keys:** `DEEPGRAM_API_KEY` (the platform's voice key) and the authoring models' keys must be on the server.
+
+## The player
+
+A video with quizzes plays in lk-react's interactive player. Every other lesson video plays in the platform's own
+player (`components/courses/video-player/`), drawn after the OCW platform's reviewer player and made for learners:
+
+- **Its own controls, never the browser's:** no download item or native menu, the same look in every browser, and
+  right-click on the video does nothing. A determined learner can still find the file (its signed address is in the
+  page and expires in hours); this removes the easy ways.
+- **Captions drawn by the player**, above its bar, in the learner's choice from the Captions menu (Off, English,
+  Español); until they choose, the page's language. The `<track>` elements only make the browser parse the WebVTT.
+- **Speed** from 0.5× to 2× (the button shows it when it isn't 1×), volume, ±10 s, time elapsed or remaining,
+  picture in picture and fullscreen.
+- **Transcript** under the video: the line being spoken is marked and followed, any line jumps there, and a search
+  finds where something was said. The seek bar shows the line spoken under the pointer.
+- **Keyboard:** Space/K, J/L, arrows, 0–9, < >, M, C, T, P, F, and ? for the list.
+- Speed, volume, the caption language and the transcript are remembered in the browser for every lesson video.
+- The bar hides while playing and comes back with the pointer, a tap or keyboard focus; the big play button shows
+  only before the first play and after the end, so a paused frame (code to read) stays clear. On a phone the bar keeps
+  play, volume, time, transcript, speed, captions and fullscreen.

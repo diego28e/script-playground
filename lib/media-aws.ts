@@ -72,8 +72,8 @@ export function outputSize(width?: number | null, height?: number | null): { wid
 
 /**
  * Starts the encode: H.264 (QVBR, 5 Mb/s at most) and AAC in an MP4 with its index at the front, written as
- * `<outputPrefix>video.mp4`. The size is what the browser reported, scaled down to 1080p; a phone video's rotation
- * is applied first.
+ * `<outputPrefix>video.mp4`, and the audio alone as `<outputPrefix>video-audio.mp4` for the captions. The size is
+ * what the browser reported, scaled down to 1080p; a phone video's rotation is applied first.
  */
 export async function startEncodeJob(input: {
   sourceKey: string;
@@ -133,6 +133,18 @@ export async function startEncodeJob(input: {
                   {
                     AudioSourceName: "Audio Selector 1",
                     CodecSettings: { Codec: "AAC", AacSettings: { Bitrate: 128_000, CodingMode: "CODING_MODE_2_0", SampleRate: 48_000 } },
+                  },
+                ],
+              },
+              // The narration alone, small (about 3 MB for 7 minutes), as `video-audio.mp4`: what the captions are
+              // transcribed from (lib/captions.ts), sent to Deepgram as bytes rather than a 30 MB video it fetches.
+              {
+                NameModifier: "-audio",
+                ContainerSettings: { Container: "MP4", Mp4Settings: { MoovPlacement: "PROGRESSIVE_DOWNLOAD" } },
+                AudioDescriptions: [
+                  {
+                    AudioSourceName: "Audio Selector 1",
+                    CodecSettings: { Codec: "AAC", AacSettings: { Bitrate: 64_000, CodingMode: "CODING_MODE_1_0", SampleRate: 48_000 } },
                   },
                 ],
               },

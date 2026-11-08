@@ -38,24 +38,51 @@ const KEYTERMS = [
 
 type DeepgramWord = { start: number; end: number; punctuated_word?: string; word: string };
 
+/** Above this a video is too big to pass through the server: Deepgram fetches it from its address instead. */
+const MAX_SENT_BYTES = 200 * 1024 ** 2;
+
+/**
+ * What Deepgram hears, as bytes the server sends it: the encode's audio-only copy (`video-audio.mp4`, a few MB) when
+ * there is one, else the video itself (videos encoded before the audio copy existed). Sending bytes, not an address:
+ * Deepgram fetching a file by its URL sometimes took 7 s and sometimes hung past 40 s for the same file (2026-11-08).
+ * Null when only the address will do (a very long video).
+ */
+async function audioToSend(videoPath: string, signal: AbortSignal): Promise<{ bytes: ArrayBuffer; type: string } | null> {
+  const local = (path: string) => join(process.cwd(), "public", path);
+  const audioPath = videoPath.replace(/video\.mp4$/, "video-audio.mp4");
+  const url = (path: string) => resolveMediaUrls(path);
+  if (!/^https?:\/\//.test(url(videoPath))) {
+    // Local development without the media host: the files are in public/media.
+    const bytes = await readFile(local(audioPath)).catch(() => readFile(local(videoPath)));
+    return { bytes: Uint8Array.from(bytes).buffer, type: "video/mp4" };
+  }
+  if (audioPath !== videoPath) {
+    const audio = await fetch(url(audioPath), { signal }).catch(() => null);
+    if (audio?.ok) return { bytes: await audio.arrayBuffer(), type: "audio/mp4" };
+  }
+  const head = await fetch(url(videoPath), { method: "HEAD", signal }).catch(() => null);
+  if (Number(head?.headers.get("content-length") ?? Infinity) > MAX_SENT_BYTES) return null;
+  const video = await fetch(url(videoPath), { signal });
+  if (!video.ok) throw new Error(`The video couldn't be read from the media host (${video.status})`);
+  return { bytes: await video.arrayBuffer(), type: "video/mp4" };
+}
+
 /**
  * Deepgram Nova-3 transcribes the video's English narration (pre-recorded, with smart formatting: numbers as
- * digits, punctuation). A video on the media host is fetched by Deepgram from its signed URL; one served from
- * public/media in local development is sent as bytes.
+ * digits, punctuation).
  */
 export async function transcribe(videoPath: string, signal: AbortSignal): Promise<DeepgramWord[]> {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) throw new Error("DEEPGRAM_API_KEY is not set");
+  if (!videoPath.startsWith(MEDIA_PREFIX)) throw new Error("The video isn't on the media host");
   const params = new URLSearchParams({ model: "nova-3", language: "en", smart_format: "true", punctuate: "true" });
   for (const term of KEYTERMS) params.append("keyterm", term);
 
-  const url = resolveMediaUrls(videoPath);
-  const remote = /^https?:\/\//.test(url);
-  if (!remote && !videoPath.startsWith(MEDIA_PREFIX)) throw new Error("The video isn't on the media host");
+  const audio = await audioToSend(videoPath, signal);
   const response = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
     method: "POST",
-    headers: { Authorization: `Token ${key}`, "Content-Type": remote ? "application/json" : "video/mp4" },
-    body: remote ? JSON.stringify({ url }) : new Uint8Array(await readFile(join(process.cwd(), "public", videoPath))),
+    headers: { Authorization: `Token ${key}`, "Content-Type": audio ? audio.type : "application/json" },
+    body: audio ? audio.bytes : JSON.stringify({ url: resolveMediaUrls(videoPath) }),
     signal,
   });
   const result = (await response.json().catch(() => null)) as {

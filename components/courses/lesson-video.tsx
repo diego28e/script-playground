@@ -9,15 +9,14 @@ import "@intellectif/lk-react/theme/skin.css";
 import { saveVideoState, type VideoState } from "@/actions/lessons";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { LK_STRINGS_ES } from "@/lib/lk-strings-es";
+import { VideoPlayer } from "@/components/courses/video-player/video-player";
 
 const COPY = {
     es: {
         saveError: "No pudimos guardar tu avance en el video. Seguiremos intentándolo.",
-        noVideo: "Tu navegador no puede reproducir este video.",
     },
     en: {
         saveError: "We couldn't save your place in the video. We'll keep trying.",
-        noVideo: "Your browser can't play this video.",
     },
 };
 
@@ -148,13 +147,13 @@ export function LessonVideo({ video, lessonId, videoId, title, language, trackin
                     media={video.media}
                     portrait={portrait}
                     initial={initial}
+                    language={language}
                     onProgress={onProgress}
                     onEnded={() => {
                         // Watched to the end: kept, so the lesson's playlist ticks it (and a video lesson completes).
                         update((current) => ({ ...current, finishedAt: current.finishedAt ?? new Date().toISOString() }), 0);
                         onFinished?.();
                     }}
-                    fallback={t.noVideo}
                 />
             </div>
         );
@@ -200,66 +199,37 @@ export function LessonVideo({ video, lessonId, videoId, title, language, trackin
     );
 }
 
-/** A video with no questions yet: the browser's own player, with captions, a poster and resume. */
+/**
+ * A video with no questions yet: the platform's own player (components/courses/video-player), with its captions in
+ * the learner's choice of language, speed, transcript and resume, and none of the browser's menus.
+ */
 function PlainVideo({
     media,
     portrait,
     initial,
+    language,
     onProgress,
     onEnded,
-    fallback,
 }: {
     media: Extract<LessonVideoData, { kind: "plain" }>["media"];
     portrait: boolean;
     initial: VideoState;
+    language: "es" | "en";
     onProgress: (progress: MediaProgress) => void;
     onEnded?: () => void;
-    fallback: string;
 }) {
-    const ref = useRef<HTMLVideoElement>(null);
-    const furthest = useRef(initial.progress?.furthest ?? 0);
-    const lastReport = useRef(0);
-
-    // Resume where the learner left off, unless that was the very end. Metadata that loaded before hydration is
-    // replayed by the box around the player (usePlayerBox), so this handler always runs once.
-    const resume = (element: HTMLVideoElement) => {
-        const at = initial.progress?.at ?? 0;
-        if (at > 0 && at < element.duration - 5) element.currentTime = at;
-    };
-
-    const report = (element: HTMLVideoElement, force = false) => {
-        const at = element.currentTime;
-        furthest.current = Math.max(furthest.current, at);
-        if (!force && Date.now() - lastReport.current < 5000) return;
-        lastReport.current = Date.now();
-        onProgress({ progressVersion: "1.0", at, furthest: furthest.current });
-    };
-
     return (
-        <video
-            ref={ref}
-            controls
-            playsInline
-            preload="metadata"
-            // Captions come from the media host, another origin; the browser only reads them with CORS.
-            crossOrigin="anonymous"
+        <VideoPlayer
+            src={media.url}
             poster={media.poster}
-            aria-label={media.alt}
-            className={portrait ? "aspect-[9/16] w-full bg-black" : "aspect-video w-full bg-black"}
-            onLoadedMetadata={(event) => resume(event.currentTarget)}
-            onTimeUpdate={(event) => report(event.currentTarget)}
-            onPause={(event) => report(event.currentTarget, true)}
-            onSeeked={(event) => report(event.currentTarget, true)}
-            onEnded={(event) => {
-                report(event.currentTarget, true);
-                onEnded?.();
-            }}
-        >
-            <source src={media.url} />
-            {media.tracks?.map((track) => (
-                <track key={`${track.kind}-${track.srclang}`} kind={track.kind} src={track.src} srcLang={track.srclang} label={track.label} default={track.default} />
-            ))}
-            {fallback}
-        </video>
+            tracks={media.tracks ?? []}
+            title={media.alt ?? ""}
+            language={language}
+            portrait={portrait}
+            startAt={initial.progress?.at ?? 0}
+            furthestBefore={initial.progress?.furthest ?? 0}
+            onProgress={({ at, furthest }) => onProgress({ progressVersion: "1.0", at, furthest })}
+            onEnded={onEnded}
+        />
     );
 }
