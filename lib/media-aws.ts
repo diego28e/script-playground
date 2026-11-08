@@ -1,14 +1,21 @@
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { CreateJobCommand, GetJobCommand, MediaConvertClient, type JobStatus } from "@aws-sdk/client-mediaconvert";
+import { fromTemporaryCredentials } from "@aws-sdk/credential-providers";
 
 // The AWS side of uploading lesson videos from the admin page (actions/videos.ts). Credentials come from the
 // SDK's default chain: on Amplify, the app's compute role (infra/media/template.yaml, PlatformComputeRole); on
 // your PC, the profile in AWS_PROFILE (.env.local). No access keys are stored in the app.
 //
+// Encoding runs as a role of its own, the encoder role (EncoderRole), when MEDIA_ENCODER_ROLE_ARN is set (on
+// Amplify): starting a MediaConvert job hands MediaConvert its role (iam:PassRole), and Amplify assumes the compute
+// role with a session policy that denies every iam: action. The compute role assumes the encoder role, whose session
+// carries no such policy. On your PC, leave it unset: your profile starts the jobs itself.
+//
 // The region is our own variable: Amplify reserves names that start with AWS_ for itself.
 
 const region = process.env.MEDIA_AWS_REGION ?? "us-east-1";
+const encoderRoleArn = process.env.MEDIA_ENCODER_ROLE_ARN;
 
 export function mediaUploadsConfigured(): boolean {
   return Boolean(process.env.MEDIA_BUCKET && process.env.MEDIA_CONVERT_ROLE_ARN);
@@ -23,7 +30,14 @@ function config() {
 
 const globalForAws = globalThis as unknown as { mediaS3?: S3Client; mediaConvert?: MediaConvertClient };
 const s3 = () => (globalForAws.mediaS3 ??= new S3Client({ region }));
-const mediaConvert = () => (globalForAws.mediaConvert ??= new MediaConvertClient({ region }));
+const mediaConvert = () =>
+  (globalForAws.mediaConvert ??= new MediaConvertClient({
+    region,
+    // Short sessions, renewed by the SDK before they expire.
+    ...(encoderRoleArn
+      ? { credentials: fromTemporaryCredentials({ params: { RoleArn: encoderRoleArn, RoleSessionName: "academia-encode", DurationSeconds: 900 }, clientConfig: { region } }) }
+      : {}),
+  }));
 
 export type PresignedUpload = { url: string; headers: Record<string, string> };
 
@@ -35,6 +49,12 @@ export async function presignUpload(key: string, contentType: string, cacheContr
   const command = new PutObjectCommand({ Bucket: config().bucket, Key: key, ContentType: contentType, CacheControl: cacheControl });
   const url = await getSignedUrl(s3(), command, { expiresIn: 3600, signableHeaders: new Set(["content-type", "cache-control"]) });
   return { url, headers: { "Content-Type": contentType, ...(cacheControl ? { "Cache-Control": cacheControl } : {}) } };
+}
+
+/** Writes a small file the server made (a caption track) under courses/, cached for good: a new version gets a new key. */
+export async function putMediaFile(key: string, body: string, contentType: string): Promise<void> {
+  if (!key.startsWith("courses/")) throw new Error("Only files under courses/ are written here");
+  await s3().send(new PutObjectCommand({ Bucket: config().bucket, Key: key, Body: body, ContentType: contentType, CacheControl: "public, max-age=31536000, immutable" }));
 }
 
 export async function deleteUpload(key: string): Promise<void> {

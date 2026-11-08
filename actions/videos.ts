@@ -59,10 +59,12 @@ function describeVideo(stored: unknown) {
     return { kind: "invalid" as const, error: (error as Error).message.split("\n")[0] };
   }
   const media = video.kind === "interactive" ? video.group.stimulus?.media : video.media;
-  const signed = resolveMediaUrls({ poster: media?.poster ?? null });
+  const signed = resolveMediaUrls({ poster: media?.poster ?? null, src: media?.url ?? null });
   return {
     kind: video.kind,
     url: media?.url ?? null,
+    // Loadable, for picking a poster frame on the admin page.
+    src: signed.src,
     poster: signed.poster,
     tracks: (media?.tracks ?? []).map((track) => track.label),
     quizzes: video.kind === "interactive" ? (video.group.timeline?.cues.length ?? 0) : 0,
@@ -370,8 +372,11 @@ async function attach(upload: Prisma.VideoUploadGetPayload<object>) {
   await prisma.videoUpload.update({ where: { id: upload.id }, data: { partId: part.id } });
 }
 
-/** Reads the encode's progress; when it has finished, attaches the video to its lesson. */
-export async function refreshUpload(uploadId: string): Promise<Result<{ upload: UploadSummary }>> {
+/**
+ * Reads the encode's progress; when it has finished, attaches the video to its lesson. `needsCaptions`: it finished
+ * now and has no caption tracks (none were uploaded with it), so the page generates them (actions/video-media.ts).
+ */
+export async function refreshUpload(uploadId: string): Promise<Result<{ upload: UploadSummary; needsCaptions?: boolean }>> {
   if (!(await requireAdmin())) return { success: false, error: "Only admins can upload videos." };
   const upload = await prisma.videoUpload.findUnique({ where: { id: uploadId } });
   if (!upload) return { success: false, error: "Upload not found." };
@@ -393,7 +398,8 @@ export async function refreshUpload(uploadId: string): Promise<Result<{ upload: 
       // The original is no longer needed; the bucket's lifecycle rule removes it anyway after 7 days.
       await deleteUpload(upload.sourceKey).catch((error) => console.warn("Couldn't delete the original:", error));
       revalidatePath("/courses", "layout");
-      return { success: true, upload: describeUpload(ready) };
+      const captions = z.array(z.unknown()).safeParse(upload.captions);
+      return { success: true, upload: describeUpload(ready), needsCaptions: !captions.success || captions.data.length === 0 };
     }
     if (job.status === "ERROR" || job.status === "CANCELED") {
       const failed = await prisma.videoUpload.update({

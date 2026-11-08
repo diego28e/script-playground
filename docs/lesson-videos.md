@@ -48,3 +48,27 @@ upload, the repository's otherwise).
   state is kept per video (`LessonProgress.videoState`, by video id: where to resume, quiz answers, when finished); the
   migration re-keyed existing states by their video. A video lesson completes when all its videos have been watched to
   the end.
+
+## Captions and posters
+
+Decided with the admin on 2026-11-08: videos carry no captions in the picture; every video gets **English captions and
+Spanish subtitles** as tracks, and each learner picks one in the player (lk-react's Captions menu: Off, English,
+Español, or a second language under the first), or turns them off.
+
+- **Made for you** (`lib/captions.ts`, `actions/video-media.ts`): **Deepgram Nova-3** transcribes the video's
+  narration from its signed URL, with word timings and smart formatting (numbers as digits), and the words become
+  cues of at most two lines of about 42 characters and 7 seconds, ending at a sentence or a comma where possible.
+  The authoring models (Claude Sonnet first) translate the cues to Latin American Spanish **line for line**, so both
+  tracks share the same timings; code, product names and the technical terms developers say in English stay as they
+  are. Both are written as WebVTT under the video's folder (`courses/<course>/<lesson>/<video id>/captions-<version>.<lang>.vtt`,
+  new keys each time, since media files are cached for good) and replace the video's English and Spanish tracks.
+  Each step is one request, because Amplify stops a request after about 30 s: the admin page runs them in turn
+  (transcribe, translate in batches of 24 lines, three at a time, then save). Tried on 00.07's first video (6:54): the
+  transcript differed from the script only in formatting; a 20-line video took about 9 s in all.
+- **When:** automatically when an upload finishes encoding without caption files of its own (the admin page that
+  follows the encode starts it), and from a video's **Captions** button at any time (with a confirmation when it
+  already has tracks). Uploading your own WebVTT files with a video still works and skips the automatic captions.
+- **Posters:** when uploading, the frame on screen or **Upload an image** (PNG, JPEG or WebP, made a JPEG of at most
+  1920 px); for a video already on the lesson, its **Poster** button does the same, the frame taken from the stored
+  video (the media host's CORS allows it). A new poster gets a new key in the video's folder.
+- **Keys:** `DEEPGRAM_API_KEY` (the platform's voice key) and the authoring models' keys must be on the server.

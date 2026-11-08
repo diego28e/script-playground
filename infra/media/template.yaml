@@ -232,6 +232,31 @@ Resources:
                 Effect: Allow
                 Action: s3:DeleteObject
                 Resource: !Sub ${MediaBucket.Arn}/uploads/*
+              # Encoding runs as the encoder role: Amplify assumes this role with a session policy that denies every
+              # iam: action, iam:PassRole among them, and starting a MediaConvert job passes MediaConvert its role.
+              # (The ARN is written out, not referenced, so the two roles don't depend on each other.)
+              - Sid: AssumeEncoder
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-encoder
+
+  # Starts encoding jobs and reads their status, for the platform's server only: assumed by the compute role.
+  EncoderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-encoder
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !GetAtt PlatformComputeRole.Arn
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-encoding-jobs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
               - Sid: Encode
                 Effect: Allow
                 Action:
@@ -283,3 +308,6 @@ Outputs:
   PlatformComputeRoleArn:
     Description: The Amplify app's compute role (App settings, IAM roles)
     Value: !GetAtt PlatformComputeRole.Arn
+  EncoderRoleArn:
+    Description: MEDIA_ENCODER_ROLE_ARN in the platform (on Amplify only)
+    Value: !GetAtt EncoderRole.Arn

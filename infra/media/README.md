@@ -89,16 +89,26 @@ Then, in Amplify:
 
 1. **App settings → IAM roles → Compute role:** choose `academia-media-platform-compute` (the
    `PlatformComputeRoleArn` output). The app's server then calls S3 and MediaConvert as that role; no keys are stored.
-2. **Environment variables:** add `MEDIA_BUCKET` (the `BucketName` output) and `MEDIA_CONVERT_ROLE_ARN` (the
-   `MediaConvertRoleArn` output), and two more lines in the build spec:
+2. **Environment variables:** add `MEDIA_BUCKET` (the `BucketName` output), `MEDIA_CONVERT_ROLE_ARN` (the
+   `MediaConvertRoleArn` output) and `MEDIA_ENCODER_ROLE_ARN` (the `EncoderRoleArn` output), and three more lines in
+   the build spec:
 
 ```yaml
         - echo "MEDIA_BUCKET=$MEDIA_BUCKET" >> .env.production
         - echo "MEDIA_CONVERT_ROLE_ARN=$MEDIA_CONVERT_ROLE_ARN" >> .env.production
+        - echo "MEDIA_ENCODER_ROLE_ARN=$MEDIA_ENCODER_ROLE_ARN" >> .env.production
 ```
 
-To upload from `pnpm dev`, put the same two variables in `.env.local` with `AWS_PROFILE=dalejo`, and open the site
-at `http://localhost:3000` (the bucket accepts uploads only from the platform and that address).
+**Why an encoder role.** Starting a MediaConvert job hands MediaConvert its own role (`iam:PassRole`), and Amplify
+assumes the compute role with a session policy that allows what the role allows except every `iam:` and
+`organizations:` action. So on Amplify a job started as the compute role fails with "not authorized to perform:
+iam:PassRole ... with an explicit deny in a session policy". The compute role may only assume the encoder role, which
+starts and reads jobs and passes MediaConvert its role; Amplify's session policy doesn't reach a role assumed from
+inside.
+
+To upload from `pnpm dev`, put `MEDIA_BUCKET` and `MEDIA_CONVERT_ROLE_ARN` in `.env.local` with `AWS_PROFILE=dalejo`,
+but not `MEDIA_ENCODER_ROLE_ARN` (your profile starts the jobs itself), and open the site at `http://localhost:3000`
+(the bucket accepts uploads only from the platform and that address).
 
 ## Adding a video to a lesson
 

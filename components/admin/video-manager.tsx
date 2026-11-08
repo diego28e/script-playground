@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Link from "next/link";
-import { AlertTriangle, ArrowDown, ArrowUp, Captions, Check, FileText, Film, GitBranch, ImageIcon, Plus, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Captions, Check, FileText, Film, GitBranch, ImageIcon, ImageUp, Plus, Trash2, Upload, X } from "lucide-react";
 import {
   markUploadFailed,
   moveLessonVideo,
@@ -16,6 +16,8 @@ import {
   type VideoLessonList,
   type VideoTarget,
 } from "@/actions/videos";
+import { setVideoPoster, startPosterChange } from "@/actions/video-media";
+import { frameToJpeg, generateCaptions, imageToJpeg, put } from "@/components/admin/video-media-client";
 import { Tip } from "@/components/ui/tip";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -116,14 +118,39 @@ function UploadStatus({ upload, label }: { upload: UploadSummary; label: string 
   );
 }
 
-/** Where the uploader is open: replacing one of the lesson's videos, or adding one. */
-type Opened = { kind: "replace"; part: Part } | { kind: "add" } | null;
+/** What is open under the lesson: the uploader (replacing one of its videos, or adding one), or a video's poster. */
+type Opened = { kind: "replace"; part: Part } | { kind: "add" } | { kind: "poster"; part: Part } | null;
+
+type Captioning = { step: string } | { error: string };
 
 function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean }) {
   const router = useRouter();
   const [opened, setOpened] = useState<Opened>(null);
   const [uploads, setUploads] = useState<UploadSummary[]>(lesson.uploads);
   const [pending, startPending] = useTransition();
+
+  // Caption runs on this lesson's videos, by video id: the step each is on, or why it stopped.
+  const [captioning, setCaptioning] = useState<Record<string, Captioning>>({});
+  const runCaptions = useCallback(
+    async (partId: string) => {
+      const show = (state: Captioning) => setCaptioning((all) => ({ ...all, [partId]: state }));
+      show({ step: "Starting" });
+      const result = await generateCaptions(partId, (step) => show({ step }));
+      if (!result.ok) {
+        show({ error: result.error });
+        toast.error("The captions couldn't be made. The reason is under the video.");
+        return;
+      }
+      setCaptioning((all) => {
+        const rest = { ...all };
+        delete rest[partId];
+        return rest;
+      });
+      toast.success(`Captions ready: ${result.labels.join(", ")}.`);
+      router.refresh();
+    },
+    [router],
+  );
 
   const labelOf = useCallback((upload: UploadSummary) => {
     if (upload.partId) return lesson.videos.find((part) => part.id === upload.partId)?.title ?? "a video";
@@ -138,19 +165,25 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
     const timer = setTimeout(async () => {
       const results = await Promise.all(encoding.map((upload) => refreshUpload(upload.id).catch(() => null)));
       let changed = false;
+      // A video that has just finished encoding with no caption files gets its captions made right away.
+      const toCaption: string[] = [];
       const next = uploads.map((upload) => {
         const result = results[encoding.indexOf(upload)];
         if (!result?.success) return upload;
         if (result.upload.status !== upload.status) changed = true;
-        if (result.upload.status === "READY") toast.success(`Video ready: ${labelOf(result.upload)}.`);
+        if (result.upload.status === "READY") {
+          toast.success(`Video ready: ${labelOf(result.upload)}.`);
+          if (result.needsCaptions && result.upload.partId) toCaption.push(result.upload.partId);
+        }
         if (result.upload.status === "FAILED") toast.error("An encode failed. The reason is under the lesson.");
         return result.upload;
       });
       setUploads(next.filter((upload) => upload.status !== "READY"));
       if (changed) router.refresh();
+      for (const partId of toCaption) void runCaptions(partId);
     }, POLL_MS);
     return () => clearTimeout(timer);
-  }, [uploads, router, labelOf]);
+  }, [uploads, router, labelOf, runCaptions]);
 
   const { confirm, dialog } = useConfirm();
   const remove = async (part: Part) => {
@@ -174,6 +207,19 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
       toast.success("Video removed from the lesson.");
       router.refresh();
     });
+  };
+  const remakeCaptions = async (part: Part) => {
+    const has = part.video && part.video.kind !== "invalid" && part.video.tracks.length > 0;
+    if (has) {
+      const ok = await confirm({
+        title: "Make this video's captions again?",
+        detail: part.title,
+        description: "The English captions are transcribed from the narration again and translated to Spanish. They replace the video's English and Spanish tracks.",
+        confirmLabel: "Make captions",
+      });
+      if (!ok) return;
+    }
+    void runCaptions(part.id);
   };
   const move = (part: Part, direction: "up" | "down") =>
     startPending(async () => {
@@ -244,6 +290,15 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
                     </span>
                   )}
                 </div>
+                {captioning[part.id] &&
+                  ("step" in captioning[part.id] ? (
+                    <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                      <DotLoader size={12} />
+                      Captions: {(captioning[part.id] as { step: string }).step}…
+                    </p>
+                  ) : (
+                    <p className="text-xs text-destructive">Captions failed: {(captioning[part.id] as { error: string }).error}</p>
+                  ))}
               </div>
               <div className="flex items-center gap-1">
                 <Tip content="Move up">
@@ -264,6 +319,24 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
                 >
                   <Upload className="mr-1.5 h-4 w-4" />
                   Replace
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!configured || !part.video || part.video.kind === "invalid" || (captioning[part.id] !== undefined && "step" in captioning[part.id])}
+                  onClick={() => void remakeCaptions(part)}
+                >
+                  <Captions className="mr-1.5 h-4 w-4" />
+                  Captions
+                </Button>
+                <Button
+                  variant={opened?.kind === "poster" && opened.part.id === part.id ? "secondary" : "ghost"}
+                  size="sm"
+                  disabled={!configured || !part.video || part.video.kind === "invalid"}
+                  onClick={() => setOpened(opened?.kind === "poster" && opened.part.id === part.id ? null : { kind: "poster", part })}
+                >
+                  <ImageUp className="mr-1.5 h-4 w-4" />
+                  Poster
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => void remove(part)} disabled={pending}>
                   <Trash2 className="mr-1.5 h-4 w-4" />
@@ -292,7 +365,134 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
           onDone={() => setOpened(null)}
         />
       )}
+      {opened?.kind === "poster" && (
+        <PosterChanger
+          key={opened.part.id}
+          part={opened.part}
+          onDone={() => {
+            setOpened(null);
+            router.refresh();
+          }}
+        />
+      )}
     </li>
+  );
+}
+
+/** A new poster for a video on the lesson: an image of the admin's own, or a frame of the video. */
+function PosterChanger({ part, onDone }: { part: Part; onDone: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [poster, setPoster] = useState<{ blob: Blob; url: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => () => void (poster && URL.revokeObjectURL(poster.url)), [poster]);
+  const media = part.video && part.video.kind !== "invalid" ? part.video : null;
+
+  const take = async (make: () => Promise<Blob>) => {
+    try {
+      const blob = await make();
+      setPoster({ blob, url: URL.createObjectURL(blob) });
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  };
+
+  const save = async () => {
+    if (!poster) return;
+    setSaving(true);
+    const unreachable = { success: false as const, error: "We couldn't reach the server. Try again." };
+    const started = await startPosterChange(part.id).catch(() => unreachable);
+    if (!started.success) {
+      setSaving(false);
+      toast.error(started.error);
+      return;
+    }
+    try {
+      await put(started.upload.url, started.upload.headers, poster.blob);
+    } catch (error) {
+      setSaving(false);
+      toast.error(`The poster couldn't be uploaded: ${(error as Error).message}`);
+      return;
+    }
+    const saved = await setVideoPoster(part.id, started.key).catch(() => unreachable);
+    setSaving(false);
+    if (!saved.success) {
+      toast.error(saved.error);
+      return;
+    }
+    toast.success("Poster changed.");
+    onDone();
+  };
+
+  return (
+    <div className="mt-4 grid gap-5 rounded-xl border border-border bg-card p-4 md:ml-[3.75rem] md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <p className="text-sm font-medium md:col-span-2">Poster for “{part.title}”</p>
+      <div className="space-y-2">
+        {media?.src ? (
+          <video
+            ref={videoRef}
+            src={media.src}
+            // The media host allows this origin (CORS), so the frame on screen can be drawn into the poster.
+            crossOrigin="anonymous"
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            poster={media.poster ?? undefined}
+            className="aspect-video w-full rounded-lg bg-black"
+          />
+        ) : null}
+        <p className="text-xs text-muted-foreground">Play or seek to the frame you want, or upload an image of your own (PNG, JPEG or WebP, 16:9 looks best).</p>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          {poster || media?.poster ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a local preview, or the current signed poster
+            <img src={poster?.url ?? media?.poster ?? ""} alt={poster ? "New poster" : "Current poster"} className="h-24 rounded-md bg-black object-contain" />
+          ) : (
+            <span className="grid h-24 w-24 place-items-center rounded-md bg-muted text-muted-foreground">
+              <ImageIcon className="h-5 w-5" />
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">{poster ? "New poster" : media?.poster ? "Current poster" : "No poster yet"}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={saving || !media?.src} onClick={() => videoRef.current && void take(() => frameToJpeg(videoRef.current!))}>
+            Use the frame on screen
+          </Button>
+          <ImagePicker disabled={saving} onPick={(file) => void take(() => imageToJpeg(file))} />
+        </div>
+        <Button onClick={save} disabled={!poster} loading={saving} loadingLabel="Saving the poster">
+          <Check className="mr-1.5 h-4 w-4" />
+          Save poster
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A button that opens the file picker for an image. */
+function ImagePicker({ disabled, onPick }: { disabled?: boolean; onPick: (file: File) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) onPick(file);
+        }}
+      />
+      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => inputRef.current?.click()}>
+        <ImageUp className="mr-1.5 h-4 w-4" />
+        Upload an image
+      </Button>
+    </>
   );
 }
 
@@ -354,19 +554,6 @@ function AddVideo({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (u
 
 type CaptionDraft = { id: number; file: File | null; srclang: string; label: string; kind: "captions" | "subtitles"; default: boolean; error: string | null };
 
-/** PUTs a file to a presigned URL, reporting progress. fetch can't report upload progress; XHR can. */
-function put(url: string, headers: Record<string, string>, body: Blob, onProgress?: (sent: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("PUT", url);
-    for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
-    request.upload.onprogress = (event) => onProgress?.(event.loaded);
-    request.onload = () => (request.status < 300 ? resolve() : reject(new Error(`S3 answered ${request.status}`)));
-    request.onerror = () => reject(new Error("The connection to S3 failed (check the bucket's CORS for this site)."));
-    request.send(body);
-  });
-}
-
 function Uploader({
   lessonId,
   target,
@@ -404,16 +591,18 @@ function Uploader({
     setPreview(chosen ? URL.createObjectURL(chosen) : null);
   };
 
-  /** Draws the frame on screen into a JPEG, at most 1280 px on its long side. */
+  const takePoster = async (make: () => Promise<Blob>) => {
+    try {
+      const blob = await make();
+      setPoster({ blob, url: URL.createObjectURL(blob) });
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  };
+  /** The frame on screen, as the poster. */
   const capturePoster = () => {
     const video = videoRef.current;
-    if (!video || !video.videoWidth) return;
-    const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
-    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => blob && setPoster({ blob, url: URL.createObjectURL(blob) }), "image/jpeg", 0.85);
+    if (video?.videoWidth) void takePoster(() => frameToJpeg(video));
   };
 
   const addCaption = () =>
@@ -543,21 +732,31 @@ function Uploader({
                 <ImageIcon className="h-5 w-5" />
               </span>
             )}
-            <Button type="button" variant="outline" size="sm" disabled={!meta || uploading} onClick={capturePoster}>
-              Use the frame on screen
-            </Button>
+            <div className="flex flex-col items-start gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={!meta || uploading} onClick={capturePoster}>
+                Use the frame on screen
+              </Button>
+              <ImagePicker disabled={uploading} onPick={(picked) => void takePoster(() => imageToJpeg(picked))} />
+            </div>
           </div>
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Captions (WebVTT)</Label>
+            <Label>Captions</Label>
             <Button type="button" variant="ghost" size="sm" onClick={addCaption} disabled={uploading || captions.length >= 6}>
               <Plus className="mr-1 h-4 w-4" />
-              Add
+              Use my own file
             </Button>
           </div>
-          {captions.length === 0 && <p className="text-xs text-muted-foreground">Optional. Captions transcribe the audio; subtitles translate it.</p>}
+          {captions.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Made for you once it&apos;s encoded: English captions transcribed from the narration, and Spanish subtitles
+              translated from them. Learners pick one in the player, or turn them off.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">With your own WebVTT files, no captions are made for this video. Captions transcribe the audio; subtitles translate it.</p>
+          )}
           {captions.map((caption) => (
             <div key={caption.id} className="space-y-2 rounded-lg border border-border p-3">
               <div className="flex items-center gap-2">
