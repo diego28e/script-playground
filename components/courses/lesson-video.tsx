@@ -24,6 +24,8 @@ const COPY = {
 type Props = {
     video: LessonVideoData;
     lessonId: string;
+    /** Which of the lesson's videos this is: its state is kept under this id (actions/lessons.ts saveVideoState). */
+    videoId: string;
     title: string;
     language: "es" | "en";
     /** Only an enrolled, signed-in learner's place and answers are kept. */
@@ -39,7 +41,7 @@ const EMPTY: VideoState = { responses: {}, submitted: [], scores: {} };
  * Keeps the learner's video state and saves it a moment after it changes: progress arrives every few seconds while
  * playing, so saves are batched, and the latest save always carries the whole state.
  */
-function useVideoState(lessonId: string, tracking: boolean, initialState: VideoState | null, errorMessage: string) {
+function useVideoState(lessonId: string, videoId: string, tracking: boolean, initialState: VideoState | null, errorMessage: string) {
     const state = useRef<VideoState>(initialState ?? EMPTY);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dirty = useRef(false);
@@ -50,7 +52,7 @@ function useVideoState(lessonId: string, tracking: boolean, initialState: VideoS
         timer.current = null;
         if (!tracking || !dirty.current) return;
         dirty.current = false;
-        const result = await saveVideoState(lessonId, state.current).catch(() => ({ success: false }));
+        const result = await saveVideoState(lessonId, videoId, state.current).catch(() => ({ success: false }));
         if (!result.success) {
             dirty.current = true;
             if (!warned.current) {
@@ -58,7 +60,7 @@ function useVideoState(lessonId: string, tracking: boolean, initialState: VideoS
                 toast.error(errorMessage);
             }
         }
-    }, [lessonId, tracking, errorMessage]);
+    }, [lessonId, videoId, tracking, errorMessage]);
 
     const update = useCallback(
         (change: (current: VideoState) => VideoState, delay: number) => {
@@ -133,16 +135,27 @@ function usePlayerBox(replay: boolean) {
 const BOX =
     "lk-scope mx-auto w-full overflow-hidden rounded-2xl data-[portrait]:max-w-[min(100%,max(18rem,min(24rem,calc((100svh-9rem)*9/16))))]";
 
-export function LessonVideo({ video, lessonId, title, language, tracking, initialState, onFinished }: Props) {
+export function LessonVideo({ video, lessonId, videoId, title, language, tracking, initialState, onFinished }: Props) {
     const t = COPY[language];
-    const { initial, update } = useVideoState(lessonId, tracking, initialState, t.saveError);
+    const { initial, update } = useVideoState(lessonId, videoId, tracking, initialState, t.saveError);
     const onProgress = (progress: MediaProgress) => update((current) => ({ ...current, progress }), 4000);
     const { ref: boxRef, portrait } = usePlayerBox(video.kind === "plain");
 
     if (video.kind === "plain") {
         return (
             <div ref={boxRef} className={BOX} data-portrait={portrait || undefined}>
-                <PlainVideo media={video.media} portrait={portrait} initial={initial} onProgress={onProgress} onEnded={onFinished} fallback={t.noVideo} />
+                <PlainVideo
+                    media={video.media}
+                    portrait={portrait}
+                    initial={initial}
+                    onProgress={onProgress}
+                    onEnded={() => {
+                        // Watched to the end: kept, so the lesson's playlist ticks it (and a video lesson completes).
+                        update((current) => ({ ...current, finishedAt: current.finishedAt ?? new Date().toISOString() }), 0);
+                        onFinished?.();
+                    }}
+                    fallback={t.noVideo}
+                />
             </div>
         );
     }

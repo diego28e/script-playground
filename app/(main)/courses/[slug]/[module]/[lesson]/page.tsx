@@ -7,7 +7,8 @@ import { getLessonWorkspace } from "@/actions/lessons";
 import { LessonWorkspace } from "@/components/courses/lesson-workspace";
 import { OUTLINE_COOKIE, readOutlinePreference } from "@/lib/outline-preference";
 import { LessonMarkdown } from "@/components/courses/lesson-markdown";
-import { parseLessonVideo, type LessonVideo } from "@/lib/lesson-video";
+import { parseLessonVideo } from "@/lib/lesson-video";
+import type { PlayableVideo } from "@/components/courses/lesson-videos";
 import { resolveMediaUrls } from "@/lib/media";
 
 export const runtime = "nodejs";
@@ -28,17 +29,22 @@ export default async function LessonPage({ params }: Props) {
     const result = await getLessonWorkspace(slug, moduleSlug, lessonSlug, session?.user?.id);
     if (!result.success) throw new Error(result.error);
     if (!result.data) notFound();
-    const { video: storedVideo, ...lesson } = result.data.lesson;
+    const { videos: storedVideos, ...lesson } = result.data.lesson;
     const data = { ...result.data, lesson };
 
-    // The lesson's video, checked again (it was checked on import) and with its /media/ paths turned into signed
-    // URLs here, so the signing key never leaves the server. A broken video hides the player, not the lesson.
-    let video: LessonVideo | null = null;
-    if (storedVideo) {
+    // The lesson's videos (one per skill as a rule), each checked again and with its /media/ paths turned into signed
+    // URLs here, so the signing key never leaves the server. A broken one is left out, not the lesson.
+    const videos: PlayableVideo[] = [];
+    for (const stored of storedVideos) {
         try {
-            video = resolveMediaUrls(parseLessonVideo(storedVideo));
+            videos.push({
+                id: stored.id,
+                title: result.data.videoTitles[stored.id] ?? { es: null, en: null },
+                durationSeconds: stored.durationSeconds,
+                video: resolveMediaUrls(parseLessonVideo(stored.video)),
+            });
         } catch (error) {
-            console.error(`Lesson ${lesson.id} has a video that can't be shown:`, error);
+            console.error(`Lesson ${lesson.id} has a video (${stored.id}) that can't be shown:`, error);
         }
     }
 
@@ -67,5 +73,5 @@ export default async function LessonPage({ params }: Props) {
     // The outline's width and fold, as the learner left them: rendered so from the start, with no jump.
     const outline = readOutlinePreference((await cookies()).get(OUTLINE_COOKIE)?.value);
 
-    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} video={video} outline={outline} />;
+    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} videos={videos} outline={outline} />;
 }

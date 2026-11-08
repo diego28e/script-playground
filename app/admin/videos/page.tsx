@@ -11,8 +11,9 @@ export default async function VideosPage() {
             <div>
                 <h2 className="text-2xl font-bold tracking-tight">Videos</h2>
                 <p className="max-w-2xl text-muted-foreground">
-                    Upload a lesson&apos;s video here. It goes to the media bucket, is encoded for the web, and is attached
-                    to the lesson when it&apos;s ready. Learners get it through media.academiadelcodigo.com with signed links.
+                    A lesson&apos;s videos, one per skill as a rule, in the order learners watch them. Each upload goes to the
+                    media bucket, is encoded for the web, and joins the lesson when it&apos;s ready. Learners get them through
+                    media.academiadelcodigo.com with signed links.
                 </p>
             </div>
             <VideoManager data={data} />

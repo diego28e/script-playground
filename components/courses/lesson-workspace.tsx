@@ -28,14 +28,13 @@ import { InlineCode } from "@/components/courses/inline-code";
 import { LabFrame } from "@/components/courses/lab-frame";
 import { LessonSidebar, MobileOutline } from "@/components/courses/lesson-outline";
 import type { OutlinePreference } from "@/lib/outline-preference";
-import { LessonVideo } from "@/components/courses/lesson-video";
-import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
+import { LessonVideos, type PlayableVideo } from "@/components/courses/lesson-videos";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
 import { cn } from "@/lib/utils";
 
 type WorkspaceResult = NonNullable<Extract<Awaited<ReturnType<typeof getLessonWorkspace>>, { success: true }>["data"]>;
-// The page takes the stored video off the lesson and passes it checked and signed, as `video`.
-export type LessonWorkspaceData = Omit<WorkspaceResult, "lesson"> & { lesson: Omit<WorkspaceResult["lesson"], "video"> };
+// The page takes the stored videos off the lesson and passes them checked and signed, as `videos`.
+export type LessonWorkspaceData = Omit<WorkspaceResult, "lesson"> & { lesson: Omit<WorkspaceResult["lesson"], "videos"> };
 
 const COPY = {
     es: {
@@ -123,8 +122,8 @@ type Props = {
     signedIn: boolean;
     /** A READING lesson's guide, rendered on the server (components/courses/lesson-markdown.tsx). */
     reading?: ReactNode;
-    /** The lesson's video, with URLs the browser can load (app/(main)/courses/[slug]/[module]/[lesson]/page.tsx). */
-    video?: LessonVideoData | null;
+    /** The lesson's videos in order, with URLs the browser can load (app/(main)/courses/[slug]/[module]/[lesson]/page.tsx). */
+    videos: PlayableVideo[];
     /** The outline's saved width and whether it's folded (lesson-outline.tsx), read from a cookie by the page. */
     outline: OutlinePreference;
 };
@@ -140,7 +139,7 @@ const INLINE_MARKDOWN = {
 };
 const CODE_SPANS = "[&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em]";
 
-export function LessonWorkspace({ data, signedIn, reading, video, outline }: Props) {
+export function LessonWorkspace({ data, signedIn, reading, videos, outline }: Props) {
     const { language } = useLanguage();
     const t = COPY[language];
     const router = useRouter();
@@ -396,24 +395,24 @@ export function LessonWorkspace({ data, signedIn, reading, video, outline }: Pro
                     </section>
                 )}
 
-                {video && (
+                {videos.length > 0 && (
                     <section className="border-t border-border py-8 first:border-t-0">
-                        <LessonVideo
-                            // A new lesson is a new player, with its own state.
+                        <LessonVideos
+                            // A new lesson is a new playlist, with its own state.
                             key={lesson.id}
-                            video={video}
+                            videos={videos}
                             lessonId={lesson.id}
-                            title={lesson.title.replaceAll("`", "")}
+                            lessonTitle={lesson.title.replaceAll("`", "")}
                             language={language}
                             tracking={tracking}
-                            initialState={data.videoState}
-                            // Watching a video lesson to the end completes it; in a notebook lesson the video is only a part.
-                            onFinished={lesson.kind === "VIDEO" && tracking && !completed ? () => toggleComplete(true) : undefined}
+                            initialStates={data.videoStates}
+                            // Watching all of a video lesson's videos to the end completes it; elsewhere they're only a part.
+                            onAllFinished={lesson.kind === "VIDEO" && tracking && !completed ? () => toggleComplete(true) : undefined}
                         />
                     </section>
                 )}
                 {lesson.kind === "READING" && reading && <section className="border-t border-border py-8 first:border-t-0">{reading}</section>}
-                {((lesson.kind === "VIDEO" && !video) || lesson.kind === "PRACTICE") && (
+                {((lesson.kind === "VIDEO" && videos.length === 0) || lesson.kind === "PRACTICE") && (
                     <p className="my-8 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-sm text-muted-foreground">{t.unavailable}</p>
                 )}
                 </div>

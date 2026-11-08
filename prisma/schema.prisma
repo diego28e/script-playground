@@ -189,13 +189,12 @@ model Lesson {
   sourcePath       String?
   // Markdown body of a READING lesson.
   body             String?
-  // An lk-core item group with its media timeline, for VIDEO lessons.
-  video            Json?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
   module           CourseModule         @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress         LessonProgress[]
   videoUploads     VideoUpload[]
+  videos           LessonVideoPart[]
   tutorSessions    TutorSession[]
   practiceSkills   PracticeSkill[]
   practiceDraft    PracticeLessonDraft?
@@ -205,11 +204,46 @@ model Lesson {
   @@map("lesson")
 }
 
+enum LessonVideoSource {
+  // Uploaded from the admin page.
+  UPLOAD
+  // The course repository's NN-MM-slug.video.json sidecar, written by every import.
+  REPOSITORY
+}
+
+// A lesson's videos (docs/lesson-videos.md), in teaching order: as a rule one per skill of the lesson, a short tutorial
+// each. Learners see them as the lesson's playlist.
+model LessonVideoPart {
+  id              String            @id @default(cuid())
+  lessonId        String
+  position        Int
+  // The skill it teaches: a PracticeSkill key of the course. Its label is the video's title unless it has its own.
+  skillKey        String?
+  titleEs         String?
+  titleEn         String?
+  // lk-core's video (lib/lesson-video.ts): a plain media object, or an interactive item group with its quizzes.
+  video           Json
+  source          LessonVideoSource @default(UPLOAD)
+  durationSeconds Float?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  lesson          Lesson            @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  uploads         VideoUpload[]
+
+  @@index([lessonId, position])
+  @@map("lesson_video_part")
+}
+
 // A video uploaded from the admin page (/admin/videos, actions/videos.ts): the original goes to S3 under uploads/,
-// MediaConvert writes the web version under outputPrefix, and when it is ready the lesson's video points at it.
+// MediaConvert writes the web version under outputPrefix, and when it is ready it replaces the video it was uploaded
+// for (partId) or becomes a new video of the lesson (for skillKey, or with its own title).
 model VideoUpload {
   id              String            @id @default(cuid())
   lessonId        String
+  partId          String?
+  skillKey        String?
+  titleEs         String?
+  titleEn         String?
   status          VideoUploadStatus @default(UPLOADING)
   fileName        String
   // S3 key of the original (deleted once encoded; the bucket also expires uploads/ after 7 days).
@@ -231,6 +265,7 @@ model VideoUpload {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   lesson          Lesson            @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  part            LessonVideoPart?  @relation(fields: [partId], references: [id], onDelete: SetNull)
 
   @@index([lessonId, createdAt])
   @@map("video_upload")
@@ -256,7 +291,8 @@ model LessonProgress {
   startedAt    DateTime       @default(now())
   completedAt  DateTime?
   lastViewedAt DateTime       @default(now())
-  // The lesson video, for this learner: where to resume and the quiz answers (actions/lessons.ts VideoState).
+  // The lesson's videos, for this learner, by video id: where to resume, the quiz answers, when finished
+  // (actions/lessons.ts VideoState).
   videoState   Json?
   user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   lesson       Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)

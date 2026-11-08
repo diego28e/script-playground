@@ -54,3 +54,13 @@ export function parseLessonVideo(value: unknown): LessonVideo {
   if (problems.length || !video) throw new Error(problems.join("\n"));
   return video;
 }
+
+/**
+ * The title a stored video carries itself, for one with no title of its own and no skill (one from before videos were
+ * tied to skills): an interactive video's title, or a plain one's description. Backticks are dropped.
+ */
+export function storedVideoTitle(stored: unknown): string | null {
+  const video = stored as { title?: unknown; alt?: unknown; stimulus?: { media?: { alt?: unknown } } } | null;
+  const title = video?.title ?? video?.stimulus?.media?.alt ?? video?.alt;
+  return typeof title === "string" && title.trim() ? title.replaceAll("`", "").trim() : null;
+}

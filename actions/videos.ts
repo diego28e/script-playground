@@ -6,7 +6,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { parseLessonVideo, type LessonVideo } from "@/lib/lesson-video";
+import { parseLessonVideo, storedVideoTitle, type LessonVideo } from "@/lib/lesson-video";
 import { MEDIA_PREFIX, resolveMediaUrls } from "@/lib/media";
 import { deleteUpload, getEncodeJob, mediaUploadsConfigured, presignUpload, startEncodeJob, type PresignedUpload } from "@/lib/media-aws";
 
@@ -14,10 +14,11 @@ import { deleteUpload, getEncodeJob, mediaUploadsConfigured, presignUpload, star
 //   1. startVideoUpload: a VideoUpload row and presigned URLs; the browser PUTs the original to uploads/<id>/,
 //      and the poster and caption files straight to their final place under courses/<course>/<lesson>/<id>/.
 //   2. startEncoding: a MediaConvert job writes <prefix>video.mp4.
-//   3. refreshUpload, polled by the page: when the job completes, the lesson's video points at the new files (the
-//      quizzes of an interactive video are kept) and the original is deleted.
-// A video from the course repository (NN-MM-slug.video.json) wins on the next import; one uploaded here is kept
-// by imports that have no sidecar for the lesson.
+//   3. refreshUpload, polled by the page: when the job completes, the video it was uploaded for points at the new
+//      files (the quizzes of an interactive video are kept), or a new video joins the lesson's list; the original is
+//      deleted.
+// A lesson has several videos (docs/lesson-videos.md), in order, one per skill as a rule. The course repository's
+// video (NN-MM-slug.video.json) is the lesson's REPOSITORY video, rewritten on every import; uploaded ones are kept.
 
 type Result<T = object> = ({ success: true } & T) | { success: false; error: string };
 
@@ -48,7 +49,7 @@ function awsMessage(error: unknown): string {
 
 const plainTitle = (title: string) => title.replaceAll("`", "");
 
-/** What the admin page shows of a lesson's video. */
+/** What the admin page shows of one of a lesson's videos. */
 function describeVideo(stored: unknown) {
   if (!stored) return null;
   let video: LessonVideo;
@@ -68,12 +69,35 @@ function describeVideo(stored: unknown) {
   };
 }
 
-function describeUpload(upload: { id: string; status: string; fileName: string; percent: number | null; error: string | null; createdAt: Date }) {
-  return { id: upload.id, status: upload.status, fileName: upload.fileName, percent: upload.percent, error: upload.error, createdAt: upload.createdAt.toISOString() };
+function describeUpload(upload: {
+  id: string;
+  status: string;
+  fileName: string;
+  percent: number | null;
+  error: string | null;
+  createdAt: Date;
+  partId: string | null;
+  skillKey: string | null;
+  titleEn: string | null;
+}) {
+  return {
+    id: upload.id,
+    status: upload.status,
+    fileName: upload.fileName,
+    percent: upload.percent,
+    error: upload.error,
+    createdAt: upload.createdAt.toISOString(),
+    partId: upload.partId,
+    skillKey: upload.skillKey,
+    titleEn: upload.titleEn,
+  };
 }
 export type UploadSummary = ReturnType<typeof describeUpload>;
 
-/** Every course's lessons, with each lesson's video and its latest upload. */
+/**
+ * Every course's lessons, each with its videos in order (a video per skill as a rule), the lesson's skills to make
+ * videos for, and the uploads still in progress or that failed last.
+ */
 export async function listVideoLessons() {
   if (!(await requireAdmin())) return { configured: false, courses: [] };
   const courses = await prisma.course.findMany({
@@ -98,8 +122,9 @@ export async function listVideoLessons() {
               code: true,
               title: true,
               kind: true,
-              video: true,
-              videoUploads: { orderBy: { createdAt: "desc" }, take: 1 },
+              videos: { orderBy: { position: "asc" } },
+              practiceSkills: { orderBy: { position: "asc" }, select: { key: true, labelEn: true } },
+              videoUploads: { orderBy: { createdAt: "desc" }, take: 10 },
             },
           },
         },
@@ -112,16 +137,44 @@ export async function listVideoLessons() {
       ...course,
       modules: course.modules.map((courseModule) => ({
         ...courseModule,
-        lessons: courseModule.lessons.map(({ video, videoUploads, ...lesson }) => ({
-          ...lesson,
-          video: describeVideo(video),
-          upload: videoUploads[0] ? describeUpload(videoUploads[0]) : null,
-        })),
+        lessons: courseModule.lessons.map(({ videos, practiceSkills, videoUploads, ...lesson }) => {
+          const skillLabel = new Map(practiceSkills.map((skill) => [skill.key, skill.labelEn]));
+          // Per target (a video, or a new one for a skill or a title), only its latest upload, and only while not done.
+          const latest = new Map<string, (typeof videoUploads)[number]>();
+          for (const upload of videoUploads) {
+            const target = upload.partId ?? `new:${upload.skillKey ?? upload.titleEn ?? ""}`;
+            if (!latest.has(target)) latest.set(target, upload);
+          }
+          return {
+            ...lesson,
+            skills: practiceSkills.map((skill) => ({ key: skill.key, label: skill.labelEn, hasVideo: videos.some((video) => video.skillKey === skill.key) })),
+            videos: videos.map((part) => ({
+              id: part.id,
+              position: part.position,
+              skillKey: part.skillKey,
+              title:
+                part.titleEn ??
+                (part.skillKey ? (skillLabel.get(part.skillKey) ?? part.skillKey) : (storedVideoTitle(part.video) ?? plainTitle(lesson.title))),
+              source: part.source,
+              durationSeconds: part.durationSeconds,
+              video: describeVideo(part.video),
+            })),
+            uploads: [...latest.values()].filter((upload) => upload.status !== "READY").map(describeUpload),
+          };
+        }),
       })),
     })),
   };
 }
 export type VideoLessonList = Awaited<ReturnType<typeof listVideoLessons>>;
+
+/** What an upload is for: replacing one of the lesson's videos, or a new one for a skill or with its own title. */
+const TargetSchema = z.union([
+  z.object({ partId: z.string().min(1) }),
+  z.object({ skillKey: z.string().min(1).max(200) }),
+  z.object({ titleEn: z.string().trim().min(1).max(200), titleEs: z.string().trim().min(1).max(200) }),
+]);
+export type VideoTarget = z.infer<typeof TargetSchema>;
 
 const CaptionSchema = z.object({
   kind: z.enum(["captions", "subtitles"]),
@@ -151,6 +204,7 @@ export type StartVideoUploadInput = z.infer<typeof StartSchema>;
 
 export async function startVideoUpload(
   lessonId: string,
+  target: VideoTarget,
   input: StartVideoUploadInput,
 ): Promise<Result<{ uploadId: string; source: PresignedUpload; poster: PresignedUpload | null; captions: PresignedUpload[] }>> {
   const session = await requireAdmin();
@@ -161,6 +215,12 @@ export async function startVideoUpload(
   const parsed = StartSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid upload." };
   const data = parsed.data;
+  const aim = TargetSchema.safeParse(target);
+  if (!aim.success) return { success: false, error: "Say which video this is: one of the lesson's, a skill, or a title." };
+  if ("partId" in aim.data) {
+    const part = await prisma.lessonVideoPart.findFirst({ where: { id: aim.data.partId, lessonId }, select: { id: true } });
+    if (!part) return { success: false, error: "That video isn't on this lesson any more. Reload the page." };
+  }
 
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
@@ -173,6 +233,7 @@ export async function startVideoUpload(
     const upload = await prisma.videoUpload.create({
       data: {
         lessonId,
+        ...aim.data,
         fileName: data.fileName,
         sourceKey: "",
         outputPrefix: "",
@@ -225,7 +286,7 @@ export async function startEncoding(uploadId: string): Promise<Result<{ upload: 
       outputPrefix: upload.outputPrefix,
       width: upload.width,
       height: upload.height,
-      metadata: { uploadId: upload.id, lessonId: upload.lessonId },
+      metadata: { uploadId: upload.id, lessonId: upload.lessonId, ...(upload.partId ? { partId: upload.partId } : {}) },
     });
     const updated = await prisma.videoUpload.update({ where: { id: upload.id }, data: { status: "ENCODING", jobId, percent: 0 } });
     return { success: true, upload: describeUpload(updated) };
@@ -239,15 +300,29 @@ export async function startEncoding(uploadId: string): Promise<Result<{ upload: 
   }
 }
 
-/** Points the lesson at the encoded files. An interactive video keeps its quizzes; only its media changes. */
+/**
+ * Puts the encoded files in the lesson: in the video it was uploaded for (an interactive one keeps its quizzes; only
+ * its media changes), or as a new video at the end of the lesson's list (a second upload for the same skill replaces
+ * that skill's video instead).
+ */
 async function attach(upload: Prisma.VideoUploadGetPayload<object>) {
-  const lesson = await prisma.lesson.findUniqueOrThrow({ where: { id: upload.lessonId }, select: { title: true, video: true } });
+  const lesson = await prisma.lesson.findUniqueOrThrow({ where: { id: upload.lessonId }, select: { title: true, module: { select: { courseId: true } } } });
+  const existing = upload.partId
+    ? await prisma.lessonVideoPart.findUnique({ where: { id: upload.partId } })
+    : upload.skillKey
+      ? await prisma.lessonVideoPart.findFirst({ where: { lessonId: upload.lessonId, skillKey: upload.skillKey }, orderBy: { position: "asc" } })
+      : null;
+  const skillKey = existing?.skillKey ?? upload.skillKey;
+  const skill = skillKey
+    ? await prisma.practiceSkill.findFirst({ where: { courseId: lesson.module.courseId, key: skillKey }, select: { labelEn: true } })
+    : null;
+  const title = existing?.titleEn ?? upload.titleEn ?? skill?.labelEn ?? plainTitle(lesson.title);
   const captions = z.array(CaptionSchema.extend({ key: z.string() })).parse(upload.captions);
   const path = (key: string) => `${MEDIA_PREFIX}${key}`;
   const media = {
     type: "video" as const,
     url: path(`${upload.outputPrefix}video.mp4`),
-    alt: plainTitle(lesson.title),
+    alt: plainTitle(title),
     ...(upload.posterKey ? { poster: path(upload.posterKey) } : {}),
     ...(captions.length
       ? {
@@ -262,9 +337,9 @@ async function attach(upload: Prisma.VideoUploadGetPayload<object>) {
       : {}),
   };
   let next: unknown = media;
-  if (lesson.video) {
+  if (existing) {
     try {
-      const current = parseLessonVideo(lesson.video);
+      const current = parseLessonVideo(existing.video);
       if (current.kind === "interactive") {
         next = { ...current.group, stimulus: { ...current.group.stimulus, media } };
       }
@@ -273,7 +348,26 @@ async function attach(upload: Prisma.VideoUploadGetPayload<object>) {
     }
   }
   parseLessonVideo(next); // Throws, with every problem, before anything is saved.
-  await prisma.lesson.update({ where: { id: upload.lessonId }, data: { video: next as Prisma.InputJsonValue } });
+  const video = next as Prisma.InputJsonValue;
+  if (existing) {
+    await prisma.lessonVideoPart.update({ where: { id: existing.id }, data: { video, source: "UPLOAD", durationSeconds: upload.durationSeconds } });
+    if (!upload.partId) await prisma.videoUpload.update({ where: { id: upload.id }, data: { partId: existing.id } });
+    return;
+  }
+  const last = await prisma.lessonVideoPart.findFirst({ where: { lessonId: upload.lessonId }, orderBy: { position: "desc" }, select: { position: true } });
+  const part = await prisma.lessonVideoPart.create({
+    data: {
+      lessonId: upload.lessonId,
+      position: (last?.position ?? -1) + 1,
+      skillKey: upload.skillKey,
+      titleEs: upload.titleEs,
+      titleEn: upload.titleEn,
+      video,
+      source: "UPLOAD",
+      durationSeconds: upload.durationSeconds,
+    },
+  });
+  await prisma.videoUpload.update({ where: { id: upload.id }, data: { partId: part.id } });
 }
 
 /** Reads the encode's progress; when it has finished, attaches the video to its lesson. */
@@ -316,10 +410,37 @@ export async function refreshUpload(uploadId: string): Promise<Result<{ upload: 
   }
 }
 
-/** Takes the video off a lesson. The files stay in S3, so uploading again or restoring by hand is possible. */
-export async function removeLessonVideo(lessonId: string): Promise<Result> {
+/**
+ * Takes one video off its lesson. The files stay in S3, so uploading again or restoring by hand is possible. A
+ * repository video comes back on the next import while its sidecar is in the repository.
+ */
+export async function removeLessonVideo(partId: string): Promise<Result> {
   if (!(await requireAdmin())) return { success: false, error: "Only admins can change lesson videos." };
-  await prisma.lesson.update({ where: { id: lessonId }, data: { video: Prisma.DbNull } });
+  const part = await prisma.lessonVideoPart.findUnique({ where: { id: partId }, select: { lessonId: true } });
+  if (!part) return { success: true };
+  await prisma.lessonVideoPart.delete({ where: { id: partId } });
+  await renumber(part.lessonId);
   revalidatePath("/courses", "layout");
   return { success: true };
+}
+
+/** Moves one of a lesson's videos up or down the lesson's list. */
+export async function moveLessonVideo(partId: string, direction: "up" | "down"): Promise<Result> {
+  if (!(await requireAdmin())) return { success: false, error: "Only admins can change lesson videos." };
+  const part = await prisma.lessonVideoPart.findUnique({ where: { id: partId }, select: { lessonId: true } });
+  if (!part) return { success: false, error: "That video is gone. Reload the page." };
+  const parts = await prisma.lessonVideoPart.findMany({ where: { lessonId: part.lessonId }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
+  const at = parts.findIndex((entry) => entry.id === partId);
+  const to = direction === "up" ? at - 1 : at + 1;
+  if (to < 0 || to >= parts.length) return { success: true };
+  [parts[at], parts[to]] = [parts[to], parts[at]];
+  await prisma.$transaction(parts.map((entry, position) => prisma.lessonVideoPart.update({ where: { id: entry.id }, data: { position } })));
+  revalidatePath("/courses", "layout");
+  return { success: true };
+}
+
+/** Positions 0, 1, 2… in the current order, after a video was removed. */
+async function renumber(lessonId: string) {
+  const parts = await prisma.lessonVideoPart.findMany({ where: { lessonId }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
+  await prisma.$transaction(parts.map((entry, position) => prisma.lessonVideoPart.update({ where: { id: entry.id }, data: { position } })));
 }

@@ -7,10 +7,10 @@
 // and project notebooks under project/ (solutions/ is skipped).
 //
 // A lesson video is a sidecar file, NN-MM-slug.video.json, in lk-core's format (lib/lesson-video.ts): beside a
-// notebook or guide of the same name it adds a video to that lesson; on its own it is a video lesson. Its files are
-// referred to as /media/<key> and uploaded to the media bucket separately (infra/media/README.md). A sidecar that
-// fails lk-core's checks stops the import with every problem listed. A lesson with no sidecar keeps the video it
-// has, so a video uploaded from the admin page (/admin/videos) survives a re-import.
+// notebook or guide of the same name it is that lesson's repository video, the first of its videos
+// (docs/lesson-videos.md); on its own it is a video lesson. Its files are referred to as /media/<key> and uploaded to
+// the media bucket separately (infra/media/README.md). A sidecar that fails lk-core's checks stops the import with
+// every problem listed. Videos uploaded from the admin page (/admin/videos) are never touched by an import.
 //
 // Re-running is safe: the course, modules and lessons are matched by slug and updated in place. Nothing is
 // deleted; lessons that disappeared from the repository are reported, because deleting them would delete
@@ -268,7 +268,7 @@ async function save(course: ParsedCourse, publish: boolean) {
             create: { ...fields, courseId: saved.id },
             update: fields,
           });
-          for (const [index, lesson] of lessons.entries()) {
+          for (const [index, { video, ...lesson }] of lessons.entries()) {
             const data = { ...lesson, position: index + 1 };
             const savedLesson = await tx.lesson.upsert({
               where: { moduleId_slug: { moduleId: savedModule.id, slug: lesson.slug } },
@@ -276,6 +276,16 @@ async function save(course: ParsedCourse, publish: boolean) {
               update: data,
             });
             kept.add(savedLesson.id);
+            // The sidecar is the lesson's repository video, first in its list; uploaded videos are left as they are.
+            if (video !== undefined) {
+              const current = await tx.lessonVideoPart.findFirst({ where: { lessonId: savedLesson.id, source: "REPOSITORY" }, select: { id: true } });
+              if (current) {
+                await tx.lessonVideoPart.update({ where: { id: current.id }, data: { video } });
+              } else {
+                const first = await tx.lessonVideoPart.findFirst({ where: { lessonId: savedLesson.id }, orderBy: { position: "asc" }, select: { position: true } });
+                await tx.lessonVideoPart.create({ data: { lessonId: savedLesson.id, position: (first?.position ?? 1) - 1, video, source: "REPOSITORY" } });
+              }
+            }
           }
         }
         return tx.lesson.findMany({

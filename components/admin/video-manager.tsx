@@ -1,19 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Link from "next/link";
-import { AlertTriangle, Captions, Check, FileText, Film, ImageIcon, Plus, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Captions, Check, FileText, Film, GitBranch, ImageIcon, Plus, Trash2, Upload, X } from "lucide-react";
 import {
   markUploadFailed,
+  moveLessonVideo,
   refreshUpload,
   removeLessonVideo,
   startEncoding,
   startVideoUpload,
   type UploadSummary,
   type VideoLessonList,
+  type VideoTarget,
 } from "@/actions/videos";
+import { Tip } from "@/components/ui/tip";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -22,6 +25,7 @@ import { DotLoader } from "@/components/ui/dot-loader";
 import { cn } from "@/lib/utils";
 
 type Lesson = VideoLessonList["courses"][number]["modules"][number]["lessons"][number];
+type Part = Lesson["videos"][number];
 
 const LANGUAGES: Record<string, string> = { es: "Español", en: "English", pt: "Português", fr: "Français" };
 const POLL_MS = 5000;
@@ -50,7 +54,7 @@ export function VideoManager({ data }: { data: VideoLessonList }) {
           </h3>
           <div className="divide-y divide-border rounded-xl border border-border">
             {course.modules.map((courseModule) => {
-              const withVideo = courseModule.lessons.filter((lesson) => lesson.video).length;
+              const withVideo = courseModule.lessons.filter((lesson) => lesson.videos.length > 0).length;
               return (
                 <details key={courseModule.id} className="group" open={courseModule.position === 0}>
                   <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm hover:bg-accent/50 [&::-webkit-details-marker]:hidden">
@@ -75,7 +79,7 @@ export function VideoManager({ data }: { data: VideoLessonList }) {
   );
 }
 
-function VideoBadge({ video }: { video: Lesson["video"] }) {
+function VideoBadge({ video }: { video: Part["video"] }) {
   if (!video) return <span className="text-xs text-muted-foreground">No video</span>;
   if (video.kind === "invalid") return <span className="text-xs text-destructive">Invalid video: {video.error}</span>;
   return (
@@ -94,55 +98,75 @@ function VideoBadge({ video }: { video: Lesson["video"] }) {
   );
 }
 
-function UploadStatus({ upload }: { upload: UploadSummary }) {
+/** An upload still running, or the last one that failed, with what it's for. */
+function UploadStatus({ upload, label }: { upload: UploadSummary; label: string }) {
   if (upload.status === "READY") return null;
   if (upload.status === "FAILED") {
-    return <p className="text-xs text-destructive">Last upload failed: {upload.error ?? "unknown error"}</p>;
+    return (
+      <p className="text-xs text-destructive">
+        Upload for {label} failed: {upload.error ?? "unknown error"}
+      </p>
+    );
   }
   return (
     <p className="flex items-center gap-2 text-xs text-muted-foreground">
       <DotLoader size={12} />
-      {upload.status === "UPLOADING" ? "Waiting for the upload to finish" : `Encoding ${upload.percent ?? 0}%`} · {upload.fileName}
+      {upload.status === "UPLOADING" ? "Waiting for the upload to finish" : `Encoding ${upload.percent ?? 0}%`} · {label} · {upload.fileName}
     </p>
   );
 }
 
+/** Where the uploader is open: replacing one of the lesson's videos, or adding one. */
+type Opened = { kind: "replace"; part: Part } | { kind: "add" } | null;
+
 function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [upload, setUpload] = useState<UploadSummary | null>(lesson.upload);
-  const [removing, startRemoving] = useTransition();
+  const [opened, setOpened] = useState<Opened>(null);
+  const [uploads, setUploads] = useState<UploadSummary[]>(lesson.uploads);
+  const [pending, startPending] = useTransition();
 
-  // An encode started earlier (or in another tab) is followed here until it finishes.
+  const labelOf = useCallback((upload: UploadSummary) => {
+    if (upload.partId) return lesson.videos.find((part) => part.id === upload.partId)?.title ?? "a video";
+    if (upload.skillKey) return lesson.skills.find((skill) => skill.key === upload.skillKey)?.label ?? upload.skillKey;
+    return upload.titleEn ?? "a new video";
+  }, [lesson.videos, lesson.skills]);
+
+  // Encodes started earlier (or in another tab) are followed here until they finish.
   useEffect(() => {
-    if (upload?.status !== "ENCODING") return;
+    const encoding = uploads.filter((upload) => upload.status === "ENCODING");
+    if (!encoding.length) return;
     const timer = setTimeout(async () => {
-      const result = await refreshUpload(upload.id).catch(() => null);
-      if (!result?.success) return setUpload({ ...upload });
-      setUpload(result.upload);
-      if (result.upload.status === "READY") {
-        toast.success(`Video ready on “${lesson.title.replaceAll("`", "")}”.`);
-        setOpen(false);
-        router.refresh();
-      } else if (result.upload.status === "FAILED") {
-        toast.error("The encode failed. The reason is under the lesson.");
-      }
+      const results = await Promise.all(encoding.map((upload) => refreshUpload(upload.id).catch(() => null)));
+      let changed = false;
+      const next = uploads.map((upload) => {
+        const result = results[encoding.indexOf(upload)];
+        if (!result?.success) return upload;
+        if (result.upload.status !== upload.status) changed = true;
+        if (result.upload.status === "READY") toast.success(`Video ready: ${labelOf(result.upload)}.`);
+        if (result.upload.status === "FAILED") toast.error("An encode failed. The reason is under the lesson.");
+        return result.upload;
+      });
+      setUploads(next.filter((upload) => upload.status !== "READY"));
+      if (changed) router.refresh();
     }, POLL_MS);
     return () => clearTimeout(timer);
-  }, [upload, lesson.title, router]);
+  }, [uploads, router, labelOf]);
 
   const { confirm, dialog } = useConfirm();
-  const remove = async () => {
+  const remove = async (part: Part) => {
     const ok = await confirm({
-      title: "Take the video off this lesson?",
-      detail: lesson.title.replaceAll("`", ""),
-      description: "Learners stop seeing it. The files stay in the media bucket, and you can upload a video again.",
+      title: "Take this video off the lesson?",
+      detail: part.title,
+      description:
+        part.source === "REPOSITORY"
+          ? "Learners stop seeing it. It comes from the course repository, so the next import brings it back while its .video.json is there."
+          : "Learners stop seeing it. The files stay in the media bucket, and you can upload it again.",
       confirmLabel: "Remove video",
       tone: "danger",
     });
     if (!ok) return;
-    startRemoving(async () => {
-      const result = await removeLessonVideo(lesson.id).catch(() => null);
+    startPending(async () => {
+      const result = await removeLessonVideo(part.id).catch(() => null);
       if (!result?.success) {
         toast.error(result?.error ?? "We couldn't reach the server. Try again.");
         return;
@@ -151,15 +175,23 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
       router.refresh();
     });
   };
+  const move = (part: Part, direction: "up" | "down") =>
+    startPending(async () => {
+      const result = await moveLessonVideo(part.id, direction).catch(() => null);
+      if (!result?.success) toast.error(result?.error ?? "We couldn't reach the server. Try again.");
+      router.refresh();
+    });
 
-  const busy = upload?.status === "UPLOADING" || upload?.status === "ENCODING";
+  const busy = uploads.some((upload) => upload.status === "UPLOADING" || upload.status === "ENCODING");
+  const firstPoster = lesson.videos.find((part) => part.video && part.video.kind !== "invalid" && part.video.poster)?.video;
+  const missing = lesson.skills.filter((skill) => !skill.hasVideo).length;
   return (
     <li className="px-4 py-3">
       {dialog}
       <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 md:grid-cols-[3rem_minmax(0,1fr)_auto]">
-        {lesson.video && lesson.video.kind !== "invalid" && lesson.video.poster ? (
+        {firstPoster && firstPoster.kind !== "invalid" && firstPoster.poster ? (
           // eslint-disable-next-line @next/next/no-img-element -- a signed CloudFront URL, not an optimisable asset
-          <img src={lesson.video.poster} alt="" className="h-12 w-12 shrink-0 rounded-md bg-black object-cover" />
+          <img src={firstPoster.poster} alt="" className="h-12 w-12 shrink-0 rounded-md bg-black object-cover" />
         ) : (
           <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
             <Film className="h-4 w-4" />
@@ -170,37 +202,153 @@ function LessonRow({ lesson, configured }: { lesson: Lesson; configured: boolean
             {lesson.code && <span className="mr-2 font-mono text-xs text-muted-foreground">{lesson.code}</span>}
             {lesson.title.replaceAll("`", "")}
           </p>
-          <VideoBadge video={lesson.video} />
-          {upload && <UploadStatus upload={upload} />}
+          <p className="text-xs text-muted-foreground">
+            {lesson.videos.length === 0 ? "No videos" : `${lesson.videos.length} video${lesson.videos.length === 1 ? "" : "s"}`}
+            {lesson.skills.length > 0 && ` · ${lesson.skills.length - missing} of ${lesson.skills.length} skills have one`}
+          </p>
+          {uploads.map((upload) => (
+            <UploadStatus key={upload.id} upload={upload} label={labelOf(upload)} />
+          ))}
         </div>
         <div className="col-start-2 flex flex-wrap gap-2 md:col-start-3 md:justify-end">
-          {/* What the session that makes this lesson's video reads (lib/video-brief.ts). */}
+          {/* What the session that makes this lesson's videos reads (lib/video-brief.ts). */}
           <Button variant="ghost" size="sm" asChild>
             <Link href={`/admin/videos/brief/${lesson.id}`}>
               <FileText className="mr-1.5 h-4 w-4" />
               Video brief
             </Link>
           </Button>
-          {lesson.video && (
-            <Button variant="ghost" size="sm" onClick={remove} loading={removing} loadingLabel="Removing…" disabled={busy}>
-              <Trash2 className="mr-1.5 h-4 w-4" />
-              Remove
-            </Button>
-          )}
-          <Button variant={open ? "secondary" : "outline"} size="sm" onClick={() => setOpen(!open)} disabled={!configured || busy}>
-            {open ? <X className="mr-1.5 h-4 w-4" /> : <Upload className="mr-1.5 h-4 w-4" />}
-            {open ? "Close" : lesson.video ? "Replace video" : "Upload video"}
+          <Button variant={opened?.kind === "add" ? "secondary" : "outline"} size="sm" onClick={() => setOpened(opened?.kind === "add" ? null : { kind: "add" })} disabled={!configured}>
+            {opened?.kind === "add" ? <X className="mr-1.5 h-4 w-4" /> : <Plus className="mr-1.5 h-4 w-4" />}
+            {opened?.kind === "add" ? "Close" : "Add video"}
           </Button>
         </div>
       </div>
-      {open && (
+
+      {lesson.videos.length > 0 && (
+        <ol className="mt-3 divide-y divide-border rounded-lg border border-border md:ml-[3.75rem]">
+          {lesson.videos.map((part, index) => (
+            <li key={part.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+              <span className="w-5 font-mono text-xs text-muted-foreground">{index + 1}</span>
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="text-sm">
+                  {part.title}
+                  {part.skillKey === null && part.source !== "REPOSITORY" && <span className="ml-2 text-xs text-muted-foreground">(own title)</span>}
+                </p>
+                <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                  <VideoBadge video={part.video} />
+                  {part.durationSeconds ? <span className="font-mono">{clock(part.durationSeconds)}</span> : null}
+                  {part.source === "REPOSITORY" && (
+                    <span className="inline-flex items-center gap-1">
+                      <GitBranch className="h-3.5 w-3.5" /> From the course repository
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Tip content="Move up">
+                  <Button variant="ghost" size="icon" aria-label="Move up" disabled={index === 0 || pending} onClick={() => move(part, "up")}>
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                </Tip>
+                <Tip content="Move down">
+                  <Button variant="ghost" size="icon" aria-label="Move down" disabled={index === lesson.videos.length - 1 || pending} onClick={() => move(part, "down")}>
+                    <ArrowDown className="h-4 w-4" />
+                  </Button>
+                </Tip>
+                <Button
+                  variant={opened?.kind === "replace" && opened.part.id === part.id ? "secondary" : "ghost"}
+                  size="sm"
+                  disabled={!configured || busy}
+                  onClick={() => setOpened(opened?.kind === "replace" && opened.part.id === part.id ? null : { kind: "replace", part })}
+                >
+                  <Upload className="mr-1.5 h-4 w-4" />
+                  Replace
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void remove(part)} disabled={pending}>
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  Remove
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {opened?.kind === "replace" && (
         <Uploader
+          lessonId={lesson.id}
+          target={{ partId: opened.part.id }}
+          heading={`Replace “${opened.part.title}”`}
+          keepsQuizzes={opened.part.video?.kind === "interactive"}
+          onStarted={(summary) => setUploads((list) => [summary, ...list.filter((upload) => upload.partId !== summary.partId)])}
+          onDone={() => setOpened(null)}
+        />
+      )}
+      {opened?.kind === "add" && (
+        <AddVideo
           lesson={lesson}
-          onStarted={(summary) => setUpload(summary)}
-          onDone={() => setOpen(false)}
+          onStarted={(summary) => setUploads((list) => [summary, ...list])}
+          onDone={() => setOpened(null)}
         />
       )}
     </li>
+  );
+}
+
+/**
+ * A new video for the lesson: for one of its skills (those without a video first; one that has a video gets it
+ * replaced), or another video with its own title.
+ */
+function AddVideo({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (upload: UploadSummary) => void; onDone: () => void }) {
+  const ordered = [...lesson.skills.filter((skill) => !skill.hasVideo), ...lesson.skills.filter((skill) => skill.hasVideo)];
+  const [choice, setChoice] = useState<string>(ordered[0]?.key ?? "__own");
+  const [titleEn, setTitleEn] = useState("");
+  const [titleEs, setTitleEs] = useState("");
+  const own = choice === "__own";
+  const skill = lesson.skills.find((entry) => entry.key === choice);
+  const target: VideoTarget | null = own ? (titleEn.trim() && titleEs.trim() ? { titleEn: titleEn.trim(), titleEs: titleEs.trim() } : null) : { skillKey: choice };
+  return (
+    <div className="mt-4 space-y-3 rounded-xl border border-border bg-card p-4 md:ml-[3.75rem]">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="space-y-1.5">
+          <Label htmlFor={`target-${lesson.id}`}>What it teaches</Label>
+          <select id={`target-${lesson.id}`} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={choice} onChange={(event) => setChoice(event.target.value)}>
+            {ordered.map((entry) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.label}
+                {entry.hasVideo ? " (has a video: replaces it)" : ""}
+              </option>
+            ))}
+            <option value="__own">Another video, with its own title</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {lesson.skills.length
+              ? "One video per skill, in the lesson's order; reorder them in the list afterwards."
+              : "This lesson has no skills yet (Admin → Practice): give the video its own title."}
+          </p>
+        </div>
+        {own && (
+          <div className="grid gap-2">
+            <Input aria-label="Title in English" placeholder="Title in English" value={titleEn} onChange={(event) => setTitleEn(event.target.value)} maxLength={200} />
+            <Input aria-label="Title in Spanish" placeholder="Título en español" value={titleEs} onChange={(event) => setTitleEs(event.target.value)} maxLength={200} />
+          </div>
+        )}
+      </div>
+      {target ? (
+        <Uploader
+          key={own ? "own" : choice}
+          lessonId={lesson.id}
+          target={target}
+          heading={own ? "Upload the video" : `Video for “${skill?.label ?? choice}”`}
+          keepsQuizzes={false}
+          onStarted={onStarted}
+          onDone={onDone}
+        />
+      ) : (
+        <p className="text-xs text-muted-foreground">Give the video a title in both languages to upload it.</p>
+      )}
+    </div>
   );
 }
 
@@ -219,7 +367,21 @@ function put(url: string, headers: Record<string, string>, body: Blob, onProgres
   });
 }
 
-function Uploader({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (upload: UploadSummary) => void; onDone: () => void }) {
+function Uploader({
+  lessonId,
+  target,
+  heading,
+  keepsQuizzes,
+  onStarted,
+  onDone,
+}: {
+  lessonId: string;
+  target: VideoTarget;
+  heading: string;
+  keepsQuizzes: boolean;
+  onStarted: (upload: UploadSummary) => void;
+  onDone: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -269,7 +431,7 @@ function Uploader({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (u
   const upload = async () => {
     if (!file || !meta) return;
     setStage("Preparing…");
-    const result = await startVideoUpload(lesson.id, {
+    const result = await startVideoUpload(lessonId, target, {
       fileName: file.name,
       contentType: file.type || "video/mp4",
       size: file.size,
@@ -293,7 +455,17 @@ function Uploader({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (u
       const message = (error as Error).message;
       await markUploadFailed(result.uploadId, message).catch(() => undefined);
       setStage(null);
-      onStarted({ id: result.uploadId, status: "FAILED", fileName: file.name, percent: null, error: message, createdAt: new Date().toISOString() });
+      onStarted({
+        id: result.uploadId,
+        status: "FAILED",
+        fileName: file.name,
+        percent: null,
+        error: message,
+        createdAt: new Date().toISOString(),
+        partId: "partId" in target ? target.partId : null,
+        skillKey: "skillKey" in target ? target.skillKey : null,
+        titleEn: "titleEn" in target ? target.titleEn : null,
+      });
       toast.error(`The upload failed: ${message}`);
       return;
     }
@@ -316,11 +488,12 @@ function Uploader({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (u
   const uploading = stage !== null;
   return (
     <div className="mt-4 grid gap-5 rounded-xl border border-border bg-card p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <p className="text-sm font-medium md:col-span-2">{heading}</p>
       <div className="space-y-3">
         <div className="space-y-1.5">
-          <Label htmlFor={`file-${lesson.id}`}>Video file</Label>
+          <Label htmlFor={`file-${lessonId}`}>Video file</Label>
           <Input
-            id={`file-${lesson.id}`}
+            id={`file-${lessonId}`}
             type="file"
             accept="video/mp4,video/quicktime,video/webm,video/x-matroska,video/x-m4v,.mp4,.mov,.webm,.mkv,.m4v"
             disabled={uploading}
@@ -430,7 +603,7 @@ function Uploader({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (u
               <label className="flex items-center gap-2 text-xs">
                 <input
                   type="radio"
-                  name={`default-${lesson.id}`}
+                  name={`default-${lessonId}`}
                   checked={caption.default}
                   disabled={uploading}
                   onChange={() => setCaptions((list) => list.map((entry) => ({ ...entry, default: entry.id === caption.id })))}
@@ -441,10 +614,10 @@ function Uploader({ lesson, onStarted, onDone }: { lesson: Lesson; onStarted: (u
           ))}
         </div>
 
-        {lesson.video?.kind === "interactive" && (
+        {keepsQuizzes && (
           <p className="rounded-lg border border-border bg-muted/50 p-3 text-xs">
-            This lesson&apos;s video has quizzes. The new video replaces the old one and keeps the quizzes at their times; check
-            they still fit.
+            This video has quizzes. The new file replaces the old one and keeps the quizzes at their times; check they
+            still fit.
           </p>
         )}
 

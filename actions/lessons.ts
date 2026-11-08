@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { storedVideoTitle } from "@/lib/lesson-video";
 
 export type LessonStatus = "IN_PROGRESS" | "COMPLETED";
 
@@ -58,9 +59,22 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         objectives: true,
         sourcePath: true,
         body: true,
-        video: true,
+        videos: { orderBy: { position: "asc" }, select: { id: true, skillKey: true, titleEs: true, titleEn: true, video: true, durationSeconds: true } },
       },
     });
+    // A skill video's title is its skill's label unless it has one of its own.
+    const skillKeys = lesson.videos.map((video) => video.skillKey).filter((key): key is string => Boolean(key));
+    const skills = skillKeys.length
+      ? await prisma.practiceSkill.findMany({ where: { courseId: course.id, key: { in: skillKeys } }, select: { key: true, labelEs: true, labelEn: true } })
+      : [];
+    // A video with neither (one from before videos were tied to skills) uses the title it carries itself.
+    const videoTitles = Object.fromEntries(
+      lesson.videos.map((video) => {
+        const skill = skills.find((entry) => entry.key === video.skillKey);
+        const own = storedVideoTitle(video.video);
+        return [video.id, { es: video.titleEs ?? skill?.labelEs ?? own, en: video.titleEn ?? skill?.labelEn ?? own }];
+      }),
+    );
 
     // Course order, across modules, for previous / next.
     const sequence = course.modules.flatMap((item) => item.lessons.map((entry) => ({ moduleSlug: item.slug, ...entry })));
@@ -70,7 +84,8 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
 
     let enrolled = false;
     const progress: Record<string, LessonStatus> = {};
-    let videoState: VideoState | null = null;
+    // The learner's state for each of the lesson's videos, by video id.
+    let videoStates: Record<string, VideoState> = {};
     if (userId) {
       const [enrollment, rows] = await Promise.all([
         prisma.enrollment.findUnique({ where: { userId_courseId: { userId, courseId: course.id } } }),
@@ -82,10 +97,7 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
       enrolled = Boolean(enrollment);
       for (const row of rows) {
         progress[row.lessonId] = row.status;
-        if (row.lessonId === lesson.id && lesson.video) {
-          const parsed = VideoStateSchema.safeParse(row.videoState);
-          videoState = parsed.success ? parsed.data : null;
-        }
+        if (row.lessonId === lesson.id && lesson.videos.length) videoStates = readVideoStates(row.videoState);
       }
     }
 
@@ -100,7 +112,8 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         next: next && { moduleSlug: next.moduleSlug, slug: next.slug, code: next.code, title: next.title },
         enrolled,
         progress,
-        videoState,
+        videoTitles,
+        videoStates,
       },
     };
   } catch (error) {
@@ -166,8 +179,9 @@ export async function setLessonCompleted(lessonId: string, completed: boolean) {
 }
 
 /**
- * A learner's place in a lesson video, kept on their LessonProgress row: where to resume (lk-core MediaProgress),
- * each quiz answer by slot id, which were handed in, and the practice score each earned.
+ * A learner's place in one of a lesson's videos, kept on their LessonProgress row by video id: where to resume (lk-core
+ * MediaProgress), each quiz answer by slot id, which were handed in, the practice score each earned, and when they
+ * reached the end.
  */
 const VideoStateSchema = z.object({
   progress: z.object({ progressVersion: z.literal("1.0"), at: z.number().min(0), furthest: z.number().min(0) }).optional(),
@@ -181,8 +195,22 @@ export type VideoState = z.infer<typeof VideoStateSchema>;
 // Answers are small; a state this large is not one the player wrote.
 const VIDEO_STATE_MAX_BYTES = 64 * 1024;
 
-/** Saves the learner's whole video state (the player sends all of it, so the latest save is always complete). */
-export async function saveVideoState(lessonId: string, state: VideoState) {
+/** The stored states, by video id; anything unreadable is left out (the learner starts that video afresh). */
+function readVideoStates(stored: unknown): Record<string, VideoState> {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+  const states: Record<string, VideoState> = {};
+  for (const [id, value] of Object.entries(stored as Record<string, unknown>)) {
+    const parsed = VideoStateSchema.safeParse(value);
+    if (parsed.success) states[id] = parsed.data;
+  }
+  return states;
+}
+
+/**
+ * Saves the learner's whole state for one of the lesson's videos (the player sends all of it, so the latest save is
+ * always complete); the other videos' states are kept as they are.
+ */
+export async function saveVideoState(lessonId: string, videoId: string, state: VideoState) {
   try {
     const parsed = VideoStateSchema.safeParse(state);
     if (!parsed.success || JSON.stringify(parsed.data).length > VIDEO_STATE_MAX_BYTES) {
@@ -190,8 +218,11 @@ export async function saveVideoState(lessonId: string, state: VideoState) {
     }
     const learner = await enrolledLearner(lessonId);
     if ("error" in learner) return { success: false, error: learner.error };
+    const video = await prisma.lessonVideoPart.findFirst({ where: { id: videoId, lessonId }, select: { id: true } });
+    if (!video) return { success: false, error: "That video isn't on this lesson" };
+    const row = await prisma.lessonProgress.findUnique({ where: { userId_lessonId: { userId: learner.userId, lessonId } }, select: { videoState: true } });
     // Parsed from JSON-safe input, so it is JSON; zod's `unknown` answers just can't say so to Prisma's types.
-    const videoState = parsed.data as Prisma.InputJsonObject;
+    const videoState = { ...readVideoStates(row?.videoState), [videoId]: parsed.data } as unknown as Prisma.InputJsonObject;
     await prisma.lessonProgress.upsert({
       where: { userId_lessonId: { userId: learner.userId, lessonId } },
       create: { userId: learner.userId, lessonId, videoState },
