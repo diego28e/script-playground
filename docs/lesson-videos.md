@@ -42,12 +42,14 @@ upload, the repository's otherwise).
   finishes, the upload fills the video it was for, or a new video joins the end of the list.
 - **The course import** (`scripts/import-course.ts`): a lesson's `NN-MM-slug.video.json` sidecar is its `REPOSITORY`
   video, kept first in the list and rewritten on every import; uploaded videos are never touched by an import.
-- **Learners** (`components/courses/lesson-videos.tsx`): one video plays alone; several get a playlist under the player
-  (the videos are landscape 1920 x 1080 screencasts, so the player keeps the column's full width), each with its length and a tick once watched to the end, a counter and the video's
-  title under the player, and "Next" when one ends. The open video is kept in the address (`?video=2`). A learner's
-  state is kept per video (`LessonProgress.videoState`, by video id: where to resume, quiz answers, when finished); the
-  migration re-keyed existing states by their video. A video lesson completes when all its videos have been watched to
-  the end.
+- **Learners** (`components/courses/lesson-videos.tsx`): one video plays alone. Several get a small stepper **above**
+  the player, kept apart from the lesson's own previous / next at the bottom of the page: a numbered dot per video,
+  joined by lines that fill as videos are watched, a tick on each watched one, and on the current one a thin ring
+  that fills as it plays. Titles show on hover in the platform's tooltip (a lesson can have seven videos), the current
+  title once, left of the stepper, and "Next" rises in when a video ends. Arrow keys move between the dots.
+  The open video is kept in the address (`?video=2`). A learner's state is kept per video (`LessonProgress.videoState`,
+  by video id: where to resume, quiz answers, when finished); the migration re-keyed existing states by their video.
+  A video lesson completes when all its videos have been watched to the end.
 
 ## Captions and posters
 

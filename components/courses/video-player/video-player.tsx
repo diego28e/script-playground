@@ -535,6 +535,8 @@ export function VideoPlayer({ src, poster, tracks = [], title, language, portrai
             if (startAt > 0 && startAt < element.duration - 5) {
               element.currentTime = startAt;
               setCurrent(startAt);
+            } else {
+              setCurrent(element.currentTime);
             }
           }}
           onEnded={() => {

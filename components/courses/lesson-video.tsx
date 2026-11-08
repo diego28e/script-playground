@@ -32,6 +32,8 @@ type Props = {
     initialState: VideoState | null;
     /** Called when the learner reaches the end of the video (and, for an interactive one, presses Finish). */
     onFinished?: () => void;
+    /** How far through the video the playhead is, 0 to 1, as it moves (the lesson's video stepper shows it). */
+    onPlayhead?: (fraction: number) => void;
 };
 
 const EMPTY: VideoState = { responses: {}, submitted: [], scores: {} };
@@ -134,11 +136,27 @@ function usePlayerBox(replay: boolean) {
 const BOX =
     "lk-scope mx-auto w-full overflow-hidden rounded-2xl data-[portrait]:max-w-[min(100%,max(18rem,min(24rem,calc((100svh-9rem)*9/16))))]";
 
-export function LessonVideo({ video, lessonId, videoId, title, language, tracking, initialState, onFinished }: Props) {
+export function LessonVideo({ video, lessonId, videoId, title, language, tracking, initialState, onFinished, onPlayhead }: Props) {
     const t = COPY[language];
     const { initial, update } = useVideoState(lessonId, videoId, tracking, initialState, t.saveError);
     const onProgress = (progress: MediaProgress) => update((current) => ({ ...current, progress }), 4000);
     const { ref: boxRef, portrait } = usePlayerBox(video.kind === "plain");
+
+    // Either player is a <video> inside the box: its time updates pass through the box on the way down (capture).
+    useEffect(() => {
+        const box = boxRef.current;
+        if (!box || !onPlayhead) return;
+        const onTime = (event: Event) => {
+            const element = event.target;
+            if (element instanceof HTMLVideoElement && element.duration > 0) onPlayhead(Math.min(1, element.currentTime / element.duration));
+        };
+        box.addEventListener("timeupdate", onTime, true);
+        box.addEventListener("loadedmetadata", onTime, true);
+        return () => {
+            box.removeEventListener("timeupdate", onTime, true);
+            box.removeEventListener("loadedmetadata", onTime, true);
+        };
+    }, [boxRef, onPlayhead]);
 
     if (video.kind === "plain") {
         return (

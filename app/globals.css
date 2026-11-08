@@ -408,3 +408,19 @@
 @media (prefers-reduced-motion: reduce) {
   .progress-sweep { animation: none; transform: none; width: 100%; opacity: 0.3; }
 }
+
+/* The lesson's video stepper (components/courses/lesson-videos.tsx): the current video's dot settles in with a small
+   overshoot, and "Next" rises in when a video ends. */
+@keyframes step-settle {
+  0% { transform: scale(0.82); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+.step-settle { animation: step-settle 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.rise-in { animation: rise-in 260ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .step-settle, .rise-in { animation: none; }
+}
