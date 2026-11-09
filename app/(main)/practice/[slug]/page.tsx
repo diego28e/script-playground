@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { PracticeToday } from "@/components/practice/practice-today";
+import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
 
 export const runtime = "nodejs";
 
@@ -22,5 +23,7 @@ export default async function PracticePage({ params }: Props) {
   if (!session) redirect(`/login?next=${encodeURIComponent(`/practice/${slug}`)}`);
   const course = await prisma.course.findUnique({ where: { slug }, select: { slug: true, title: true } });
   if (!course) notFound();
-  return <PracticeToday courseSlug={course.slug} courseTitle={course.title} />;
+  // An admin can fix a task from here (components/admin/practice-task-edit-button.tsx).
+  const editModels = session.user.role === "ADMIN" ? AUTHORING_CHAIN.map(({ model, label }) => ({ id: model, label })) : undefined;
+  return <PracticeToday courseSlug={course.slug} courseTitle={course.title} editModels={editModels} />;
 }

@@ -341,6 +341,23 @@ it was proven by DeepSeek and retired the original; moving the right-option mark
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built
 with (nodejs20.x, 22.x or 24.x).
 
+## Finding and fixing a task
+
+Built 2026-11-09. A task found wrong or unclear is one search away, and fixed with the task editor (above: an edit is
+proven again and replaces the task, which is retired; answers already given keep pointing at the old version).
+
+- **Admin → Practice → Tasks** (`/admin/practice/tasks`, `actions/practice-tasks.ts`,
+  `components/admin/practice-task-finder.tsx`): every task of a course. Search its words in either language (the whole
+  content: prompt, options, answers, explanations, code); narrow by lesson, skill (found and tutor skills under the lesson
+  they were found for), form, stage and status (in use, rejected, retired, all); sort by newest, most missed or most
+  answered. Each task shows its lesson and skill (click to filter by them) and how learners did ("12 answers · 25%
+  right", in amber when most of at least three answers are wrong: check the wording and the key). The filters are in
+  the address, so a search can be shared; `?task=<id>` opens that task in the editor.
+- **From your own practice:** an admin sees **Edit** on every task card of the practice page
+  (`components/admin/practice-task-edit-button.tsx`), which opens the editor right there, and **All tasks**, which opens
+  the finder on that task. Learners never see either: the page passes the editor's models only to an admin. The
+  session in progress keeps the task it had; the next sessions get the new version.
+
 ## Practice from the tutor
 
 Decided with the admin on 2026-11-07: practice the tutor asks for starts right away for that learner, with no approval;

@@ -18,6 +18,7 @@ import {
   type PracticeToday as Today,
 } from "@/actions/practice-learner";
 import { PRACTICE_ANSWERED } from "@/components/practice/practice-nav-link";
+import { PracticeTaskEditButton } from "@/components/admin/practice-task-edit-button";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tip";
@@ -171,7 +172,16 @@ type Notice = { kind: "working" | "info"; text: string } | null;
 const MARKDOWN =
   "text-base leading-relaxed [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em] [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-code-panel [&_pre]:p-4 [&_pre]:text-sm [&_pre]:text-code-foreground [&_pre_code]:bg-transparent [&_pre_code]:p-0";
 
-export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string; courseTitle: string }) {
+export function PracticeToday({
+  courseSlug,
+  courseTitle,
+  editModels,
+}: {
+  courseSlug: string;
+  courseTitle: string;
+  /** For an admin only: the task editor's models, and an Edit button on each task. */
+  editModels?: { id: string; label: string }[];
+}) {
   const { language } = useLanguage();
   const t = COPY[language];
   const [today, setToday] = useState<Today | null>(null);
@@ -401,6 +411,7 @@ export function PracticeToday({ courseSlug, courseTitle }: { courseSlug: string;
             onHint={hinted}
             onNext={() => setIndex(index + 1)}
             onPrevious={index > 0 ? () => setIndex(index - 1) : undefined}
+            editModels={editModels}
           />
         )}
         {finished && items.length > 0 && today && (
@@ -440,6 +451,7 @@ function TaskCard({
   onHint,
   onNext,
   onPrevious,
+  editModels,
 }: {
   item: PracticeTaskView;
   t: Copy;
@@ -451,6 +463,7 @@ function TaskCard({
   onHint: (taskId: string, hint: string) => void;
   onNext: () => void;
   onPrevious?: () => void;
+  editModels?: { id: string; label: string }[];
 }) {
   const es = language === "es";
   // When the task appeared, for the answer's duration (set after render: reading the clock while rendering isn't pure).
@@ -582,6 +595,7 @@ function TaskCard({
             <GraduationCap className="size-3" aria-hidden="true" /> {t.tutor}
           </span>
         )}
+        {editModels && <PracticeTaskEditButton key={item.id} taskId={item.id} models={editModels} />}
       </header>
       {item.isProbe && !answer && <p className="px-6 pt-2 text-sm text-muted-foreground md:px-8">{t.probeHint}</p>}
       {item.isTutor && !answer && <p className="px-6 pt-2 text-sm text-muted-foreground md:px-8">{t.tutorHint}</p>}

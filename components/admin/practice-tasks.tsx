@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { Archive, Check, ChevronDown, Pencil, Sparkles, X } from "lucide-react";
@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 type Lang = "es" | "en";
 
-const FORM_LABEL: Record<string, string> = {
+export const FORM_LABEL: Record<string, string> = {
   choice: "Multiple choice",
   fill: "Fill the blank",
   predict: "Predict the output",
@@ -121,9 +121,26 @@ function Code({ title, text }: { title: string; text: string }) {
   );
 }
 
-function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRetired: () => void }) {
+/**
+ * One task: its form, stage and proof, the prompt and options, and on request the key and explanation; Edit opens the
+ * task editor, Retire takes it out of the pool. `context` is a line above it (the finder shows the lesson, the skill and
+ * how learners did); `defaultEditing` opens the editor at once (a task linked by its id).
+ */
+export function TaskCard({
+  task,
+  lang,
+  onRetired,
+  context,
+  defaultEditing = false,
+}: {
+  task: SkillTask;
+  lang: Lang;
+  onRetired: () => void;
+  context?: ReactNode;
+  defaultEditing?: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(defaultEditing);
   const [pending, start] = useTransition();
   const { confirm, dialog } = useConfirm();
   const c = task.content;
@@ -144,6 +161,7 @@ function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRe
     <li className={cn("rounded-lg bg-muted/50 p-3", pending && "opacity-60")}>
       {dialog}
       {editing && <TaskEditor task={task} open={editing} onOpenChange={setEditing} onSaved={onRetired} />}
+      {context}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-semibold text-foreground">{FORM_LABEL[task.form] ?? task.form}</span>
         <span>{task.stage}</span>
@@ -156,6 +174,8 @@ function TaskCard({ task, lang, onRetired }: { task: SkillTask; lang: Lang; onRe
           <span className="text-emerald-700 dark:text-emerald-300">
             Proven{task.proof?.kind === "model-checked" ? ` (${task.proof.model} agreed)` : task.proof?.kind === "executable" ? " (ran on the grader)" : ""}
           </span>
+        ) : task.status === "RETIRED" ? (
+          <span>Retired: learners no longer get it</span>
         ) : (
           <span className="text-destructive">Rejected: {task.rejectReason}</span>
         )}
