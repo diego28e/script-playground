@@ -2,6 +2,7 @@ import { Type, type Content, type Schema, type ThinkingLevel } from "@google/gen
 import { z } from "zod";
 import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
+import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // Drafting a lesson's practice skills (docs/practice.md, "The skill graph"): a model reads the lesson (objectives,
 // prerequisites and the notebook or reading itself) and the skills earlier lessons already have, and proposes this
@@ -135,7 +136,7 @@ export type DraftResult =
  */
 export async function draftLesson(lessonId: string, userId: string, model?: string): Promise<DraftResult> {
   // The whole draft, models and fallbacks included, ends inside one Amplify request (reported to stop at about 30 s).
-  const deadline = Date.now() + 27_000;
+  const deadline = Date.now() + REQUEST_BUDGET_MS;
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     select: {

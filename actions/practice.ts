@@ -10,6 +10,7 @@ import { addDiscoveryToCourse, courseDiscoveries, setDiscoveryStatus, type Cours
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
 import { publishGraph, type PublishedGraph } from "@/lib/practice/graph";
 import { aiEditTask, generateTask, saveTaskEdit, type TaskContent, type TaskForm } from "@/lib/practice/tasks";
+import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // The practice skill graph's admin page (/admin/practice, docs/practice.md): draft each lesson's skills with a model,
 // edit and approve them, then publish a version for learners.
@@ -253,8 +254,8 @@ export type SkillTask = Awaited<ReturnType<typeof getSkillTasks>>[number];
 export async function writeSkillTask(courseId: string, skillKey: string, stage: string, form?: TaskForm): Promise<Result<{ form: string; model: string; note: string }>> {
   const session = await requireAdmin();
   if (!session) return denied;
-  // An Amplify request is reported to stop at about 30 s: the writing and the proof end by 27 s.
-  const result = await generateTask({ courseId, skillKey, stage, form, userId: session.user.id, deadline: Date.now() + 27_000 });
+  // Amplify stops a request at 28 s (lib/request-budget.ts): the writing and the proof end within the budget.
+  const result = await generateTask({ courseId, skillKey, stage, form, userId: session.user.id, deadline: Date.now() + REQUEST_BUDGET_MS });
   refresh();
   if (!result.ok) return { success: false, error: result.error };
   return { success: true, form: result.form, model: result.model, note: result.note };
@@ -265,7 +266,7 @@ export async function aiEditPracticeTask(taskId: string, instruction: string, mo
   const session = await requireAdmin();
   if (!session) return denied;
   if (!instruction.trim()) return { success: false, error: "Say what to change." };
-  const result = await aiEditTask({ taskId, instruction: instruction.slice(0, 4000), model, userId: session.user.id, deadline: Date.now() + 27_000 });
+  const result = await aiEditTask({ taskId, instruction: instruction.slice(0, 4000), model, userId: session.user.id, deadline: Date.now() + REQUEST_BUDGET_MS });
   return result.ok ? { success: true, task: result.task, model: result.model } : { success: false, error: result.error };
 }
 
@@ -276,8 +277,8 @@ export async function aiEditPracticeTask(taskId: string, instruction: string, mo
 export async function savePracticeTaskEdit(taskId: string, task: TaskContent, editedWith: string | null): Promise<Result<{ taskId: string; note: string }>> {
   const session = await requireAdmin();
   if (!session) return denied;
-  // An Amplify request is reported to stop at about 30 s: the proof ends by 27 s.
-  const result = await saveTaskEdit({ taskId, task, editedWith, userId: session.user.id, deadline: Date.now() + 27_000 });
+  // Amplify stops a request at 28 s (lib/request-budget.ts): the proof ends within the budget.
+  const result = await saveTaskEdit({ taskId, task, editedWith, userId: session.user.id, deadline: Date.now() + REQUEST_BUDGET_MS });
   refresh();
   if (!result.ok) return { success: false, error: result.error };
   return { success: true, taskId: result.taskId, note: result.note };

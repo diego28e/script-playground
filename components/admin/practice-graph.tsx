@@ -54,6 +54,135 @@ function storedModel(): string | null {
   }
 }
 const plain = (text: string) => text.replaceAll("`", "").replaceAll("**", "");
+
+const REDEPLOYED = "A new version of the site was deployed while this ran, and this page can't reach it any more. Reload the page and run it again: it carries on from where it stopped.";
+
+/**
+ * One request of a bulk run, robust to the request failing outright rather than answering with an error: it ran past
+ * Amplify's 28 s and was killed, or the connection dropped. That is tried once more; then it's "failed" and the run
+ * moves on. "redeployed": a deployment happened since this page loaded, so its server actions no longer exist.
+ */
+async function callOnce<T>(call: () => Promise<T>): Promise<T | "failed" | "redeployed"> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      if (/Server Action|older or newer deployment/i.test(error instanceof Error ? error.message : String(error))) return "redeployed";
+    }
+  }
+  return "failed";
+}
+
+type RunState = {
+  kind: "draft" | "write";
+  total: number;
+  /** Steps finished before the one running. */
+  at: number;
+  current: string;
+  tally: { ok: number; rejected: number; failed: number };
+  stopping: boolean;
+  startedAt: number;
+};
+type RunResult = {
+  kind: RunState["kind"];
+  /** done: every step ran; stopped: by the admin; halted: something every later step would hit too. */
+  outcome: "done" | "stopped" | "halted";
+  message?: string;
+  total: number;
+  /** Steps finished. */
+  at: number;
+  tally: RunState["tally"];
+  failures: { what: string; why: string }[];
+  seconds: number;
+};
+
+const duration = (seconds: number) =>
+  seconds < 90 ? `${Math.max(1, Math.round(seconds))} s` : seconds < 5400 ? `${Math.round(seconds / 60)} min` : `${(seconds / 3600).toFixed(1)} h`;
+
+/** A run in progress: where it is, how it's going, and about how long is left. */
+function RunProgress({ run }: { run: RunState }) {
+  // The estimate is worked out when a step starts (each step re-renders this), not on every render.
+  const [left, setLeft] = useState<number | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setLeft(run.at > 0 ? ((Date.now() - run.startedAt) / 1000 / run.at) * (run.total - run.at) : null), 0);
+    return () => clearTimeout(timer);
+  }, [run.at, run.startedAt, run.total]);
+  const noun = run.kind === "write" ? "written" : "drafted";
+  return (
+    <div className="w-full space-y-2" role="status" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <DotLoader />
+        <span className={cn("min-w-0 truncate", run.stopping && "text-muted-foreground")}>
+          {run.stopping ? "Stopping: the task in progress may still finish on the server" : run.current}
+        </span>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          {run.at + 1} of {run.total}
+        </span>
+        <span className="flex-1" />
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {run.tally.ok} {noun}
+          {run.tally.rejected ? ` · ${run.tally.rejected} rejected` : ""}
+          {run.tally.failed ? ` · ${run.tally.failed} failed` : ""}
+          {left !== null && !run.stopping ? ` · about ${duration(left)} left` : ""}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-background" aria-hidden="true">
+        <div className="h-full rounded-full bg-foreground/70 transition-[width] duration-500" style={{ width: `${(run.at / Math.max(1, run.total)) * 100}%` }} />
+      </div>
+      <p className="text-xs text-muted-foreground">Keep this tab open: the run stops if the page is closed or reloaded. The list fills in as each step is done.</p>
+    </div>
+  );
+}
+
+/** How the last run ended, until closed: the counts, and each failed or rejected step with why. */
+function RunSummary({ result, onClose }: { result: RunResult; onClose: () => void }) {
+  const [open, setOpen] = useState(false);
+  const noun = result.kind === "write" ? "written and proven" : "drafted";
+  const title =
+    result.outcome === "done"
+      ? `Finished: ${result.total} of ${result.total}`
+      : result.outcome === "stopped"
+        ? `Stopped after ${result.at} of ${result.total}`
+        : `Halted after ${result.at} of ${result.total}`;
+  return (
+    <div
+      role="status"
+      className={cn(
+        "w-full rounded-xl border px-4 py-3 text-sm",
+        result.outcome === "halted" ? "border-destructive/40 bg-destructive/5" : result.tally.failed ? "border-amber-500/40 bg-amber-500/5" : "border-border bg-background/60",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium">{title}</span>
+        <span className="text-muted-foreground">
+          {result.tally.ok} {noun}, {result.tally.rejected} rejected, {result.tally.failed} failed · {duration(result.seconds)}
+        </span>
+        <span className="flex-1" />
+        {result.failures.length > 0 && (
+          <button type="button" onClick={() => setOpen(!open)} className="text-xs text-muted-foreground hover:text-foreground">
+            {open ? "Hide" : "Show"} {result.failures.length} {result.failures.length === 1 ? "problem" : "problems"}
+          </button>
+        )}
+        <button type="button" onClick={onClose} aria-label="Close this summary" className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {result.message && <p className="mt-1.5 text-destructive">{result.message}</p>}
+      {result.outcome !== "done" && !result.message && <p className="mt-1.5 text-muted-foreground">Run it again to carry on: only what&apos;s still missing is listed.</p>}
+      {open && (
+        <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-xs">
+          {result.failures.map((failure, index) => (
+            <li key={index} className="flex gap-2">
+              <span className="shrink-0 font-mono text-muted-foreground">{failure.what}</span>
+              <span>{failure.why}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 const stateOf = (lesson: Lesson): Exclude<Filter, "all"> => (!lesson.practiceDraft ? "todo" : lesson.practiceDraft.status === "APPROVED" ? "approved" : "review");
 
 const STATE = {
@@ -145,8 +274,78 @@ function CourseReview({
   }, []);
   const selected = lessons.find((lesson) => lesson.id === selectedId) ?? lessons[0];
 
-  const [running, setRunning] = useState<string | null>(null);
-  const stop = useRef(false);
+  // A bulk run (drafting lessons, or writing missing tasks), and how the last one ended.
+  const [run, setRun] = useState<RunState | null>(null);
+  const [lastRun, setLastRun] = useState<RunResult | null>(null);
+  const stopper = useRef<{ stopped: boolean; resolve: () => void; promise: Promise<"stopped"> } | null>(null);
+  const running = run !== null;
+  /** Stop answers at once: the run stops waiting for the request in flight (which may still finish on the server). */
+  const stopRun = () => {
+    if (!stopper.current || stopper.current.stopped) return;
+    stopper.current.stopped = true;
+    stopper.current.resolve();
+    setRun((current) => current && { ...current, stopping: true });
+  };
+  /** Runs `steps` one after another, with Stop, a tally, the failures, and a result that stays on screen. */
+  const runBulk = async <T,>(
+    kind: RunState["kind"],
+    steps: { label: string; what: string; call: () => Promise<T> }[],
+    judge: (result: T) => { outcome: "ok" | "rejected" | "halt"; why?: string },
+  ) => {
+    let resolve!: () => void;
+    const promise = new Promise<"stopped">((done) => (resolve = () => done("stopped")));
+    const control = { stopped: false, resolve, promise };
+    stopper.current = control;
+    const tally = { ok: 0, rejected: 0, failed: 0 };
+    const failures: RunResult["failures"] = [];
+    const startedAt = Date.now();
+    let outcome: RunResult["outcome"] = "done";
+    let message: string | undefined;
+    let at = 0;
+    setLastRun(null);
+    // Keep the computer awake while it runs, where the browser allows it (a sleeping computer stops the run).
+    const wake = await navigator.wakeLock?.request("screen").catch(() => null);
+    try {
+      for (const [index, step] of steps.entries()) {
+        if (control.stopped) break;
+        at = index;
+        setRun({ kind, total: steps.length, at: index, current: step.label, tally: { ...tally }, stopping: false, startedAt });
+        const result = await Promise.race([callOnce(step.call), control.promise]);
+        if (result === "stopped") break;
+        if (result === "redeployed") {
+          outcome = "halted";
+          message = REDEPLOYED;
+          break;
+        }
+        at = index + 1;
+        if (result === "failed") {
+          tally.failed += 1;
+          failures.push({ what: step.what, why: "The request didn't answer, twice: it ran past Amplify's 28 s or the connection dropped. It stays in the list for the next run." });
+          continue;
+        }
+        const verdict = judge(result as T);
+        if (verdict.outcome === "halt") {
+          outcome = "halted";
+          message = verdict.why;
+          break;
+        }
+        if (verdict.outcome === "ok") tally.ok += 1;
+        else {
+          tally.rejected += 1;
+          failures.push({ what: step.what, why: verdict.why ?? "Rejected" });
+        }
+      }
+      if (control.stopped) outcome = "stopped";
+    } catch (error) {
+      outcome = "halted";
+      message = error instanceof Error ? error.message : "The run stopped on an unexpected error.";
+    } finally {
+      await wake?.release().catch(() => undefined);
+      stopper.current = null;
+      setRun(null);
+      setLastRun({ kind, outcome, message, total: steps.length, at, tally, failures: failures.slice(-100), seconds: Math.round((Date.now() - startedAt) / 1000) });
+    }
+  };
   const [publishing, startPublish] = useTransition();
   const [approvingAll, startApproveAll] = useTransition();
 
@@ -168,42 +367,30 @@ function CourseReview({
     });
   };
 
-  const draftRemaining = async () => {
-    const todo = lessons.filter((lesson) => !lesson.practiceDraft);
-    stop.current = false;
-    for (const [index, lesson] of todo.entries()) {
-      if (stop.current) break;
-      setRunning(`Drafting ${lesson.code ?? ""}, ${index + 1} of ${todo.length}`);
-      const result = await draftLessonSkills(lesson.id, model || undefined);
-      if (!result.success) {
-        toast.error(`${lesson.code}: ${result.error}`);
-        if (/allowance/.test(result.error)) break;
-      }
-    }
-    setRunning(null);
-  };
+  const draftRemaining = () =>
+    runBulk(
+      "draft",
+      lessons
+        .filter((lesson) => !lesson.practiceDraft)
+        .map((lesson) => ({ label: `Drafting ${lesson.code ?? plain(lesson.title)}`, what: lesson.code ?? plain(lesson.title), call: () => draftLessonSkills(lesson.id, model || undefined) })),
+      (result) => (result.success ? { outcome: "ok" } : /allowance/.test(result.error) ? { outcome: "halt", why: result.error } : { outcome: "rejected", why: result.error }),
+    );
 
   // Practice tasks: the published skills' stages that have no proven task yet.
   const missing = useMemo(
     () => Object.entries(course.stages).flatMap(([skillKey, stages]) => stages.filter((stage) => !(course.tasks[skillKey]?.[stage] ?? 0)).map((stage) => ({ skillKey, stage }))),
     [course.stages, course.tasks],
   );
-  const writeMissing = async () => {
-    stop.current = false;
-    let written = 0;
-    for (const [index, { skillKey, stage }] of missing.entries()) {
-      if (stop.current) break;
-      setRunning(`Writing a ${stage} task for ${skillKey}, ${index + 1} of ${missing.length}`);
-      const result = await writeSkillTask(course.id, skillKey, stage);
-      if (result.success) written += 1;
-      else if (/allowance|Publish/.test(result.error)) {
-        toast.error(result.error);
-        break;
-      }
-    }
-    setRunning(null);
-    toast.success(`${written} tasks written and proven. Rejected candidates are kept under each skill; run again to fill what's left.`);
-  };
+  // Writes the missing tasks one request at a time (each ends inside Amplify's 28 s, lib/request-budget.ts). A request
+  // that fails outright is tried once more, then counted as failed and skipped: one bad task never stops the run. A new
+  // deployment halts it (this open page can't reach the new server): reload and run again, it carries on where it
+  // stopped, since only stages still without a task are listed.
+  const writeMissing = () =>
+    runBulk(
+      "write",
+      missing.map(({ skillKey, stage }) => ({ label: `Writing a ${stage} task for ${skillKey}`, what: `${skillKey} · ${stage}`, call: () => writeSkillTask(course.id, skillKey, stage) })),
+      (result) => (result.success ? { outcome: "ok" } : /allowance|Publish/.test(result.error) ? { outcome: "halt", why: result.error } : { outcome: "rejected", why: result.error }),
+    );
 
   const publish = () =>
     startPublish(async () => {
@@ -281,9 +468,9 @@ function CourseReview({
               </select>
             </Tip>
           </label>
-          {running ? (
-            <Button variant="outline" size="sm" onClick={() => (stop.current = true)}>
-              <Square className="mr-2 h-4 w-4" /> Stop
+          {run ? (
+            <Button variant="outline" size="sm" onClick={stopRun} disabled={run.stopping}>
+              <Square className="mr-2 h-4 w-4" /> {run.stopping ? "Stopping…" : "Stop"}
             </Button>
           ) : (
             <Button variant="outline" size="sm" onClick={draftRemaining} disabled={counts.todo === 0}>
@@ -305,11 +492,8 @@ function CourseReview({
             <Upload className="mr-2 h-4 w-4" /> {publishing ? "Publishing…" : `Publish version ${(course.latest?.version ?? 0) + 1}`}
           </Button>
         </div>
-        {running && (
-          <p className="flex w-full items-center gap-2 text-sm text-muted-foreground">
-            <DotLoader /> {running}. The list fills in as each lesson is done.
-          </p>
-        )}
+        {run && <RunProgress run={run} />}
+        {!run && lastRun && <RunSummary result={lastRun} onClose={() => setLastRun(null)} />}
       </div>
 
       <div className="grid gap-5 md:h-[calc(100dvh-19.5rem)] md:min-h-[560px] md:grid-cols-[320px_minmax(0,1fr)]">

@@ -10,6 +10,7 @@ import { pendingTutorRequests, tutorRequestedSkills } from "@/lib/practice/tutor
 import { askHint, MAX_HINTS } from "@/lib/practice/hints";
 import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
+import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // The learner's side of practice (/practice/<course>, docs/practice.md "A session"). Learners only ever get a task's
 // question side: never its key, tests or solutions.
@@ -202,8 +203,8 @@ export type PracticeMapData = Extract<Awaited<ReturnType<typeof getPracticeMap>>
 export async function runPracticeDiagnosis(courseSlug: string, diagnosisId: string): Promise<Result<{ opened: number }>> {
   const who = await learnerFor(courseSlug);
   if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
-  // Amplify ends a request at about 30 s: the model gets until 25 s, the rest is for saving.
-  const result = await runDiagnosis(who.userId, who.course.id, diagnosisId, Date.now() + 25_000);
+  // Amplify stops a request at 28 s (lib/request-budget.ts): the model works within the budget, the rest is for saving.
+  const result = await runDiagnosis(who.userId, who.course.id, diagnosisId, Date.now() + REQUEST_BUDGET_MS);
   return result.ok ? { success: true, opened: result.opened } : { success: false, error: result.error };
 }
 
@@ -214,7 +215,7 @@ export async function runPracticeDiagnosis(courseSlug: string, diagnosisId: stri
 export async function preparePracticeDiscovery(courseSlug: string, sessionId: string): Promise<Result<{ items: PracticeTaskView[]; more: boolean }>> {
   const who = await learnerFor(courseSlug);
   if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
-  const prepared = await prepareDiscovery(who.userId, who.course.id, sessionId, Date.now() + 27_000);
+  const prepared = await prepareDiscovery(who.userId, who.course.id, sessionId, Date.now() + REQUEST_BUDGET_MS);
   if (!prepared) return { success: false, error: "That practice session isn't yours." };
   if (!prepared.added.length) return { success: true, items: [], more: prepared.more };
   const loaded = await loadLearner(who.userId, who.course.id);

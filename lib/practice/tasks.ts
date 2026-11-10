@@ -229,10 +229,16 @@ export const normaliseAnswer = (text: string) =>
 
 type Proof = { ok: true; proof: CandidateProof; note: string } | { ok: false; reason: string };
 
-/** Code tasks: the starter or buggy code fails the tests, the solution passes, wrong code fails. */
-async function proveByRunning(task: TaskContent): Promise<Proof> {
+/**
+ * Code tasks: the starter or buggy code fails the tests, the solution passes, wrong code fails. The runs end by
+ * `deadline`: a grader that answers later would get the whole request killed (lib/request-budget.ts).
+ */
+async function proveByRunning(task: TaskContent, deadline: number): Promise<Proof> {
+  const left = deadline - Date.now();
+  if (left < 1_500) return { ok: false, reason: "no time left to run it on the grader (the writing took too long); try again" };
+  const signal = AbortSignal.timeout(left);
   if (task.form === "predict") {
-    const run = await gradeCode({ code: task.code! });
+    const run = await gradeCode({ code: task.code! }, { signal });
     if (run.status === "unavailable") return { ok: false, reason: `grader unavailable: ${run.message}` };
     if (run.status !== "passed") return { ok: false, reason: `the snippet didn't run cleanly (${run.status}${run.error ? `: ${run.error.message.split("\n").at(-1)}` : ""})` };
     if (!sameOutput(run.stdout, task.expectedOutput!)) return { ok: false, reason: `the snippet prints ${JSON.stringify(run.stdout.slice(0, 200))}, not the key ${JSON.stringify(task.expectedOutput!.slice(0, 200))}` };
@@ -240,7 +246,7 @@ async function proveByRunning(task: TaskContent): Promise<Proof> {
     return { ok: true, proof: { kind: "executable", at: Date.now(), referencePassed: true, wrongSolutionsFailed: 1, runner: "academia-grader" }, note: `printed the key in ${run.wallMs} ms` };
   }
   const wrongs = task.form === "code" ? [task.code!, task.wrongSolution!] : [task.code!];
-  const [reference, ...others] = await Promise.all([task.solution!, ...wrongs].map((code) => gradeCode({ code, tests: task.tests! })));
+  const [reference, ...others] = await Promise.all([task.solution!, ...wrongs].map((code) => gradeCode({ code, tests: task.tests! }, { signal })));
   if (reference.status === "unavailable") return { ok: false, reason: `grader unavailable: ${reference.message}` };
   if (reference.status !== "passed") {
     const failed = reference.tests.filter((test) => !test.passed).map((test) => `${test.name}: ${test.message}`)[0] ?? reference.error?.message.split("\n").at(-1) ?? reference.status;
@@ -382,7 +388,7 @@ async function proveAndStore(input: {
     ? { ok: false, reason: shape }
     : form === "choice" || form === "fill"
       ? await proveByModel(task, input.model, input.userId, input.deadline)
-      : await proveByRunning(task);
+      : await proveByRunning(task, input.deadline);
 
   const taskId = randomUUID();
   const contentHash = createHash("sha256").update(JSON.stringify([form, task.promptEn, task.code ?? "", task.optionsEn ?? []])).digest("hex");

@@ -9,6 +9,7 @@ import { gradeCode } from "@/lib/practice/grader";
 import type { TaskContent } from "@/lib/practice/tasks";
 import { DETECTOR_SOURCE } from "@/lib/compass/detector-source";
 import { conceptOfError, recordSignal } from "@/lib/compass/signals";
+import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // The practice scratchbook (docs/practice.md, "Scratchbook"): Python a learner writes beside any task, to calculate,
 // try a line or prove an idea, run on the grader's sandbox (the same Python as code tasks), and an AI that explains
@@ -190,7 +191,7 @@ export async function askScratch(input: z.input<typeof AskSchema>): Promise<Resu
     feature: "ask",
     userId: user.id,
     models: SCRATCH_CHAIN,
-    deadline: Date.now() + 25_000,
+    deadline: Date.now() + REQUEST_BUDGET_MS,
     contents: [{ role: "user", parts: [{ text: message }] }],
     config: { systemInstruction: SYSTEM(language), temperature: 0.3, maxOutputTokens: 1200 },
   });

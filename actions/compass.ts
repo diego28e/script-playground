@@ -10,6 +10,7 @@ import { COURSE_INVENTORY, syncConcepts } from "@/lib/compass/concepts";
 import { CardSchema, checkDraft, draftCard, fromColumns, proveCard, toColumns, type CardDraft, type CardProof } from "@/lib/compass/cards";
 import { docCandidates, docLink, type DocLink } from "@/lib/compass/docs";
 import { demandByConcept, missingSearches } from "@/lib/compass/signals";
+import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // Admin → Python (docs/compass.md, "Cards"): the concepts in the course's order of use, and each one's card: drafted by
 // a model or by hand, proven on the grader, reviewed and published. A card is versioned: editing a proven or published
@@ -108,8 +109,8 @@ export async function draftCompassCard(key: string, options: { model?: string; i
     const card = await prisma.compassCard.findFirst({ where: { id: options.fromCardId, conceptId: concept.id } });
     if (card) previous = fromColumns(card);
   }
-  // An Amplify request stops at about 30 s.
-  const result = await draftCard({ concept, allConcepts: all, model: options.model, instruction: options.instruction?.slice(0, 4000), previous, userId: session.user.id, deadline: Date.now() + 26_000 });
+  // Amplify stops a request at 28 s (lib/request-budget.ts).
+  const result = await draftCard({ concept, allConcepts: all, model: options.model, instruction: options.instruction?.slice(0, 4000), previous, userId: session.user.id, deadline: Date.now() + REQUEST_BUDGET_MS });
   if (!result.ok) return { success: false, error: result.error };
   const card = await prisma.compassCard.create({
     data: { conceptId: concept.id, version: (concept.cards[0]?.version ?? 0) + 1, status: "DRAFT", author: result.model, ...(toColumns(result.card) as Omit<Prisma.CompassCardCreateInput, "concept" | "version" | "author">) },

@@ -18,11 +18,13 @@ export type GradeResult = {
 export type GradeOutcome = GradeResult | { status: "unavailable"; message: string };
 
 /** Runs `code`, then the test functions in `tests` (named test_*, using plain assert), in a fresh sandbox. */
-export async function gradeCode(input: { code: string; tests?: string; timeoutMs?: number }): Promise<GradeOutcome> {
+export async function gradeCode(input: { code: string; tests?: string; timeoutMs?: number }, options: { signal?: AbortSignal } = {}): Promise<GradeOutcome> {
   const url = process.env.GRADER_URL?.replace(/\/+$/, "");
   const secret = process.env.GRADER_SECRET;
   if (!url || !secret) return { status: "unavailable", message: "GRADER_URL and GRADER_SECRET are not set." };
   const body = JSON.stringify(input);
+  // `options.signal` ends the wait early, when the request that asked has a deadline (lib/request-budget.ts).
+  const signal = options.signal ? AbortSignal.any([AbortSignal.timeout(45_000), options.signal]) : AbortSignal.timeout(45_000);
   const time = String(Date.now());
   const signature = createHmac("sha256", secret).update(`${time}.`).update(body).digest("hex");
   try {
@@ -30,8 +32,8 @@ export async function gradeCode(input: { code: string; tests?: string; timeoutMs
       method: "POST",
       headers: { "Content-Type": "application/json", "x-grader-time": time, "x-grader-signature": signature },
       body,
-      // The grader's own limit is 30 s a run, plus its queue.
-      signal: AbortSignal.timeout(45_000),
+      // The grader's own limit is 30 s a run, plus its queue; a caller's deadline can end it sooner.
+      signal,
     });
     const data = (await response.json().catch(() => null)) as (GradeResult & { message?: string }) | null;
     if (!response.ok || !data || !("status" in data)) return { status: "unavailable", message: data?.message ?? `The grader answered ${response.status}.` };
