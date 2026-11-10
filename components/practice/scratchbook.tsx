@@ -6,6 +6,8 @@ import { Editor, type OnMount } from "@monaco-editor/react";
 import { Eraser, Lightbulb, Loader2, Play, Send, Sparkles, SquareTerminal, X } from "lucide-react";
 import { toast } from "sonner";
 import { askScratch, runScratch, type ScratchRun } from "@/actions/practice-scratch";
+import { getPublishedConcepts } from "@/actions/compass-guide";
+import { EVERYWHERE } from "@/lib/compass/everywhere";
 import { Tip } from "@/components/ui/tip";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { defineAcademiaTheme } from "@/lib/monaco-theme";
@@ -105,6 +107,47 @@ function describe(run: ScratchRun | null): string {
   return [run.stdout, run.value !== null ? `=> ${run.value}` : "", run.error ? `${run.error.type}: ${run.error.message}${run.error.line ? ` (line ${run.error.line})` : ""}` : ""].filter(Boolean).join("\n");
 }
 
+/**
+ * Under a run, the Python Compass cards for the constructs in the code (docs/compass.md, "Code lens"), in the order they
+ * appear; after an error, the card for the construct on the failing line first. Only constructs with a published card.
+ */
+function CodeConcepts({ run, cards, language }: { run: ScratchRun; cards: Record<string, { es: string; en: string }>; language: "es" | "en" }) {
+  const found = Object.entries(run.concepts ?? {})
+    .filter(([key]) => cards[key])
+    .sort((a, b) => Math.min(...a[1]) - Math.min(...b[1]));
+  if (!found.length) return null;
+  const errorLine = run.error?.line ?? null;
+  // The most specific construct on the failing line: not one of those on nearly every line.
+  const onErrorLine = errorLine ? found.find(([key, lines]) => lines.includes(errorLine) && !EVERYWHERE.has(key))?.[0] : undefined;
+  const chip = (key: string, emphasis = false) => (
+    <a
+      key={key}
+      href={`/python/${encodeURIComponent(key)}`}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 font-sans text-[11px] transition-colors",
+        emphasis ? "bg-red-500/15 text-red-200 hover:bg-red-500/25" : "bg-white/[0.06] text-code-foreground/75 hover:bg-white/[0.12] hover:text-code-foreground",
+      )}
+    >
+      {cards[key][language]}
+    </a>
+  );
+  return (
+    <div className="space-y-1 pt-1">
+      {onErrorLine && (
+        <p className="flex flex-wrap items-center gap-1.5 font-sans text-[11px] text-code-foreground/50">
+          {language === "es" ? "Sobre este error:" : "About this error:"} {chip(onErrorLine, true)}
+        </p>
+      )}
+      <p className="flex flex-wrap items-center gap-1.5 font-sans text-[11px] text-code-foreground/50">
+        {language === "es" ? "En tu código:" : "In your code:"}
+        {found.slice(0, 8).map(([key]) => chip(key))}
+      </p>
+    </div>
+  );
+}
+
 export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: string; taskId: string | null; language: "es" | "en" }) {
   const t = COPY[language];
   const [open, setOpen] = useState(false);
@@ -120,6 +163,14 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const decorations = useRef<string[]>([]);
   const runRef = useRef<() => void>(() => undefined);
+  // The Python Compass's published cards, by concept: a run links the constructs in the code to them.
+  const [cards, setCards] = useState<Record<string, { es: string; en: string }>>({});
+  useEffect(() => {
+    if (!open || Object.keys(cards).length) return;
+    void getPublishedConcepts()
+      .then(setCards)
+      .catch(() => undefined);
+  }, [open, cards]);
 
   // What this browser kept: open or not, the width, and this course's code. Read after mount (the server has none).
   useEffect(() => {
@@ -356,6 +407,7 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
                         </p>
                       )}
                       {!entry.run.stdout && entry.run.value === null && !entry.run.error && <p className="text-code-foreground/40">{t.noOutput}</p>}
+                      <CodeConcepts run={entry.run} cards={cards} language={language} />
                     </div>
                   ))}
                 {entry.kind === "question" && (

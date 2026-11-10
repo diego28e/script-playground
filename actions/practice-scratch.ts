@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { TUTOR_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
 import { gradeCode } from "@/lib/practice/grader";
 import type { TaskContent } from "@/lib/practice/tasks";
+import { DETECTOR_SOURCE } from "@/lib/compass/detector-source";
+import { conceptOfError, recordSignal } from "@/lib/compass/signals";
 
 // The practice scratchbook (docs/practice.md, "Scratchbook"): Python a learner writes beside any task, to calculate,
 // try a line or prove an idea, run on the grader's sandbox (the same Python as code tasks), and an AI that explains
@@ -42,14 +44,18 @@ function overLimit(userId: string): boolean {
 // printed: U+241E (the last expression's value, like a Python prompt shows it) and U+241F (an error, as JSON).
 const VALUE = "␞";
 const ERROR = "␟";
+// U+241D: the Python constructs in the code, by line (lib/compass/detector.py, run with it: docs/compass.md).
+const CONCEPTS = "␝";
 
 /**
  * The learner's code inside a small runner: it runs like a script, then shows the value of a last line that is an
  * expression (so `6000 // 400` answers 15, as in a Python prompt), and reports an error with the line it happened on
- * in the learner's own numbering.
+ * in the learner's own numbering. The Python Compass's detector runs with it, so the run also says which constructs the
+ * code uses and where (the console links them to their cards; an error is put down to the construct on its line).
  */
 function wrap(code: string): string {
-  return `import ast as __ast, json as __json, traceback as __tb
+  return `${DETECTOR_SOURCE}
+import ast as __ast, json as __json, traceback as __tb
 __source = ${JSON.stringify(code)}
 try:
     __tree = __ast.parse(__source, "<scratch>")
@@ -66,6 +72,10 @@ except BaseException as __error:
     __frames = [frame for frame in __tb.extract_tb(__error.__traceback__) if frame.filename == "<scratch>"]
     __line = __frames[-1].lineno if __frames else getattr(__error, "lineno", None)
     print(${JSON.stringify(ERROR)} + __json.dumps({"type": type(__error).__name__, "message": str(__error), "line": __line}))
+try:
+    print(${JSON.stringify(CONCEPTS)} + __json.dumps(detect(__source)))
+except BaseException:
+    pass
 `;
 }
 
@@ -76,10 +86,15 @@ export type ScratchRun = {
   value: string | null;
   error: { type: string; message: string; line: number | null } | null;
   ms: number;
+  /** The Python constructs the code uses, by the detector's key, with their lines. */
+  concepts: Record<string, number[]>;
 };
 
-/** Runs the learner's scratch code in the grader's sandbox (10 s at most). */
-export async function runScratch(code: string): Promise<Result<{ run: ScratchRun }>> {
+/**
+ * Runs the learner's scratch code in the grader's sandbox (10 s at most). `surface` says where it was run from, for the
+ * Compass's signals: the scratchbook, or a card's example in the Python guide.
+ */
+export async function runScratch(code: string, surface: "scratchbook" | "guide" = "scratchbook"): Promise<Result<{ run: ScratchRun }>> {
   const user = await signedIn();
   if (!user) return { success: false, error: "Sign in to run code." };
   if (!code.trim()) return { success: false, error: "Write some Python first." };
@@ -90,14 +105,21 @@ export async function runScratch(code: string): Promise<Result<{ run: ScratchRun
   const outcome = await gradeCode({ code: wrap(code), timeoutMs: RUN_TIMEOUT_MS });
   const ms = Date.now() - started;
   if (outcome.status === "unavailable") return { success: false, error: "The Python sandbox can't be reached right now. Try again in a moment." };
-  if (outcome.status === "timeout") return { success: true, run: { stdout: outcome.stdout ?? "", value: null, error: { type: "Timeout", message: `It ran longer than ${RUN_TIMEOUT_MS / 1000} seconds (an endless loop?).`, line: null }, ms } };
-  if (outcome.status === "oom") return { success: true, run: { stdout: outcome.stdout ?? "", value: null, error: { type: "MemoryError", message: "It used more memory than the sandbox allows.", line: null }, ms } };
+  if (outcome.status === "timeout") return { success: true, run: { stdout: outcome.stdout ?? "", value: null, error: { type: "Timeout", message: `It ran longer than ${RUN_TIMEOUT_MS / 1000} seconds (an endless loop?).`, line: null }, ms, concepts: {} } };
+  if (outcome.status === "oom") return { success: true, run: { stdout: outcome.stdout ?? "", value: null, error: { type: "MemoryError", message: "It used more memory than the sandbox allows.", line: null }, ms, concepts: {} } };
 
   const lines: string[] = [];
   let value: string | null = null;
   let error: ScratchRun["error"] = outcome.error ? { type: outcome.error.type, message: outcome.error.message, line: null } : null;
+  let concepts: Record<string, number[]> = {};
   for (const line of (outcome.stdout ?? "").split("\n")) {
-    if (line.startsWith(VALUE)) value = line.slice(VALUE.length);
+    if (line.startsWith(CONCEPTS)) {
+      try {
+        concepts = JSON.parse(line.slice(CONCEPTS.length));
+      } catch {
+        concepts = {};
+      }
+    } else if (line.startsWith(VALUE)) value = line.slice(VALUE.length);
     else if (line.startsWith(ERROR)) {
       try {
         error = JSON.parse(line.slice(ERROR.length));
@@ -106,7 +128,9 @@ export async function runScratch(code: string): Promise<Result<{ run: ScratchRun
       }
     } else lines.push(line);
   }
-  return { success: true, run: { stdout: lines.join("\n").replace(/\n+$/, ""), value, error, ms } };
+  // Learners' struggles, for the Compass (docs/compass.md, "Ranking"): the error, and the construct it's most likely about.
+  if (error) void recordSignal({ kind: "RUN_ERROR", userId: user.id, text: error.type, conceptKey: await conceptOfError(concepts, error.line), surface: surface === "guide" ? "guide" : "scratchbook" });
+  return { success: true, run: { stdout: lines.join("\n").replace(/\n+$/, ""), value, error, ms, concepts } };
 }
 
 const AskSchema = z.object({

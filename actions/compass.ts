@@ -9,6 +9,7 @@ import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
 import { COURSE_INVENTORY, syncConcepts } from "@/lib/compass/concepts";
 import { CardSchema, checkDraft, draftCard, fromColumns, proveCard, toColumns, type CardDraft, type CardProof } from "@/lib/compass/cards";
 import { docCandidates, docLink, type DocLink } from "@/lib/compass/docs";
+import { demandByConcept, missingSearches } from "@/lib/compass/signals";
 
 // Admin → Python (docs/compass.md, "Cards"): the concepts in the course's order of use, and each one's card: drafted by
 // a model or by hand, proven on the grader, reviewed and published. A card is versioned: editing a proven or published
@@ -41,12 +42,16 @@ export async function listCompassConcepts() {
       cards: { orderBy: { version: "desc" }, select: { version: true, status: true } },
     },
   });
+  // What learners need (docs/compass.md, "Ranking"): their signals over the last 90 days.
+  const [demand, missing] = await Promise.all([demandByConcept(90), missingSearches(90)]);
   return {
+    missing,
     commit: COURSE_INVENTORY.commit,
     lessons: COURSE_INVENTORY.taughtNotebooks,
     models: AUTHORING_CHAIN.filter((entry) => entry.provider === "anthropic" || entry.provider === "deepseek").map(({ model, label }) => ({ id: model, label })),
     concepts: concepts.map(({ cards, ...concept }) => ({
       ...concept,
+      need: demand.get(concept.key) ?? { views: 0, searches: 0, errors: 0, score: 0 },
       latest: cards[0] ?? null,
       published: cards.find((card) => card.status === "PUBLISHED")?.version ?? null,
     })),

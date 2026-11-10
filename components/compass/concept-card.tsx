@@ -24,7 +24,10 @@ export function ConceptCard({
   language,
   related,
   usage,
+  renderExample,
 }: {
+  /** Draws an example another way (the guide's pages make it runnable); the static code and output otherwise. */
+  renderExample?: (example: CardDraft["examples"][number], index: number) => React.ReactNode;
   card: CardDraft;
   /** The docs links by key (the card stores keys; the page resolves them). */
   links: Record<string, DocLink>;
@@ -61,13 +64,17 @@ export function ConceptCard({
           <h3 className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{t.examples}</h3>
           {card.examples.map((example, index) => (
             <figure key={index} className="space-y-1.5">
-              <div className="overflow-hidden rounded-xl ring-1 ring-code-border">
-                <Code code={example.code} className="rounded-none" />
-                <div className="border-t border-code-border bg-code-panel px-3.5 py-2.5 font-mono text-[13px] text-code-foreground">
-                  <span className="mr-2 text-[10px] uppercase tracking-[0.14em] text-code-muted">{t.prints}</span>
-                  <span className="whitespace-pre-wrap text-signal">{example.output || "(nothing)"}</span>
+              {renderExample ? (
+                renderExample(example, index)
+              ) : (
+                <div className="overflow-hidden rounded-xl ring-1 ring-code-border">
+                  <Code code={example.code} className="rounded-none" />
+                  <div className="border-t border-code-border bg-code-panel px-3.5 py-2.5 font-mono text-[13px] text-code-foreground">
+                    <span className="mr-2 text-[10px] uppercase tracking-[0.14em] text-code-muted">{t.prints}</span>
+                    <span className="whitespace-pre-wrap text-signal">{example.output || "(nothing)"}</span>
+                  </div>
                 </div>
-              </div>
+              )}
               {(es ? example.noteEs : example.noteEn) && <figcaption className="text-sm text-muted-foreground">{es ? example.noteEs : example.noteEn}</figcaption>}
             </figure>
           ))}

@@ -90,11 +90,37 @@ mistake raised a SyntaxError that 3.12 accepts, and another that raised a ValueE
 one-line rewrite fixed it, and it was published. The next five (print, strings, assignment, indexing, keyword
 arguments) were proven on the first try, 4 of 4 each.
 
+## The guide and the signals (built 2026-11-10)
+
+**The guide** (`/python`, "Python" in the site's menu, open to everyone; `lib/compass/guide.ts`,
+`components/compass/`): only published cards. The home is search first (a learner comes with a question), then every
+card in the order the course uses them. The search runs in the browser over the published cards (names, titles,
+summaries, explanations, in both languages, accents ignored), so it answers as you type. A card's page
+(`/python/<key>`) shows it in the learner's language with its examples **runnable**: the code is editable, **Run** (or
+Ctrl + Enter) runs it in the scratchbook's sandbox and shows what it printed, the last line's value or the error and its
+line; "Back to the example" restores it. Running needs an account; reading doesn't. Related concepts with cards are links.
+
+**The scratchbook's code lens** (`actions/practice-scratch.ts`): the detector runs with every scratchbook run, in the
+same grader request (`lib/compass/detector-source.ts`, generated from `detector.py` by
+`scripts/compass-detector-source.ts`: regenerate it after changing the detector). Under each run, **In your code** links
+the constructs it uses to their published cards, and after an error **About this error** links the construct on the
+failing line (the most specific one: not one of those on nearly every line, `lib/compass/everywhere.ts`).
+
+**Signals** (`lib/compass/signals.ts`, `CompassSignal`), recorded quietly, never in the learner's way:
+- `SEARCH`: a search the learner settled on (a pause of 1.5 s, or Enter), with its top result; `empty` when nothing
+  matched.
+- `CARD_VIEW`: a card opened.
+- `RUN_ERROR`: code that raised in the scratchbook or in a card's example, with the error type and the concept on the
+  failing line.
+
+**Back to the admin**: Admin → Python shows each concept's errors, searches and views over the last 90 days, sorts by
+**Most needed by learners** (errors weigh 3, searches 2, views 1), and lists **what learners looked for and found no
+card**, the cards to write or publish next.
+
 ## Next
 
-1. **Publish the first 20 to 30 cards**, the most used first (review each in the learner's view).
-2. **Signals** from the scratchbook (run errors, with the construct on the failing line: the scratchbook already runs
-   on the grader, so the detector can run with it), practice code tasks and search.
-3. **Learner surfaces**: search, the card page, and "Try it" opening the example in the scratchbook.
-4. Then the code lens (explain this line, the error explainer), "Python you'll meet in this lesson", and the practice
-   track.
+1. **Publish the first 20 to 30 cards**, the most used first, then follow "Most needed".
+2. **More signals**: practice code tasks' errors (`PRACTICE_MISS`) and the tutor's questions about Python.
+3. **The code lens elsewhere**: explain this line on lesson code, and "Python you'll meet in this lesson" (the
+   inventory knows each notebook's concepts).
+4. **The practice track**: cards as practice skills, and the missing-prerequisite diagnosis proposing them.

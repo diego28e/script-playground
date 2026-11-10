@@ -50,6 +50,14 @@ export function Navbar() {
                         >
                             {t.courses}
                         </Link>
+                        {/* The Python guide (docs/compass.md) is open to everyone; running its examples needs an account. */}
+                        <Link
+                            href="/python"
+                            aria-current={pathname.startsWith("/python") ? "page" : undefined}
+                            className={cn(NAV_LINK, pathname.startsWith("/python") && "text-foreground")}
+                        >
+                            Python
+                        </Link>
                         {signedIn && (
                             <>
                                 <Link

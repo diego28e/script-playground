@@ -50,6 +50,8 @@ export function CompassConceptList({ data }: { data: CompassList }) {
   const [status, setStatus] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [batch, setBatch] = useState<{ done: number; total: number; current: string } | null>(null);
+  // The course's order, or what learners need most (their signals over 90 days: errors, searches, views).
+  const [sort, setSort] = useState<"course" | "need">("course");
 
   const groups = [...new Set(data.concepts.map((concept) => concept.group))].sort();
   const needle = query.trim().toLowerCase();
@@ -59,6 +61,7 @@ export function CompassConceptList({ data }: { data: CompassList }) {
     if (status === "live" ? !concept.published : status && state !== status) return false;
     return !needle || `${concept.key} ${concept.labelEn} ${concept.labelEs}`.toLowerCase().includes(needle);
   });
+  if (sort === "need") shown.sort((a, b) => b.need.score - a.need.score || (a.usageRank ?? 1e6) - (b.usageRank ?? 1e6));
   const counts = {
     published: data.concepts.filter((concept) => concept.published).length,
     used: data.concepts.filter((concept) => concept.usageRank !== null).length,
@@ -120,6 +123,10 @@ export function CompassConceptList({ data }: { data: CompassList }) {
           <option value="PROVEN">Proven, to review</option>
           <option value="live">Published</option>
         </select>
+        <select aria-label="Order" className={SELECT} value={sort} onChange={(event) => setSort(event.target.value as "course" | "need")}>
+          <option value="course">Course order</option>
+          <option value="need">Most needed by learners</option>
+        </select>
         <Button variant="outline" size="sm" onClick={() => void draftNext(5)} disabled={batch !== null}>
           <Sparkles className="mr-1.5 size-4" aria-hidden="true" /> Draft the next 5
         </Button>
@@ -136,6 +143,22 @@ export function CompassConceptList({ data }: { data: CompassList }) {
           subtitle="Each draft takes 10 to 20 seconds; keep this page open."
           steps={[{ label: "Drafts", state: "active", percent: (batch.done / batch.total) * 100, detail: `${batch.done} of ${batch.total}` }]}
         />
+      )}
+
+      {data.missing.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <p className="text-sm font-medium">Learners looked for these and found no card</p>
+          <p className="mb-2 text-xs text-muted-foreground">Searches in the Python guide over the last 90 days: the cards to write or publish next.</p>
+          <ul className="flex flex-wrap gap-1.5">
+            {data.missing.map((entry) => (
+              <li key={entry.text}>
+                <button type="button" onClick={() => setQuery(entry.text)} className="rounded-full bg-background px-2.5 py-1 text-xs ring-1 ring-border transition-colors hover:ring-foreground/40">
+                  {entry.text} <span className="font-mono text-muted-foreground">×{entry.count}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <p className="text-sm text-muted-foreground">
@@ -159,6 +182,14 @@ export function CompassConceptList({ data }: { data: CompassList }) {
                 <span className="hidden text-xs text-muted-foreground md:block">{concept.group}</span>
                 <span className="hidden text-xs tabular-nums text-muted-foreground md:block">
                   {concept.lessonCount ? `${concept.lessonCount} lessons · from ${concept.firstLesson}` : "Not in the course yet"}
+                  {concept.need.score > 0 && (
+                    <span className="mt-0.5 block text-amber-700 dark:text-amber-300">
+                      {[[concept.need.errors, "error"], [concept.need.searches, "search"], [concept.need.views, "view"]]
+                        .filter(([count]) => count)
+                        .map(([count, word]) => `${count} ${word}${count === 1 ? "" : word === "search" ? "es" : "s"}`)
+                        .join(" · ")}
+                    </span>
+                  )}
                 </span>
                 <CardStatus concept={concept} />
               </Link>
