@@ -81,7 +81,9 @@ English, `components/compass/concept-card.tsx`, the component the guide's pages 
 - **Prove** (`proveCard`): every example and mistake runs on the grader; an example must print exactly its output
   without an error, a mistake must raise its exception or print exactly its output. All pass: **PROVEN**. When an
   output differs, **Use the real outputs** takes what the code really printed (the code is the truth) and proves again;
-  a wrong exception is the admin's (or a rewrite's) to fix.
+  a wrong exception is the admin's (or a rewrite's) to fix. The code runs as `__main__`, as it does when a learner
+  presses Run or runs it in Jupyter (the grader on its own names it `solution`, so a class would print as
+  `<class 'solution.Price'>`).
 - **Publish**: only a proven version; the version published before is retired. Editing a proven or published version
   saves a new draft version; the published one stays live until the new one is published.
 

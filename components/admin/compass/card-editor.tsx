@@ -236,6 +236,9 @@ function VersionEditor({
     const result = await adoptRealOutputs(card.id).catch(() => null);
     setBusy(null);
     if (!result?.success) return toast.error(result?.error ?? "The outputs couldn't be replaced.");
+    // Take the card as it's now stored: keeping the old copy would show the replaced outputs as unsaved changes, and
+    // saving it would put them back.
+    setDraft(result.draft);
     toast[result.proof.ok ? "success" : "error"](result.proof.ok ? "Outputs replaced and proven." : "Outputs replaced; something still doesn't behave as the card says.");
     router.refresh();
   };

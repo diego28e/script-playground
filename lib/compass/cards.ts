@@ -219,12 +219,21 @@ function describe(outcome: GradeOutcome): { stdout: string; error: string | null
   return { stdout: outcome.stdout, error: outcome.error ? `${outcome.error.type}: ${outcome.error.message}` : null };
 }
 
+// The grader runs code as a module named "solution" (infra/lab/grader/harness.py), so a class defined in it prints as
+// <class 'solution.Price'>. A learner running the example (the scratchbook's sandbox) or the same code in Jupyter runs
+// it as __main__ and sees <class '__main__.Price'>: the proof runs it the learner's way. An error raised inside still
+// reaches the grader with its own type.
+function asMain(code: string): string {
+  return `exec(compile(${JSON.stringify(code)}, "<card>", "exec"), {"__name__": "__main__"})\n`;
+}
+
 /**
- * Runs every example and mistake on the grader: an example must print exactly its output, without an error; a mistake
- * must raise the exception it names, or print exactly its output.
+ * Runs every example and mistake on the grader, as the learner would: an example must print exactly its output,
+ * without an error; a mistake must raise the exception it names, or print exactly its output.
  */
 export async function proveCard(card: CardDraft): Promise<CardProof> {
-  const runs = await Promise.all([...card.examples.map((example) => gradeCode({ code: example.code, timeoutMs: 10_000 })), ...card.mistakes.map((mistake) => gradeCode({ code: mistake.code, timeoutMs: 10_000 }))]);
+  const run = (code: string) => gradeCode({ code: asMain(code), timeoutMs: 10_000 });
+  const runs = await Promise.all([...card.examples.map((example) => run(example.code)), ...card.mistakes.map((mistake) => run(mistake.code))]);
   const unavailable = runs.find((run) => run.status === "unavailable");
   if (unavailable && unavailable.status === "unavailable") return { ok: false, items: [], ranAt: new Date().toISOString(), unavailable: unavailable.message };
   const items: ProofItem[] = [];

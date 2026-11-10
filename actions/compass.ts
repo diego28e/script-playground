@@ -164,7 +164,7 @@ export async function proveCompassCard(cardId: string): Promise<Result<{ proof: 
  * then the version is proven again. Code that raised where it shouldn't, or didn't raise where it should, stays for
  * the admin to fix.
  */
-export async function adoptRealOutputs(cardId: string): Promise<Result<{ proof: CardProof }>> {
+export async function adoptRealOutputs(cardId: string): Promise<Result<{ proof: CardProof; draft: CardDraft }>> {
   if (!(await requireAdmin())) return denied;
   const card = await prisma.compassCard.findUnique({ where: { id: cardId } });
   if (!card || card.status !== "DRAFT") return { success: false, error: "Only a draft's outputs can be replaced." };
@@ -177,7 +177,9 @@ export async function adoptRealOutputs(cardId: string): Promise<Result<{ proof: 
     else if (!draft.mistakes[item.index].raises) draft.mistakes[item.index] = { ...draft.mistakes[item.index], output: item.actual.replace(/\n+$/, "") };
   }
   await prisma.compassCard.update({ where: { id: cardId }, data: toColumns(draft) as Prisma.CompassCardUpdateInput });
-  return proveCompassCard(cardId);
+  const proved = await proveCompassCard(cardId);
+  // The editor keeps its own copy of the card: it takes this one, or it would count the old outputs as unsaved changes.
+  return proved.success ? { ...proved, draft } : proved;
 }
 
 /** Publishes a proven version for learners; the version published before is retired. */
