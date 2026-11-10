@@ -1019,3 +1019,113 @@ model PracticeHint {
   @@unique([sessionId, taskId, number])
   @@map("practice_hint")
 }
+
+// Python Compass (docs/compass.md): a card for each Python concept learners meet in the course, grounded in the official
+// docs and proven on the grader, and the signals that show which cards learners need most. `language` is "python" for
+// now; the same tables hold other languages' concepts later.
+
+enum CompassCardStatus {
+  // Written (by a model or by hand), not proven yet.
+  DRAFT
+  // Its examples ran on the grader as the card says; waiting for the admin's review.
+  PROVEN
+  // Learners see it (one published version per concept).
+  PUBLISHED
+  // Replaced by a newer version, or taken down.
+  RETIRED
+}
+
+enum CompassSignalKind {
+  // A search: what was typed, and whether it found anything (a search that found nothing says what to write next).
+  SEARCH
+  CARD_VIEW
+  // "Explain this line" on a construct.
+  EXPLAIN_LINE
+  // A learner's code raised (scratchbook, code tasks): the error type, and the concept on the failing line.
+  RUN_ERROR
+  // A question to the guide's AI.
+  ASK
+  // A practice answer missed on a task that practises the concept.
+  PRACTICE_MISS
+}
+
+// One concept the detector knows (lib/compass/detector.py), with what the course asks of it.
+model CompassConcept {
+  id          String        @id @default(cuid())
+  language    String        @default("python")
+  // The detector's key, stable across versions: "f-string", "dict-get", "stdlib:json".
+  key         String
+  group       String
+  labelEs     String
+  labelEn     String
+  // From the course inventory (scripts/compass-inventory.py): the cards' starting order, how many lessons teach with
+  // it, and the lesson where it first appears.
+  usageRank   Int?
+  lessonCount Int           @default(0)
+  firstLesson String?
+  // From learners' signals, recomputed: how much learners need it. It re-ranks the cards over time.
+  demand      Float         @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  cards       CompassCard[]
+
+  @@unique([language, key])
+  @@index([language, usageRank])
+  @@map("compass_concept")
+}
+
+// A version of a concept's card. An edit makes a new version, proven again; publishing it retires the previous one.
+model CompassCard {
+  id            String            @id @default(cuid())
+  conceptId     String
+  version       Int
+  status        CompassCardStatus @default(DRAFT)
+  // The Python version its examples ran on and its links point to (the lab's).
+  pythonVersion String            @default("3.12")
+  // What the learner reads, in Spanish and English: title, one-line summary, the explanation (Markdown), when to reach
+  // for it, and the LangChain lessons where it shows up.
+  content       Json
+  // Runnable examples (the code and the output it must print) and common mistakes (code that must fail with the error
+  // the card names), all checked on the grader.
+  examples      Json
+  // Official docs links, each one in the docs index (lib/compass/python-docs-<version>.json): never an invented URL.
+  docs          Json
+  // Concept keys it builds on and leads to.
+  related       String[]
+  // The grader's results for its examples and mistakes, when proven.
+  proof         Json?
+  // Who wrote this version: a model id, or "admin".
+  author        String
+  reviewedById  String?
+  publishedAt   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  concept       CompassConcept    @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  @@unique([conceptId, version])
+  @@index([status])
+  @@map("compass_card")
+}
+
+// What learners do and where they struggle, collected from day one so the cards can be ranked by need, not guesses.
+// Counted, never shown by name.
+model CompassSignal {
+  id         String            @id @default(cuid())
+  kind       CompassSignalKind
+  // The learner, when signed in: to count distinct learners.
+  userId     String?
+  language   String            @default("python")
+  conceptKey String?
+  // What was searched or asked (trimmed), or the error type of a RUN_ERROR.
+  text       String?
+  // A search that found nothing.
+  empty      Boolean           @default(false)
+  // Where it happened: "scratchbook", "practice", "lesson", "guide".
+  surface    String?
+  courseId   String?
+  createdAt  DateTime          @default(now())
+
+  @@index([kind, createdAt])
+  @@index([conceptKey, kind])
+  @@map("compass_signal")
+}
