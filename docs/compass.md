@@ -55,11 +55,44 @@ python -I scripts/compass-docs-index.py --version 3.12
 npx tsx scripts/compass-sync.ts
 ```
 
+On a deployed platform, Admin → Python's **Inventory** button does what `compass-sync.ts` does, from the inventory
+bundled with that version.
+
+## Cards (built 2026-11-10)
+
+**Admin → Python** (`/admin/python`, `actions/compass.ts`, `components/admin/compass/`): every concept in the course's
+order of use, with its card's status (no card, draft, proven, published, and which version learners see); search and
+filters by group and status; **Draft the next 5** (the most used concepts without a card, drafted one after another,
+each one request) and **Inventory** (reload the concepts).
+
+**A concept's page** (`/admin/python/<key>`): the form on the left, the **learner's view** on the right (Spanish or
+English, `components/compass/concept-card.tsx`, the component the guide's pages will reuse), the versions above.
+
+- **Draft with AI** (`lib/compass/cards.ts`, `draftCard`): Sonnet by default (about 15 s; Opus is offered but slow).
+  The model gets the concept, how the course uses it (lessons, first lesson, a real line), the **docs candidates**
+  (`lib/compass/docs.ts`: the index entries most likely to explain it, the tutorial and glossary first, grammar
+  tokens, parser internals and release notes left out; packages get their official sites) and every concept's key. It
+  writes the card in the platform's voice (the video guide's: calm, precise, warm; no "simply" or "just"; Spanish with
+  technical terms in English), true on Python 3.12. A link or related concept it invents is dropped, and said so.
+- **Rewrite with AI**: the version shown, rewritten following one instruction ("mistake 2 really raises ValueError…").
+- **The card**: title, one-sentence summary, explanation (Markdown, 80 to 180 words), when to reach for it, 1 to 3
+  examples (code and exactly what it prints), 0 to 2 common mistakes (code that raises a named exception, or prints
+  something unintended, with why and how to write it), 1 to 4 docs links (index keys only), related concepts.
+- **Prove** (`proveCard`): every example and mistake runs on the grader; an example must print exactly its output
+  without an error, a mistake must raise its exception or print exactly its output. All pass: **PROVEN**. When an
+  output differs, **Use the real outputs** takes what the code really printed (the code is the truth) and proves again;
+  a wrong exception is the admin's (or a rewrite's) to fix.
+- **Publish**: only a proven version; the version published before is retired. Editing a proven or published version
+  saves a new draft version; the published one stays live until the new one is published.
+
+First run (local, 2026-11-10): the f-strings draft written before the prompt said "true on Python 3.12" claimed a
+mistake raised a SyntaxError that 3.12 accepts, and another that raised a ValueError: the proof caught both, a
+one-line rewrite fixed it, and it was published. The next five (print, strings, assignment, indexing, keyword
+arguments) were proven on the first try, 4 of 4 each.
+
 ## Next
 
-1. **Cards and their authoring** (Admin → Python): a model drafts a card from the pinned docs in the platform's voice,
-   choosing its links from the docs index; the grader proves its examples and mistakes; the admin reviews and
-   publishes. The 20 to 30 most-used concepts first.
+1. **Publish the first 20 to 30 cards**, the most used first (review each in the learner's view).
 2. **Signals** from the scratchbook (run errors, with the construct on the failing line: the scratchbook already runs
    on the grader, so the detector can run with it), practice code tasks and search.
 3. **Learner surfaces**: search, the card page, and "Try it" opening the example in the scratchbook.

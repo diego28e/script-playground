@@ -72,6 +72,17 @@ export function AdminNav() {
                             Practice
                         </Link>
                         <Link
+                            href="/admin/python"
+                            className={cn(
+                                "transition-colors hover:text-foreground/80",
+                                pathname?.startsWith("/admin/python")
+                                    ? "text-foreground"
+                                    : "text-foreground/60"
+                            )}
+                        >
+                            Python
+                        </Link>
+                        <Link
                             href="/admin/lab-access"
                             className={cn(
                                 "transition-colors hover:text-foreground/80",
