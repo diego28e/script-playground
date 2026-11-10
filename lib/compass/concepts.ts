@@ -48,14 +48,16 @@ export async function syncConcepts(): Promise<{ concepts: number; commit: string
       firstLesson: null,
     })),
   ];
-  await prisma.$transaction(
-    rows.map((row) =>
-      prisma.compassConcept.upsert({
-        where: { language_key: { language: "python", key: row.key } },
-        create: { language: "python", ...row },
-        update: row,
-      }),
-    ),
-  );
+  // Two statements, whatever the number of concepts: an upsert each, in one transaction, took over Prisma's 5 s
+  // transaction limit from Amplify to the database. Both are safe to run again, so no transaction is needed.
+  // New concepts first (the ones already there are skipped), then every concept's labels and course figures.
+  await prisma.compassConcept.createMany({ data: rows.map((row) => ({ language: "python", ...row })), skipDuplicates: true });
+  await prisma.$executeRaw`
+    UPDATE "compass_concept" AS c
+    SET "group" = r."group", "labelEn" = r."labelEn", "labelEs" = r."labelEs", "usageRank" = r."usageRank",
+        "lessonCount" = r."lessonCount", "firstLesson" = r."firstLesson", "updatedAt" = now()
+    FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+      AS r("key" text, "group" text, "labelEn" text, "labelEs" text, "usageRank" int, "lessonCount" int, "firstLesson" text)
+    WHERE c."language" = 'python' AND c."key" = r."key"`;
   return { concepts: rows.length, commit: COURSE_INVENTORY.commit };
 }

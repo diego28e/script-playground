@@ -78,6 +78,7 @@ export function CompassConceptList({ data }: { data: CompassList }) {
 
   // The most used concepts without a card, drafted one after another (each is one request).
   const draftNext = async (count: number) => {
+    if (!data.concepts.length) return toast.info("Load the concepts first with the Inventory button.");
     const next = data.concepts.filter((concept) => concept.usageRank !== null && !concept.latest).slice(0, count);
     if (!next.length) return toast.info("Every concept the course uses has a card.");
     let done = 0;
