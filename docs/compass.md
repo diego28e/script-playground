@@ -109,7 +109,8 @@ failing line (the most specific one: not one of those on nearly every line, `lib
 **Signals** (`lib/compass/signals.ts`, `CompassSignal`), recorded quietly, never in the learner's way:
 - `SEARCH`: a search the learner settled on (a pause of 1.5 s, or Enter), with its top result; `empty` when nothing
   matched.
-- `CARD_VIEW`: a card opened.
+- `CARD_VIEW`: a card opened, with where from: the guide, a lesson (`?from=lesson`) or the scratchbook
+  (`?from=scratchbook`).
 - `RUN_ERROR`: code that raised in the scratchbook or in a card's example, with the error type and the concept on the
   failing line.
 
@@ -117,10 +118,27 @@ failing line (the most specific one: not one of those on nearly every line, `lib
 **Most needed by learners** (errors weigh 3, searches 2, views 1), and lists **what learners looked for and found no
 card**, the cards to write or publish next.
 
+## Python in this lesson (built 2026-11-10)
+
+On the page of a lesson or project with a notebook, before the videos, **Python in this lesson** names the Python its notebook uses
+(`lib/compass/lesson.ts`, `components/compass/lesson-python.tsx`), read from the course inventory, so no notebook is
+parsed when the page loads:
+- **New here**: the constructs this notebook uses for the first time in the course (the inventory's `firstLesson`), the
+  most used across the course first. With a published card they're solid chips, to look up before starting.
+- **Also uses**: constructs met in earlier lessons that have a published card, the least used first (the ones a learner
+  is likeliest to have forgotten).
+
+Constructs on nearly every line (`lib/compass/everywhere.ts`) and solution notebooks are left out. A chip with a card
+opens it in a new tab with `?from=lesson`, so its view is counted as coming from the lesson; one without a card is
+named all the same, dashed, with "Its card is coming soon". A row folds behind "+N more" past 8 chips, only when that
+hides 3 or more. A lesson without a notebook, or with nothing to name, shows no section.
+
+The concept `dataclass` is now labelled "Dataclasses (@dataclass)": next to the module `dataclasses` the two read the
+same. In production, press **Inventory** in Admin → Python once after deploying, so the stored label follows.
+
 ## Next
 
 1. **Publish the first 20 to 30 cards**, the most used first, then follow "Most needed".
 2. **More signals**: practice code tasks' errors (`PRACTICE_MISS`) and the tutor's questions about Python.
-3. **The code lens elsewhere**: explain this line on lesson code, and "Python you'll meet in this lesson" (the
-   inventory knows each notebook's concepts).
+3. **The code lens elsewhere**: explain this line on lesson code.
 4. **The practice track**: cards as practice skills, and the missing-prerequisite diagnosis proposing them.

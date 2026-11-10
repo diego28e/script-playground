@@ -28,6 +28,7 @@ import { InlineCode } from "@/components/courses/inline-code";
 import { LabFrame } from "@/components/courses/lab-frame";
 import { LessonSidebar, MobileOutline } from "@/components/courses/lesson-outline";
 import type { OutlinePreference } from "@/lib/outline-preference";
+import { LessonPythonSection } from "@/components/compass/lesson-python";
 import { LessonVideos, type PlayableVideo } from "@/components/courses/lesson-videos";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
 import { cn } from "@/lib/utils";
@@ -394,6 +395,8 @@ export function LessonWorkspace({ data, signedIn, reading, videos, outline }: Pr
                         )}
                     </section>
                 )}
+
+                {data.python && <LessonPythonSection python={data.python} language={language} />}
 
                 {videos.length > 0 && (
                     <section className="border-t border-border py-8 first:border-t-0">

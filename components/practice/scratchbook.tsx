@@ -122,7 +122,7 @@ function CodeConcepts({ run, cards, language }: { run: ScratchRun; cards: Record
   const chip = (key: string, emphasis = false) => (
     <a
       key={key}
-      href={`/python/${encodeURIComponent(key)}`}
+      href={`/python/${encodeURIComponent(key)}?from=scratchbook`}
       target="_blank"
       rel="noreferrer"
       className={cn(

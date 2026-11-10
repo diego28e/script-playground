@@ -30,7 +30,7 @@ export function CompassCardPage({
 }) {
   const { language } = useLanguage();
   useEffect(() => {
-    void logCardView(conceptKey).catch(() => undefined);
+    void logCardView(conceptKey, new URLSearchParams(window.location.search).get("from")).catch(() => undefined);
   }, [conceptKey]);
 
   return (

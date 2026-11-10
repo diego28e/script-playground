@@ -7,6 +7,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { storedVideoTitle } from "@/lib/lesson-video";
+import { pythonInLesson } from "@/lib/compass/lesson";
 
 export type LessonStatus = "IN_PROGRESS" | "COMPLETED";
 
@@ -114,6 +115,8 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         progress,
         videoTitles,
         videoStates,
+        // The Python its notebook uses (docs/compass.md, "Python in this lesson").
+        python: await pythonInLesson(lesson.sourcePath).catch(() => null),
       },
     };
   } catch (error) {

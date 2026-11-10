@@ -24,8 +24,10 @@ export async function logGuideSearch(input: z.input<typeof SearchSchema>): Promi
 }
 
 /** A card a learner opened. */
-export async function logCardView(key: string, surface: "guide" | "scratchbook" = "guide"): Promise<void> {
+export async function logCardView(key: string, from: string | null = null): Promise<void> {
   if (!/^[a-z0-9:_.-]{1,80}$/i.test(key)) return;
+  // Where the learner came from: a lesson's "Python in this lesson", the scratchbook, or the guide itself.
+  const surface = from === "lesson" ? "lesson" : from === "scratchbook" ? "scratchbook" : "guide";
   await recordSignal({ kind: "CARD_VIEW", userId: await userId(), conceptKey: key, surface });
 }
 
