@@ -358,6 +358,29 @@ proven again and replaces the task, which is retired; answers already given keep
   the finder on that task. Learners never see either: the page passes the editor's models only to an admin. The
   session in progress keeps the task it had; the next sessions get the new version.
 
+## Scratchbook
+
+Built 2026-11-10. Python beside every task, so learners calculate, try a line or prove an idea in Python instead of a
+calculator or an IDE: the habit the course is about. Decided with the admin: it is open on **every** task, "what does it
+print?" ones included (honesty is the learner's; a tips icon says how to use it well), its AI is free and never answers
+the task, and the code runs on the grader.
+
+- **Where** (`components/practice/scratchbook.tsx`): a "Python" button floats at the bottom right of the practice page.
+  On a computer the scratchbook docks on the right (drag its edge to resize; 340 to 720 px) and the practice moves
+  left, so the task stays in view; on a phone it's a sheet over the lower part of the page. Whether it's open, its width
+  and each course's code are kept in the browser.
+- **Running** (`actions/practice-scratch.ts`, `runScratch`): the code runs on the grader's sandbox (the same Python and
+  packages as code tasks), 10 s at most, about 30 runs a minute per learner. A small runner around it shows the value
+  of a last line that is an expression, like a Python prompt (`6000 // 400` → `15`), and reports an error with the
+  line it happened on, which is highlighted in the editor. Ctrl/Cmd + Enter runs.
+- **The console:** each run shows what it printed, the value (`→ 15`) or the error, and its time; the AI's answers
+  join the same timeline.
+- **The AI** (`askScratch`): "Explain my code", "Why did it fail?" (after an error) or the learner's own question. It
+  sees their code, the last run's output and what they see of the task (prompt, options, a code task's starter: never
+  the key), and is told never to solve the task, give its answer or confirm a guess, pointing to the Hint button
+  instead. It doesn't count as a hint. Models: the Flash-Lite models first (about 2 s), then DeepSeek, then the bigger
+  free ones.
+
 ## Practice from the tutor
 
 Decided with the admin on 2026-11-07: practice the tutor asks for starts right away for that learner, with no approval;

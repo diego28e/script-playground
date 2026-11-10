@@ -424,3 +424,7 @@
 @media (prefers-reduced-motion: reduce) {
   .step-settle, .rise-in { animation: none; }
 }
+
+/* The scratchbook's error line (components/practice/scratchbook.tsx): the line a run failed on, in the editor. */
+.scratch-error-line { background: rgba(248, 113, 113, 0.14); }
+.scratch-error-glyph { background: #f87171; width: 3px !important; margin-left: 4px; border-radius: 2px; }

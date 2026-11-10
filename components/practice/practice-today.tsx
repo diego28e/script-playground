@@ -19,6 +19,7 @@ import {
 } from "@/actions/practice-learner";
 import { PRACTICE_ANSWERED } from "@/components/practice/practice-nav-link";
 import { PracticeTaskEditButton } from "@/components/admin/practice-task-edit-button";
+import { Scratchbook } from "@/components/practice/scratchbook";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tip";
@@ -312,126 +313,131 @@ export function PracticeToday({
   const streak = today ? today.streak.days + (finished && items.length > 0 && !today.extra && !today.streak.doneToday ? 1 : 0) : 0;
 
   return (
-    <div className="container mx-auto max-w-3xl px-4 py-10 md:py-14">
-      <Link href={`/courses/${courseSlug}`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" aria-hidden="true" /> {t.back}
-      </Link>
-      <header className="mt-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">{t.eyebrow}</p>
-          <h1 className="mt-2 text-3xl font-light tracking-tight text-balance md:text-4xl">{courseTitle}</h1>
-          {state === "ready" && today && (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-              <span className={cn("inline-flex items-center gap-1.5", streak > 0 ? "text-foreground" : "text-muted-foreground")}>
-                <Flame className={cn("size-4", streak > 0 && "text-ring")} aria-hidden="true" />
-                {streak > 0 ? t.streak(streak) : t.noStreak}
-              </span>
-              <Link href={`/practice/${courseSlug}/map`} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground hover:underline">
-                <MapIcon className="size-4" aria-hidden="true" /> {t.map}
-              </Link>
+    // The scratchbook docks on the right on a computer and the practice moves left to keep the task in view; on a
+    // phone it's a sheet below, and the page gets room to scroll above it.
+    <div className="transition-[padding] duration-300 max-lg:pb-[var(--scratchbook-sheet,0px)] lg:pr-[var(--scratchbook-width,0px)]">
+      <div className="container mx-auto max-w-3xl px-4 py-10 md:py-14">
+        <Link href={`/courses/${courseSlug}`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-4" aria-hidden="true" /> {t.back}
+        </Link>
+        <header className="mt-6 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">{t.eyebrow}</p>
+            <h1 className="mt-2 text-3xl font-light tracking-tight text-balance md:text-4xl">{courseTitle}</h1>
+            {state === "ready" && today && (
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                <span className={cn("inline-flex items-center gap-1.5", streak > 0 ? "text-foreground" : "text-muted-foreground")}>
+                  <Flame className={cn("size-4", streak > 0 && "text-ring")} aria-hidden="true" />
+                  {streak > 0 ? t.streak(streak) : t.noStreak}
+                </span>
+                <Link href={`/practice/${courseSlug}/map`} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground hover:underline">
+                  <MapIcon className="size-4" aria-hidden="true" /> {t.map}
+                </Link>
+              </div>
+            )}
+          </div>
+          {state === "ready" && items.length > 0 && (
+            <div className="w-full sm:w-auto sm:min-w-40 sm:text-right">
+              <p className="font-mono text-xs text-muted-foreground">{t.progress(done, items.length)}</p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(done / items.length) * 100}%` }} />
+              </div>
             </div>
           )}
-        </div>
-        {state === "ready" && items.length > 0 && (
-          <div className="w-full sm:w-auto sm:min-w-40 sm:text-right">
-            <p className="font-mono text-xs text-muted-foreground">{t.progress(done, items.length)}</p>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-              <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${(done / items.length) * 100}%` }} />
-            </div>
-          </div>
-        )}
-      </header>
+        </header>
 
-      <div className="mt-8">
-        {state === "loading" && (
-          <div className="flex items-center gap-3 rounded-3xl border border-border bg-card p-8 text-muted-foreground shadow-[var(--shadow-tile)]">
-            <DotLoader /> {t.loading}
-          </div>
-        )}
-        {state === "error" && <Notice text={t.error} />}
-        {state === "not-ready" && <Notice text={t.notReady} />}
-        {notice && (
-          <p
-            role="status"
-            className={cn(
-              "mb-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm",
-              notice.kind === "working" ? "border-border bg-muted/50 text-muted-foreground" : "border-ring/30 bg-ring/10 text-foreground",
-            )}
-          >
-            {notice.kind === "working" ? <DotLoader className="mt-0.5 shrink-0" /> : <ScanSearch className="mt-0.5 size-4 shrink-0 text-ring" aria-hidden="true" />}
-            <span className="flex-1">{notice.text}</span>
-            {notice.kind === "info" && (
-              <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="OK">
-                <X className="size-4" aria-hidden="true" />
-              </button>
-            )}
-          </p>
-        )}
-        {state === "ready" && items.length === 0 && <Notice text={t.nothing} />}
-        {state === "ready" && items.length > 1 && (
-          <nav aria-label={t.steps} className="mb-4">
-            <ol className="flex flex-wrap gap-1.5">
-              {items.map((item, at) => {
-                const stepState = item.answer ? (item.answer.feedback.passed ? "right" : "wrong") : at === firstOpen ? "current" : "later";
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => setIndex(at)}
-                      disabled={!reachable(at)}
-                      aria-current={at === index ? "step" : undefined}
-                      aria-label={t.step(at + 1, t.stepState[stepState])}
-                      className={cn(
-                        "flex size-8 items-center justify-center rounded-full font-mono text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        stepState === "right" && "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300",
-                        stepState === "wrong" && "bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-200",
-                        stepState === "current" && "border border-foreground/40 text-foreground hover:bg-muted",
-                        stepState === "later" && "border border-dashed border-border text-muted-foreground/60",
-                        at === index && "ring-2 ring-ring ring-offset-2 ring-offset-background",
-                      )}
-                    >
-                      {item.isProbe ? <ScanSearch className="size-3.5" aria-hidden="true" /> : at + 1}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </nav>
-        )}
-        {state === "ready" && today && items.length > 0 && !finished && (
-          <TaskCard
-            key={items[index].id}
-            item={items[index]}
-            t={t}
-            language={language}
-            courseSlug={courseSlug}
-            sessionId={today.sessionId}
-            last={index === items.length - 1}
-            onAnswered={answered}
-            onHint={hinted}
-            onNext={() => setIndex(index + 1)}
-            onPrevious={index > 0 ? () => setIndex(index - 1) : undefined}
-            editModels={editModels}
-          />
-        )}
-        {finished && items.length > 0 && today && (
-          <section className="rounded-3xl border border-border bg-card p-8 shadow-[var(--shadow-tile)]">
-            <div className="flex size-12 items-center justify-center rounded-full bg-ring/15 text-ring">
-              <Check className="size-6" aria-hidden="true" />
+        <div className="mt-8">
+          {state === "loading" && (
+            <div className="flex items-center gap-3 rounded-3xl border border-border bg-card p-8 text-muted-foreground shadow-[var(--shadow-tile)]">
+              <DotLoader /> {t.loading}
             </div>
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight">{t.doneTitle}</h2>
-            <p className="mt-2 max-w-prose text-muted-foreground">{t.doneBody(today.today.right, today.today.answered)}</p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Button onClick={() => void more()} disabled={loadingMore}>
-                {loadingMore ? <DotLoader className="mr-2" /> : <Sparkles className="mr-2 size-4" />} {t.more}
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href={`/courses/${courseSlug}`}>{t.back}</Link>
-              </Button>
-            </div>
-          </section>
-        )}
+          )}
+          {state === "error" && <Notice text={t.error} />}
+          {state === "not-ready" && <Notice text={t.notReady} />}
+          {notice && (
+            <p
+              role="status"
+              className={cn(
+                "mb-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm",
+                notice.kind === "working" ? "border-border bg-muted/50 text-muted-foreground" : "border-ring/30 bg-ring/10 text-foreground",
+              )}
+            >
+              {notice.kind === "working" ? <DotLoader className="mt-0.5 shrink-0" /> : <ScanSearch className="mt-0.5 size-4 shrink-0 text-ring" aria-hidden="true" />}
+              <span className="flex-1">{notice.text}</span>
+              {notice.kind === "info" && (
+                <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="OK">
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              )}
+            </p>
+          )}
+          {state === "ready" && items.length === 0 && <Notice text={t.nothing} />}
+          {state === "ready" && items.length > 1 && (
+            <nav aria-label={t.steps} className="mb-4">
+              <ol className="flex flex-wrap gap-1.5">
+                {items.map((item, at) => {
+                  const stepState = item.answer ? (item.answer.feedback.passed ? "right" : "wrong") : at === firstOpen ? "current" : "later";
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        onClick={() => setIndex(at)}
+                        disabled={!reachable(at)}
+                        aria-current={at === index ? "step" : undefined}
+                        aria-label={t.step(at + 1, t.stepState[stepState])}
+                        className={cn(
+                          "flex size-8 items-center justify-center rounded-full font-mono text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          stepState === "right" && "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300",
+                          stepState === "wrong" && "bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-200",
+                          stepState === "current" && "border border-foreground/40 text-foreground hover:bg-muted",
+                          stepState === "later" && "border border-dashed border-border text-muted-foreground/60",
+                          at === index && "ring-2 ring-ring ring-offset-2 ring-offset-background",
+                        )}
+                      >
+                        {item.isProbe ? <ScanSearch className="size-3.5" aria-hidden="true" /> : at + 1}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
+          )}
+          {state === "ready" && today && items.length > 0 && !finished && (
+            <TaskCard
+              key={items[index].id}
+              item={items[index]}
+              t={t}
+              language={language}
+              courseSlug={courseSlug}
+              sessionId={today.sessionId}
+              last={index === items.length - 1}
+              onAnswered={answered}
+              onHint={hinted}
+              onNext={() => setIndex(index + 1)}
+              onPrevious={index > 0 ? () => setIndex(index - 1) : undefined}
+              editModels={editModels}
+            />
+          )}
+          {finished && items.length > 0 && today && (
+            <section className="rounded-3xl border border-border bg-card p-8 shadow-[var(--shadow-tile)]">
+              <div className="flex size-12 items-center justify-center rounded-full bg-ring/15 text-ring">
+                <Check className="size-6" aria-hidden="true" />
+              </div>
+              <h2 className="mt-4 text-2xl font-semibold tracking-tight">{t.doneTitle}</h2>
+              <p className="mt-2 max-w-prose text-muted-foreground">{t.doneBody(today.today.right, today.today.answered)}</p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button onClick={() => void more()} disabled={loadingMore}>
+                  {loadingMore ? <DotLoader className="mr-2" /> : <Sparkles className="mr-2 size-4" />} {t.more}
+                </Button>
+                <Button variant="ghost" asChild>
+                  <Link href={`/courses/${courseSlug}`}>{t.back}</Link>
+                </Button>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
+      {state === "ready" && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} />}
     </div>
   );
 }
