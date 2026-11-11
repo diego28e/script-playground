@@ -61,6 +61,21 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     mem_limit: 256m
 
+  # Bulk practice work the admin page starts (docs/practice.md "Jobs"): writes missing tasks and drafts lessons, with no
+  # request time limit. It reaches the grader on the lab's default network (GRADER_URL=http://grader:8080) and the
+  # platform's database and model APIs over the internet; nothing reaches it. On a stop it finishes the items in
+  # progress first, hence the long grace period.
+  practice-worker:
+    build: practice-worker
+    image: lab-practice-worker:1
+    container_name: practice-worker
+    restart: unless-stopped
+    env_file: practice-worker/.env
+    stop_grace_period: 3m
+    mem_limit: 512m
+    depends_on:
+      - grader
+
 networks:
   jupyterhub:
     name: jupyterhub

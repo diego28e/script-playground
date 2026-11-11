@@ -34,6 +34,7 @@ yarn-error.log*
 .env*
 !infra/lab/.env.example
 !infra/lab/learning/.env.example
+!infra/lab/practice-worker/.env.example
 !infra/lab/grader/.env.example
 !.env.local.example
 
@@ -52,6 +53,8 @@ next-env.d.ts
 # The learning service bundle and schema copy, built by pnpm learning:build
 /infra/lab/learning/dist/
 /infra/lab/learning/schema.prisma
+/infra/lab/practice-worker/dist/
+/infra/lab/practice-worker/schema.prisma
 
 # The tutor panel's local build (the student image rebuilds it: infra/lab/Dockerfile)
 /infra/lab/tutor/labextension/node_modules/

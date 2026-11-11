@@ -134,9 +134,10 @@ export type DraftResult =
  * Drafts one lesson's skills and saves them as DRAFTED. A skill whose key the lesson already had is updated in place
  * (its id, and the prerequisites later lessons drew to it, are kept); skills the new draft no longer has are removed.
  */
-export async function draftLesson(lessonId: string, userId: string, model?: string): Promise<DraftResult> {
-  // The whole draft, models and fallbacks included, ends inside one Amplify request (reported to stop at about 30 s).
-  const deadline = Date.now() + REQUEST_BUDGET_MS;
+export async function draftLesson(lessonId: string, userId: string, model?: string, budgetMs = REQUEST_BUDGET_MS): Promise<DraftResult> {
+  // The whole draft, models and fallbacks included, ends inside one Amplify request (lib/request-budget.ts); the
+  // practice worker (no request limit) gives it longer.
+  const deadline = Date.now() + budgetMs;
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     select: {

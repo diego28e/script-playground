@@ -1,0 +1,12 @@
+{
+  "name": "academia-practice-worker",
+  "private": true,
+  "type": "module",
+  "description": "Bulk practice work for the platform (built from services/practice-worker by pnpm practice-worker:build).",
+  "dependencies": {
+    "@prisma/adapter-pg": "7.0.0",
+    "@prisma/client": "7.0.0",
+    "pg": "8.16.3",
+    "prisma": "7.0.0"
+  }
+}

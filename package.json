@@ -10,6 +10,8 @@
     "course:import": "tsx scripts/import-course.ts",
     "learning:build": "node scripts/build-learning.mjs",
     "learning:dev": "tsx services/learning/dev.ts",
+    "practice-worker:build": "node scripts/build-practice-worker.mjs",
+    "practice-worker:dev": "tsx services/practice-worker/dev.ts",
     "grader:check": "tsx scripts/grader-check.ts"
   },
   "dependencies": {

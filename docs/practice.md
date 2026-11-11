@@ -341,6 +341,30 @@ it was proven by DeepSeek and retired the original; moving the right-option mark
 Amplify build is pinned to Node 24 so the site runs on 24: Amplify picks the runtime by the major version it built
 with (nodejs20.x, 22.x or 24.x).
 
+## Jobs
+
+Built 2026-11-11. Bulk work, writing every missing task or drafting every remaining lesson, runs as a **job** that the
+**practice worker** on the lab server carries out, not in the admin's browser. Before, the page called the server once
+per task and the run lived in the open tab: closing it, a sleeping computer or a deployment stopped it, and a request
+that ran past Amplify's 28 s (lib/request-budget.ts) was killed. On 2026-11-10 a run stopped silently at task 15 of
+2514 that way.
+
+- **Starting** (Admin → Practice → "Write N missing tasks" or "Draft N remaining", `actions/practice-jobs.ts`,
+  `lib/practice/jobs.ts`): the job lists its items when it starts (every published stage with no proven task, or every
+  lesson not drafted), one active job per course.
+- **The worker** (`services/practice-worker`, a container in the lab, `infra/lab/practice-worker`): polls for the
+  oldest active job every 4 s and keeps its items in progress (two at a time for tasks, one for drafts), each with
+  150 s and no request limit. A task that fails its proof is **rejected**, a real outcome, kept under its skill. One
+  that fails for a passing reason (no model answered, the grader didn't, a repeat) is **retried** after 30 s, then
+  2 min, and counts as **failed** after 3 attempts. A spent allowance or an unpublished graph **halts** the job: every
+  later item would hit it too. On a restart, items left in progress go back in the queue.
+- **Stop**: a queued job stops at once; a running one finishes the items in progress (at most about 2.5 minutes), then
+  reads "Stopped". Starting again carries on: only what's still missing is listed.
+- **The page** (`components/admin/practice-job-panel.tsx`) polls every 3 s while a job runs: how many are done of the
+  total, written, rejected and failed, about how long is left, what's in progress, and the problems (each rejected,
+  failed or retrying item and why). It can be closed: opening it again shows where the job is. When the worker hasn't
+  been heard from for a minute, it says so and how to check it. When a job ends, a summary stays until closed.
+
 ## Finding and fixing a task
 
 Built 2026-11-09. A task found wrong or unclear is one search away, and fixed with the task editor (above: an edit is

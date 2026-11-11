@@ -147,6 +147,8 @@ model Course {
   practiceLearners PracticeLearner[]
   foundSkills      PracticeFoundSkill[]
   discoveredEdges  PracticeDiscoveredEdge[]
+  // Bulk practice work the server's worker carries out (docs/practice.md, "Jobs").
+  practiceJobs     PracticeJob[]
 
   @@map("course")
 }
@@ -1128,4 +1130,87 @@ model CompassSignal {
   @@index([kind, createdAt])
   @@index([conceptKey, kind])
   @@map("compass_signal")
+}
+
+// Bulk practice work (docs/practice.md, "Jobs"): writing every missing task, or drafting every remaining lesson. The
+// admin page starts a job; the practice worker on the lab server (services/practice-worker) carries out its items one
+// by one, with no request time limit, retries what fails for a passing reason, and keeps going until every item is
+// done or the admin stops it. The page only shows the progress, so it can be closed.
+
+enum PracticeJobKind {
+  WRITE_TASKS
+  DRAFT_LESSONS
+}
+
+enum PracticeJobStatus {
+  // Waiting for the worker to pick it up.
+  QUEUED
+  RUNNING
+  // The admin pressed Stop: the worker finishes the items in progress, then stops.
+  STOPPING
+  STOPPED
+  DONE
+  // Something every later item would hit too (a spent allowance): the reason is in `error`.
+  HALTED
+}
+
+enum PracticeJobItemStatus {
+  PENDING
+  RUNNING
+  // Written and proven, or drafted.
+  OK
+  // A real outcome: the task didn't pass its proof (kept, rejected, under its skill).
+  REJECTED
+  // Failed every attempt for a passing reason (a model or the grader didn't answer).
+  FAILED
+}
+
+model PracticeJob {
+  id          String            @id @default(cuid())
+  courseId    String
+  kind        PracticeJobKind
+  status      PracticeJobStatus @default(QUEUED)
+  // The model a draft starts with (DRAFT_LESSONS); tasks use the task writer's own choice.
+  model       String?
+  // Items worked on at the same time.
+  concurrency Int               @default(2)
+  createdById String
+  // Why a halted job halted.
+  error       String?
+  // The worker's last sign of life on this job: the page warns when it goes quiet.
+  heartbeatAt DateTime?
+  createdAt   DateTime          @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  course      Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  items       PracticeJobItem[]
+
+  @@index([status, createdAt])
+  @@index([courseId, createdAt])
+  @@map("practice_job")
+}
+
+model PracticeJobItem {
+  id         String                @id @default(cuid())
+  jobId      String
+  position   Int
+  // WRITE_TASKS: the skill and the stage to write a task for. DRAFT_LESSONS: the lesson to draft.
+  skillKey   String?
+  stage      String?
+  lessonId   String?
+  // What the page calls it ("llm-system-vs-api-call · apply", "00.04").
+  label      String
+  status     PracticeJobItemStatus @default(PENDING)
+  attempts   Int                   @default(0)
+  // A retried item waits until then.
+  notBefore  DateTime?
+  // What happened: the proof's note, or why it was rejected or failed.
+  result     String?
+  model      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  job        PracticeJob           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status, position])
+  @@map("practice_job_item")
 }

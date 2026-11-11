@@ -178,6 +178,26 @@ Check a grader end to end from your PC with `pnpm grader:check` (right, wrong an
 `GRADER_URL` and `GRADER_SECRET` from `.env.local`). On Docker Desktop, which has no gVisor, add `GRADER_RUNTIME=runc`
 to `infra/lab/.env`.
 
+## The practice worker
+
+`practice-worker` carries out the practice jobs the platform's admin page starts (`docs/practice.md`, "Jobs"): writing
+every missing practice task, drafting every remaining lesson. It runs here, beside the grader, because a job takes
+hours and a request on the platform (Amplify) may take 28 s at most; the admin page only starts, stops and watches it.
+It reaches the grader on the lab's own network and the platform's database and the model APIs over the internet;
+nothing reaches it (no port).
+
+To deploy or update it, build its bundle on your PC (`pnpm practice-worker:build`, which writes
+`practice-worker/dist/worker.mjs` and `practice-worker/schema.prisma`), copy `infra/lab` to the server as for the rest
+of the lab, create `practice-worker/.env` from `practice-worker/.env.example` (the platform's `DATABASE_URL` and model
+keys, `GRADER_URL=http://grader:8080` and the `GRADER_SECRET` from `grader/.env`), then
+`docker compose up -d --build practice-worker`. Check it with `docker compose ps practice-worker` (Up) and
+`docker logs practice-worker` (a `practice.worker.start` line, then a `practice.job.item` line per task while a job
+runs). A stop or an update lets it finish the items in progress (up to 3 minutes); anything cut off goes back in the
+queue on the next start. Run one worker only.
+
+To try it on your PC: `pnpm practice-worker:dev` runs it against the database in `.env.local`, with the grader in
+`.env.local`'s `GRADER_URL`.
+
 ## Day to day
 
 - **Course content changed** (notebooks, `src/mastery`): `git pull` in a JupyterLab terminal, inside
