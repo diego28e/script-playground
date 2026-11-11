@@ -358,6 +358,17 @@ that ran past Amplify's 28 s (lib/request-budget.ts) was killed. On 2026-11-10 a
   that fails for a passing reason (no model answered, the grader didn't, a repeat) is **retried** after 30 s, then
   2 min, and counts as **failed** after 3 attempts. A spent allowance or an unpublished graph **halts** the job: every
   later item would hit it too. On a restart, items left in progress go back in the queue.
+- **Repairs** (`lib/practice/tasks.ts`, `generateTask` with `thorough`, added 2026-11-11): in a job, a task that fails
+  its proof because of the task itself (a reference that doesn't pass, a key that isn't what the snippet prints, tests
+  a wrong version passes, a question an expert model answers differently) goes back to its writer with what the sandbox
+  or the checker said in full, and comes back fixed; it's proven again, up to two repairs, before it counts as
+  rejected. The writer is also told the sandbox's real versions (Python, langchain, langchain-core, langgraph,
+  langsmith, pydantic; read from the grader once per process), and that tests use the code's names directly. Proofs get
+  the grader's longest run, 30 s (learners' runs keep 15 s). A rejection's reason is never blank: the first failing test,
+  else the error's type and last line, else the status. Tried on 8 code and predict tasks: all proven, 2 after a repair.
+- **Skills that keep failing**: three rejected tasks or more for one skill in a job, repairs and all, are listed above
+  the problems. Their tasks likely need a live service (LangSmith, an API): mark them "questions only" in the skill
+  editor.
 - **Stop**: a queued job stops at once; a running one finishes the items in progress (at most about 2.5 minutes), then
   reads "Stopped". Starting again carries on: only what's still missing is listed.
 - **The page** (`components/admin/practice-job-panel.tsx`) polls every 3 s while a job runs: how many are done of the

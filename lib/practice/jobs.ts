@@ -22,6 +22,8 @@ const RETRY_AFTER_MS = [30_000, 120_000];
 export const WORKER_QUIET_MS = 60_000;
 /** Items the problem list keeps. */
 const PROBLEMS = 200;
+/** A skill with this many rejected tasks in one job, repairs and all, is flagged: its tasks may need a live service. */
+const STRUGGLING = 3;
 
 const ACTIVE = ["QUEUED", "RUNNING", "STOPPING"] as const;
 
@@ -81,7 +83,7 @@ export async function stopPracticeJob(jobId: string): Promise<boolean> {
 export async function jobView(courseId: string) {
   const job = await prisma.practiceJob.findFirst({ where: { courseId }, orderBy: { createdAt: "desc" } });
   if (!job) return null;
-  const [byStatus, running, problems] = await Promise.all([
+  const [byStatus, running, problems, rejectedBySkill] = await Promise.all([
     prisma.practiceJobItem.groupBy({ by: ["status"], where: { jobId: job.id }, _count: { _all: true } }),
     prisma.practiceJobItem.findMany({ where: { jobId: job.id, status: "RUNNING" }, orderBy: { position: "asc" }, select: { label: true, attempts: true, startedAt: true } }),
     prisma.practiceJobItem.findMany({
@@ -90,6 +92,7 @@ export async function jobView(courseId: string) {
       take: PROBLEMS,
       select: { label: true, status: true, attempts: true, result: true },
     }),
+    prisma.practiceJobItem.groupBy({ by: ["skillKey"], where: { jobId: job.id, status: "REJECTED", skillKey: { not: null } }, _count: { _all: true } }),
   ]);
   const count = (status: string) => byStatus.find((row) => row.status === status)?._count._all ?? 0;
   const total = byStatus.reduce((sum, row) => sum + row._count._all, 0);
@@ -109,6 +112,11 @@ export async function jobView(courseId: string) {
     counts: { ok: count("OK"), rejected: count("REJECTED"), failed: count("FAILED"), pending: count("PENDING"), running: count("RUNNING") },
     running: running.map((item) => ({ label: item.label, attempt: item.attempts, since: item.startedAt?.toISOString() ?? null })),
     problems: problems.map((item) => ({ label: item.label, status: item.status, attempts: item.attempts, why: item.result ?? "" })),
+    // Skills whose tasks keep failing their proof even after repairs: candidates for "questions only" in the skill editor.
+    struggling: rejectedBySkill
+      .filter((row) => row._count._all >= STRUGGLING)
+      .map((row) => ({ skillKey: row.skillKey!, rejected: row._count._all }))
+      .sort((a, b) => b.rejected - a.rejected),
     createdAt: job.createdAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,
@@ -143,7 +151,8 @@ type Outcome = { status: "OK" | "REJECTED"; result: string; model?: string } | {
 async function doItem(job: PracticeJob, item: PracticeJobItem): Promise<Outcome> {
   try {
     if (job.kind === "WRITE_TASKS") {
-      const result = await generateTask({ courseId: job.courseId, skillKey: item.skillKey!, stage: item.stage!, userId: job.createdById, deadline: Date.now() + ITEM_BUDGET_MS });
+      // Thorough: the sandbox's versions for the writer, and up to two repairs of a task that fails its proof.
+      const result = await generateTask({ courseId: job.courseId, skillKey: item.skillKey!, stage: item.stage!, userId: job.createdById, deadline: Date.now() + ITEM_BUDGET_MS, thorough: true });
       if (result.ok) return { status: "OK", result: result.note || "written and proven", model: result.model };
       if (HALTS.test(result.error)) return { status: "HALT", result: result.error };
       // Stored as rejected: the task didn't pass its proof, a real outcome. Anything else (no model answered, the

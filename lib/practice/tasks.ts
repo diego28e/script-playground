@@ -7,7 +7,7 @@ import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai
 import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
-import { gradeCode } from "@/lib/practice/grader";
+import { gradeCode, type GradeOutcome } from "@/lib/practice/grader";
 
 // Practice tasks (docs/practice.md, "Tasks"): a model writes one task for one skill at one stage; the platform proves it
 // (code runs on the grader: the reference passes and wrong code fails; a question is answered blind by a second
@@ -52,6 +52,9 @@ Write ONE task, for the skill and stage given, in the form given.
 RULES
 - The task practises exactly this skill at this stage, and is answerable by someone who has the skill in 1 to 5 minutes. It doesn't need the lesson's text open.
 - Never require the network, an API key, a real model, a GPU or files outside /tmp. Where a chat model is needed in code, use LangChain's fake models (from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel).
+- Tests run after the code, in the same namespace: they use its names directly. Never write \`import solution\` or \`from solution import …\`.
+- A run has 30 seconds including imports (importing langchain takes a few seconds in the sandbox): keep code and tests light, with no loops that wait, sleep or retry.
+- Write against the package versions listed under THE SANDBOX when given: APIs change between versions (in recent langchain-core, for example, a message's .text is a TextAccessor, not a str).
 - Code is valid Python 3.12, deterministic, and uses English names. Text fields come in Spanish (Es) and English (En), saying the same thing; keep code, API names and identifiers in English in both. Write prompts in Markdown; put code in fenced blocks.
 - explanationEs/En: 2 to 4 sentences the learner reads after answering: why the answer is right, and the misconception behind the likely wrong one.
 - difficulty: your estimate for this stage, from -1 (easy for it) to 1 (hard for it); 0 is typical.
@@ -227,7 +230,49 @@ export const normaliseAnswer = (text: string) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
-type Proof = { ok: true; proof: CandidateProof; note: string } | { ok: false; reason: string };
+/**
+ * A proof's outcome. A failure says why in one line (`reason`, shown to the admin and stored with a rejected task);
+ * `detail` is what the sandbox or the checker said in full, for the writer to repair the task with, and `fixable`
+ * says whether the task itself is at fault (a repair can help) or something passing is (the grader, the time).
+ */
+type Proof = { ok: true; proof: CandidateProof; note: string } | { ok: false; reason: string; detail?: string; fixable?: boolean };
+
+/** The last line of a message that says something: tracebacks end with a newline, and an empty reason helps no one. */
+const lastLine = (text: string | null | undefined) =>
+  (text ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1) ?? "";
+
+const clip = (text: string, limit = 2500) => (text.length > limit ? `${text.slice(0, limit)}\n… (${text.length - limit} more characters)` : text);
+
+/** What a run said, in full, for a repair: the error, the failing tests, and what it printed. */
+function runDetail(label: string, run: Exclude<GradeOutcome, { status: "unavailable" }>): string {
+  const failing = run.tests.filter((test) => !test.passed).map((test) => `- ${test.name}: ${test.message ?? "failed"}`);
+  return clip(
+    [
+      `${label}: ${run.status}${run.seconds !== undefined ? ` in ${run.seconds} s` : ""}`,
+      run.error ? `Error (${run.error.type}):\n${run.error.message}` : "",
+      failing.length ? `Failing tests:\n${failing.join("\n")}` : "",
+      run.stdout.trim() ? `It printed:\n${run.stdout.trim()}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+}
+
+/** One line on why a run didn't pass: its first failing test, else its error, else its status. Never blank. */
+function whyRun(run: Exclude<GradeOutcome, { status: "unavailable" }>): string {
+  const test = run.tests.find((entry) => !entry.passed);
+  if (test) return `${test.name}: ${lastLine(test.message) || "failed"}`;
+  if (run.error) return `${run.error.type}: ${lastLine(run.error.message) || "no message"}`;
+  if (run.status === "timeout") return "it ran longer than the time allowed";
+  return run.status;
+}
+
+/** Proofs run with the grader's longest time (learners' own runs keep its default): imports alone take seconds. */
+const PROOF_TIMEOUT_MS = 30_000;
 
 /**
  * Code tasks: the starter or buggy code fails the tests, the solution passes, wrong code fails. The runs end by
@@ -238,24 +283,63 @@ async function proveByRunning(task: TaskContent, deadline: number): Promise<Proo
   if (left < 1_500) return { ok: false, reason: "no time left to run it on the grader (the writing took too long); try again" };
   const signal = AbortSignal.timeout(left);
   if (task.form === "predict") {
-    const run = await gradeCode({ code: task.code! }, { signal });
+    const run = await gradeCode({ code: task.code!, timeoutMs: PROOF_TIMEOUT_MS }, { signal });
     if (run.status === "unavailable") return { ok: false, reason: `grader unavailable: ${run.message}` };
-    if (run.status !== "passed") return { ok: false, reason: `the snippet didn't run cleanly (${run.status}${run.error ? `: ${run.error.message.split("\n").at(-1)}` : ""})` };
-    if (!sameOutput(run.stdout, task.expectedOutput!)) return { ok: false, reason: `the snippet prints ${JSON.stringify(run.stdout.slice(0, 200))}, not the key ${JSON.stringify(task.expectedOutput!.slice(0, 200))}` };
-    if (sameOutput(run.stdout, task.wrongOutput!)) return { ok: false, reason: "the wrong prediction equals the real output" };
+    if (run.status !== "passed") return { ok: false, reason: `the snippet didn't run cleanly (${whyRun(run)})`, detail: runDetail("The snippet", run), fixable: true };
+    if (!sameOutput(run.stdout, task.expectedOutput!)) {
+      return {
+        ok: false,
+        reason: `the snippet prints ${JSON.stringify(run.stdout.slice(0, 200))}, not the key ${JSON.stringify(task.expectedOutput!.slice(0, 200))}`,
+        detail: clip(`The snippet really prints, exactly:\n${run.stdout}\nThe task's key (expectedOutput) says:\n${task.expectedOutput}`),
+        fixable: true,
+      };
+    }
+    if (sameOutput(run.stdout, task.wrongOutput!)) return { ok: false, reason: "the wrong prediction equals the real output", detail: `Both the key and wrongOutput are what the snippet prints:\n${run.stdout}`, fixable: true };
     return { ok: true, proof: { kind: "executable", at: Date.now(), referencePassed: true, wrongSolutionsFailed: 1, runner: "academia-grader" }, note: `printed the key in ${run.wallMs} ms` };
   }
   const wrongs = task.form === "code" ? [task.code!, task.wrongSolution!] : [task.code!];
-  const [reference, ...others] = await Promise.all([task.solution!, ...wrongs].map((code) => gradeCode({ code, tests: task.tests! }, { signal })));
+  const [reference, ...others] = await Promise.all([task.solution!, ...wrongs].map((code) => gradeCode({ code, tests: task.tests!, timeoutMs: PROOF_TIMEOUT_MS }, { signal })));
   if (reference.status === "unavailable") return { ok: false, reason: `grader unavailable: ${reference.message}` };
   if (reference.status !== "passed") {
-    const failed = reference.tests.filter((test) => !test.passed).map((test) => `${test.name}: ${test.message}`)[0] ?? reference.error?.message.split("\n").at(-1) ?? reference.status;
-    return { ok: false, reason: `the reference solution doesn't pass (${failed})` };
+    return { ok: false, reason: `the reference solution doesn't pass (${whyRun(reference)})`, detail: runDetail("The reference solution with the tests", reference), fixable: true };
   }
-  if (reference.tests.length < 2) return { ok: false, reason: "fewer than 2 tests ran" };
-  const caught = others.filter((run) => run.status !== "unavailable" && run.status !== "passed").length;
-  if (caught < others.length) return { ok: false, reason: task.form === "debug" ? "the buggy code passes the tests" : "the starter or the wrong solution passes the tests" };
+  if (reference.tests.length < 2) return { ok: false, reason: "fewer than 2 tests ran", detail: `Only ${reference.tests.length} test function(s) named test_* ran: write 2 to 5.`, fixable: true };
+  if (others.some((run) => run.status === "unavailable")) return { ok: false, reason: "grader unavailable while checking the wrong versions" };
+  const passing = others.map((run, index) => ({ run, name: task.form === "debug" ? "the buggy code" : index === 0 ? "the starter" : "the wrong solution" })).filter(({ run }) => run.status === "passed");
+  const caught = others.length - passing.length;
+  if (passing.length) {
+    return {
+      ok: false,
+      reason: `${passing.map(({ name }) => name).join(" and ")} ${passing.length > 1 ? "pass" : "passes"} the tests`,
+      detail: `${passing.map(({ name }) => name).join(" and ")} passed every test, so the tests don't tell right from wrong: make them check what the wrong version gets wrong.`,
+      fixable: true,
+    };
+  }
   return { ok: true, proof: { kind: "executable", at: Date.now(), referencePassed: true, wrongSolutionsFailed: caught, runner: "academia-grader" }, note: `reference passed ${reference.tests.length} tests; ${caught} wrong version(s) failed` };
+}
+
+// What the sandbox really has, read from the grader: the writer is told, so it writes against these versions.
+const FACTS_CODE = `import sys, importlib.metadata as metadata
+print("Python", sys.version.split()[0])
+for name in ["langchain", "langchain-core", "langgraph", "langsmith", "langchain-text-splitters", "langchain-community", "pydantic"]:
+    try:
+        print(name, metadata.version(name))
+    except metadata.PackageNotFoundError:
+        pass`;
+const FACTS_TTL_MS = 6 * 60 * 60 * 1000;
+let sandboxCache: { text: string; at: number } | null = null;
+
+/**
+ * The sandbox's Python and package versions, as lines ("langchain-core 1.0.4"). Read once per process and kept for six
+ * hours; `fetch: false` only uses what's kept (a request on Amplify can't spare the seconds).
+ */
+export async function sandboxFacts({ fetch }: { fetch: boolean }): Promise<string> {
+  if (sandboxCache && Date.now() - sandboxCache.at < FACTS_TTL_MS) return sandboxCache.text;
+  if (!fetch) return "";
+  const run = await gradeCode({ code: FACTS_CODE, timeoutMs: PROOF_TIMEOUT_MS }, { signal: AbortSignal.timeout(40_000) });
+  if (run.status !== "passed" || !run.stdout.trim()) return "";
+  sandboxCache = { text: run.stdout.trim(), at: Date.now() };
+  return sandboxCache.text;
 }
 
 const CheckSchema: Schema = {
@@ -297,7 +381,15 @@ async function proveByModel(task: TaskContent, writer: string, userId: string, d
     task.form === "choice"
       ? reply.answerIndex === task.answerIndex
       : typeof reply.answer === "string" && task.answers!.map(normaliseAnswer).includes(normaliseAnswer(reply.answer));
-  if (!agreed) return { ok: false, reason: `${result.model} answered ${JSON.stringify(reply.answerIndex ?? reply.answer)}, not the key` };
+  if (!agreed) {
+    const given = task.form === "choice" && typeof reply.answerIndex === "number" ? `option ${reply.answerIndex} (${JSON.stringify(task.optionsEn?.[reply.answerIndex] ?? "")})` : JSON.stringify(reply.answer ?? reply.answerIndex);
+    return {
+      ok: false,
+      reason: `${result.model} answered ${JSON.stringify(reply.answerIndex ?? reply.answer)}, not the key`,
+      detail: `An expert model answered the question blind and chose ${given}; the key is ${task.form === "choice" ? `option ${task.answerIndex}` : JSON.stringify(task.answers)}. Either the question is ambiguous or the key is wrong: make exactly one answer clearly right.`,
+      fixable: true,
+    };
+  }
   return { ok: true, proof: { kind: "model-checked", at: Date.now(), model: result.model, agreed: true }, note: `${result.model} agreed` };
 }
 
@@ -381,14 +473,33 @@ async function proveAndStore(input: {
   checkGraph: PublishedGraph["graph"];
   keepRejected: boolean;
   editedFromId?: string;
+  /**
+   * When a proof fails because of the task itself (a reference that doesn't pass, a key that isn't what the snippet
+   * prints, tests that let a wrong version through, an ambiguous question), `fix` gets the task and what the sandbox
+   * or the checker said and returns a corrected task, proven again, up to `max` times while time allows.
+   */
+  repair?: { max: number; fix: (task: TaskContent, failure: Extract<Proof, { ok: false }>) => Promise<{ task: TaskContent; model: string } | null> };
 }): Promise<GenerateResult> {
-  const { task, form } = input;
-  const shape = shapeProblem(task);
-  const proof: Proof = shape
-    ? { ok: false, reason: shape }
-    : form === "choice" || form === "fill"
-      ? await proveByModel(task, input.model, input.userId, input.deadline)
-      : await proveByRunning(task, input.deadline);
+  const { form } = input;
+  let task = input.task;
+  let model = input.model;
+  const prove = async (candidate: TaskContent, writer: string): Promise<Proof> => {
+    const shape = shapeProblem(candidate);
+    if (shape) return { ok: false, reason: shape, detail: `The task's fields don't fit its form: ${shape}.`, fixable: true };
+    return form === "choice" || form === "fill" ? proveByModel(candidate, writer, input.userId, input.deadline) : proveByRunning(candidate, input.deadline);
+  };
+  let proof = await prove(task, model);
+  // A repair needs time for a rewrite and a second proof: about a minute.
+  let repaired = 0;
+  while (!proof.ok && proof.fixable && input.repair && repaired < input.repair.max && input.deadline - Date.now() > 60_000) {
+    const fixed = await input.repair.fix(task, proof).catch(() => null);
+    if (!fixed) break;
+    repaired += 1;
+    task = { ...fixed.task, form };
+    model = fixed.model;
+    proof = await prove(task, model);
+  }
+  const repairs = repaired ? ` (after ${repaired} ${repaired === 1 ? "repair" : "repairs"})` : "";
 
   const taskId = randomUUID();
   const contentHash = createHash("sha256").update(JSON.stringify([form, task.promptEn, task.code ?? "", task.optionsEn ?? []])).digest("hex");
@@ -396,7 +507,7 @@ async function proveAndStore(input: {
   const difficulty = toItemDifficulty(task.difficulty);
 
   let item: PracticeItem | null = null;
-  let reason = proof.ok ? null : proof.reason;
+  let reason = proof.ok ? null : `${proof.reason}${repairs}`;
   if (proof.ok) {
     const candidate: CandidateItem = {
       id: `task:${taskId}`,
@@ -420,7 +531,7 @@ async function proveAndStore(input: {
       else item = admitted.item;
     }
   }
-  if (!item && !input.keepRejected) return { ok: false, form, model: input.model, error: `It didn't pass its proof: ${reason}` };
+  if (!item && !input.keepRejected) return { ok: false, form, model, error: `It didn't pass its proof: ${reason}` };
 
   try {
     await prisma.practiceTask.create({
@@ -436,17 +547,17 @@ async function proveAndStore(input: {
         item: item ? (item as unknown as Prisma.InputJsonObject) : undefined,
         status: item ? "PROVEN" : "REJECTED",
         rejectReason: reason,
-        model: input.model,
+        model,
         traceId: input.traceId,
         contentHash,
         editedFromId: input.editedFromId,
       },
     });
   } catch {
-    return { ok: false, form, model: input.model, error: input.editedFromId ? "Nothing changed: the pool already has this exact task." : "The model repeated a task the pool already has." };
+    return { ok: false, form, model, error: input.editedFromId ? "Nothing changed: the pool already has this exact task." : "The model repeated a task the pool already has." };
   }
-  if (!item) return { ok: false, taskId, form, model: input.model, error: `Rejected: ${reason}` };
-  return { ok: true, taskId, form, model: input.model, note: proof.ok ? proof.note : "" };
+  if (!item) return { ok: false, taskId, form, model, error: `Rejected: ${reason}` };
+  return { ok: true, taskId, form, model, note: proof.ok ? `${proof.note}${repairs}` : "" };
 }
 
 /**
@@ -461,6 +572,11 @@ export async function generateTask(input: {
   model?: string;
   userId: string;
   deadline: number;
+  /**
+   * The practice worker's way (lib/practice/jobs.ts), with time to spare: it reads the sandbox's versions for the
+   * writer, and repairs a task that fails its proof up to twice, from what the sandbox said, instead of rejecting it.
+   */
+  thorough?: boolean;
 }): Promise<GenerateResult> {
   const skill = await skillFor(input.courseId, input.skillKey);
   if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
@@ -475,8 +591,10 @@ export async function generateTask(input: {
   });
   // The form this stage's pool has least of, unless one was asked for.
   const form = input.form && forms.includes(input.form) ? input.form : [...forms].sort((a, b) => existing.filter((task) => task.form === a).length - existing.filter((task) => task.form === b).length)[0];
+  const facts = await sandboxFacts({ fetch: Boolean(input.thorough) });
   const context = [
     ...(await taskContext(skill, input.stage, form)),
+    ...(facts ? [`# THE SANDBOX (the versions code runs with)\n${facts}`] : []),
     `# EXISTING TASKS (don't repeat)\n${existing.map((task) => `- (${task.form}) ${String((task.content as TaskContent).promptEn).replace(/\s+/g, " ").slice(0, 160)}`).join("\n") || "(none yet)"}`,
   ].join("\n\n");
 
@@ -513,7 +631,65 @@ export async function generateTask(input: {
     const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
     task = { ...task, optionsEs: order.map((i) => task.optionsEs![i]), optionsEn: order.map((i) => task.optionsEn![i]), answerIndex: order.indexOf(task.answerIndex) };
   }
-  return proveAndStore({ ...input, form, task, model: written.model, traceId: written.traceId, checkGraph: skill.checkGraph, keepRejected: true });
+  const repair = input.thorough
+    ? {
+        max: 2,
+        fix: (current: TaskContent, failure: Extract<Proof, { ok: false }>) =>
+          repairTask({ context, form, task: current, failure, userId: input.userId, model: chosen, deadline: input.deadline }),
+      }
+    : undefined;
+  return proveAndStore({ ...input, form, task, model: written.model, traceId: written.traceId, checkGraph: skill.checkGraph, keepRejected: true, repair });
+}
+
+/**
+ * One repair: the writer gets its task back with what the sandbox or the checker said, and returns the task fixed.
+ * It may change whatever is wrong (the code, the tests, the key, the options), keeping the skill, stage and form.
+ */
+async function repairTask(input: {
+  context: string;
+  form: TaskForm;
+  task: TaskContent;
+  failure: Extract<Proof, { ok: false }>;
+  userId: string;
+  model: string;
+  deadline: number;
+}): Promise<{ task: TaskContent; model: string } | null> {
+  // Leave time for the proof that follows.
+  const deadline = Math.min(input.deadline - 20_000, Date.now() + 75_000);
+  const written = await generateWithFallback({
+    feature: "graph",
+    pool: "AUTHORING",
+    userId: input.userId,
+    models: chainStartingAt(AUTHORING_CHAIN, input.model),
+    chosenFirst: true,
+    deadline,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: input.context },
+          { text: `# YOUR TASK\n${JSON.stringify(input.task, null, 1)}` },
+          { text: `# WHAT HAPPENED WHEN IT WAS CHECKED\n${input.failure.reason}\n\n${input.failure.detail ?? ""}` },
+          {
+            text: `The task failed its check. Fix it so it passes, as a ${input.form} task for the same skill and stage. The sandbox's output is the truth: when the code is right and teaches the skill, fix the key, the expected output or the explanation to match it; when the code or the tests are wrong, fix them (and keep the solution, the wrong solution and the recipe consistent). Keep Spanish and English saying the same thing. Answer with the whole task as the JSON object.`,
+          },
+        ],
+      },
+    ],
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseSchema: schemaFor(input.form),
+      thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
+      maxOutputTokens: 8192,
+    },
+  });
+  if (!written.ok) return null;
+  try {
+    return { task: { ...TaskSchema.parse(JSON.parse(written.text)), form: input.form }, model: written.model };
+  } catch {
+    return null;
+  }
 }
 
 // --- Admins' edits (docs/practice.md, "Editing a task") --------------------------------------------------------------
@@ -528,8 +704,10 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
   const skill = await skillFor(row.courseId, row.skillKey);
   if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
   const form = row.form as TaskForm;
+  const facts = await sandboxFacts({ fetch: false });
   const context = [
     ...(await taskContext(skill, row.stage, form)),
+    ...(facts ? [`# THE SANDBOX (the versions code runs with)\n${facts}`] : []),
     `# THE TASK NOW\n${JSON.stringify(row.content, null, 1)}`,
     `# WHAT THE ADMIN WANTS CHANGED\n${input.instruction}`,
   ].join("\n\n");

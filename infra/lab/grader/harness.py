@@ -12,6 +12,7 @@ import os
 import sys
 import time
 import traceback
+import types
 
 MAX_OUTPUT = 20_000
 MAX_MESSAGE = 2_000
@@ -52,6 +53,11 @@ with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
         result["error"] = {"type": type(error).__name__, "message": learner_traceback(error)}
 
     if tests and result["error"] is None:
+        # Tests use the code's names directly; `import solution` / `from solution import x` work too, since a test
+        # written that way is a natural one (the code is solution.py in tracebacks).
+        solution_module = types.ModuleType("solution")
+        solution_module.__dict__.update(namespace)
+        sys.modules["solution"] = solution_module
         test_namespace = dict(namespace)
         test_namespace["__name__"] = "tests"
         try:

@@ -169,7 +169,7 @@ the host; learner code never runs in it.
 
 A run's answer is `{status, ok, tests, error, stdout, wallMs}`: `passed`, `failed` (a test's `assert` failed, with its
 message), `error` (the code raised), `timeout`, `oom` or `crashed`. `harness.py` runs the code, then every `test_*`
-function in the tests against it; it prints its result behind a per-run nonce, so printed text can't pass for it.
+function in the tests against it (the tests see the code's names, and `import solution` works too); it prints its result behind a per-run nonce, so printed text can't pass for it.
 Under gVisor, an answer that keeps about 20 or more processes alive at once is ended by the sandbox (`crashed`, exit
 code 2) instead of having a fork refused; zombies and threads don't trigger it. The answer is stopped in under a
 second and the grader carries on.

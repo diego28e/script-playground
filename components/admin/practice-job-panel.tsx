@@ -101,6 +101,14 @@ export function PracticeJobPanel({ job }: { job: PracticeJobView | null }) {
     }
     setDismissed(job.id);
   };
+  // Skills that keep failing even after repairs: their tasks likely need what the sandbox doesn't have.
+  const struggling =
+    job.struggling.length > 0 ? (
+      <p className="w-full text-xs text-amber-700 dark:text-amber-300">
+        Keep failing their proof, even after repairs: {job.struggling.map((skill) => `${skill.skillKey} (${skill.rejected})`).join(", ")}. If they need a live
+        service (LangSmith, an API), mark them &ldquo;questions only&rdquo; in the skill editor.
+      </p>
+    ) : null;
   const problems =
     job.problems.length > 0 ? (
       <div>
@@ -155,6 +163,7 @@ export function PracticeJobPanel({ job }: { job: PracticeJobView | null }) {
             <code className="rounded bg-background/60 px-1">docker logs practice-worker</code>. The job waits; nothing is lost.
           </p>
         )}
+        {struggling}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <p className="text-xs text-muted-foreground">Runs on the lab server: you can close this page and come back.</p>
           {problems}
@@ -187,6 +196,7 @@ export function PracticeJobPanel({ job }: { job: PracticeJobView | null }) {
       </div>
       {job.error && <p className="text-destructive">{job.error}</p>}
       {job.status !== "DONE" && !job.error && <p className="text-muted-foreground">Start it again to carry on: only what&apos;s still missing is listed.</p>}
+      {struggling}
       {problems}
     </div>
   );
