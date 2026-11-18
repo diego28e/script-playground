@@ -1,6 +1,10 @@
 // Imports a course from its repository into the database: the course, its modules and their lessons.
 //
-//   pnpm course:import --repo <path to the course repository> [--publish] [--dry-run]
+//   pnpm course:import --repo <path to the course repository> [--publish] [--private] [--dry-run]
+//
+// --private makes the course private (docs/private-courses.md): only the people on its access list (Admin → Courses)
+// and admins see it. Pass it on the first import of a course that must never be public, before or with --publish. An
+// import never makes a course public again: that is only done from Admin → Courses.
 //
 // The repository layout is the LangChain course's: README.md (course title and tagline), modules/NN-slug/ with a
 // README.md (module title, part, goals, estimated time), lesson notebooks NN-MM-slug.ipynb, guides NN-MM-slug.md,
@@ -63,6 +67,7 @@ const { values } = parseArgs({
     repo: { type: "string" },
     slug: { type: "string" },
     publish: { type: "boolean", default: false },
+    private: { type: "boolean", default: false },
     "dry-run": { type: "boolean", default: false },
   },
 });
@@ -248,7 +253,7 @@ function printSummary(course: ParsedCourse) {
   if (untimed.length) console.log(`  without an estimated time: ${untimed.join(", ")}`);
 }
 
-async function save(course: ParsedCourse, publish: boolean) {
+async function save(course: ParsedCourse, publish: boolean, makePrivate: boolean) {
   const { prisma } = await import("@/lib/prisma");
   const target = new URL(process.env.DATABASE_URL ?? "").host;
   console.log(`  writing to ${target}`);
@@ -257,8 +262,8 @@ async function save(course: ParsedCourse, publish: boolean) {
       async (tx) => {
         const saved = await tx.course.upsert({
           where: { slug: course.slug },
-          create: { slug: course.slug, title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), status: publish ? "PUBLISHED" : "DRAFT" },
-          update: { title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), ...(publish ? { status: "PUBLISHED" as const } : {}) },
+          create: { slug: course.slug, title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), status: publish ? "PUBLISHED" : "DRAFT", visibility: makePrivate ? "PRIVATE" : "PUBLIC" },
+          update: { title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), ...(publish ? { status: "PUBLISHED" as const } : {}), ...(makePrivate ? { visibility: "PRIVATE" as const } : {}) },
         });
         const kept = new Set<string>();
         for (const courseModule of course.modules) {
@@ -299,6 +304,8 @@ async function save(course: ParsedCourse, publish: boolean) {
       console.log(`  no longer in the repository (kept, with any progress): ${removed.map((lesson) => `${lesson.module.slug}/${lesson.slug}`).join(", ")}`);
     }
     console.log(`  saved${publish ? " and published" : " (status unchanged; --publish shows a draft in the catalog)"}`);
+    const { visibility } = await prisma.course.findUniqueOrThrow({ where: { slug: course.slug }, select: { visibility: true } });
+    console.log(visibility === "PRIVATE" ? "  private: only the people on its list (Admin → Courses) and admins see it" : "  public: everyone sees it once published (--private keeps it to a list)");
   } finally {
     await prisma.$disconnect();
   }
@@ -317,7 +324,7 @@ async function main() {
     console.log(`  dry run: nothing written (a real run writes to ${new URL(process.env.DATABASE_URL ?? "").host})`);
     return;
   }
-  await save(course, values.publish);
+  await save(course, values.publish, values.private);
 }
 
 main().catch((error) => {

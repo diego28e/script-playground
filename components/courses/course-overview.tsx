@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import { ArrowRight, BookOpen, Check, ChevronDown, CircleDashed, ExternalLink, FolderKanban, NotebookPen, PlayCircle, Repeat } from "lucide-react";
+import { ArrowRight, BookOpen, Check, ChevronDown, CircleDashed, ExternalLink, FolderKanban, Lock, NotebookPen, PlayCircle, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import type { LessonKind } from "@prisma/client";
 import { enrollInCourse, type getCourseBySlug } from "@/actions/courses";
@@ -18,6 +18,7 @@ type CourseLesson = CourseDetail["modules"][number]["lessons"][number];
 const COPY = {
     es: {
         eyebrow: "Curso",
+        private: "Privado: solo lo ven las personas invitadas",
         language: { en: "en inglés", es: "en español" } as Record<string, string>,
         modules: "módulos",
         lessons: "lecciones",
@@ -42,6 +43,7 @@ const COPY = {
     },
     en: {
         eyebrow: "Course",
+        private: "Private: only the people invited see it",
         language: { en: "in English", es: "in Spanish" } as Record<string, string>,
         modules: "modules",
         lessons: "lessons",
@@ -128,6 +130,12 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
                     <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
                         {t.eyebrow} · {t.language[course.language] ?? course.language}
                     </p>
+                    {course.visibility === "PRIVATE" && (
+                        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-border bg-card/80 px-3 py-1 text-xs font-medium">
+                            <Lock className="size-3" aria-hidden="true" />
+                            {t.private}
+                        </p>
+                    )}
                     <h1 className="mt-4 max-w-4xl text-4xl font-extralight leading-tight tracking-tight text-balance sm:text-5xl md:text-6xl">
                         {course.title}
                     </h1>

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Lock } from "lucide-react";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { formatHours } from "@/components/courses/inline-code";
@@ -11,6 +11,7 @@ export type CatalogCourse = {
     title: string;
     summary: string | null;
     language: string;
+    visibility: "PUBLIC" | "PRIVATE";
     moduleCount: number;
     lessonCount: number;
     totalMinutes: number;
@@ -29,6 +30,7 @@ const COPY = {
         resume: "Continuar",
         progress: (done: number, total: number) => `${done} de ${total} lecciones completadas`,
         language: { en: "En inglés", es: "En español" } as Record<string, string>,
+        private: "Privado",
         empty: "Todavía no hay cursos publicados.",
     },
     en: {
@@ -41,6 +43,7 @@ const COPY = {
         resume: "Continue",
         progress: (done: number, total: number) => `${done} of ${total} lessons completed`,
         language: { en: "In English", es: "In Spanish" } as Record<string, string>,
+        private: "Private",
         empty: "No courses are published yet.",
     },
 };
@@ -78,6 +81,13 @@ export function CourseCatalog({ courses }: { courses: CatalogCourse[] }) {
                                         </defs>
                                         <rect width="100%" height="100%" fill={`url(#grid-${course.id})`} />
                                     </svg>
+                                    {course.visibility === "PRIVATE" && (
+                                        // Only the people on its list see this card at all (lib/course-access.ts).
+                                        <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-card/80 px-2.5 py-1 text-xs font-medium">
+                                            <Lock className="size-3" aria-hidden="true" />
+                                            {t.private}
+                                        </span>
+                                    )}
                                     <span className="absolute bottom-3 left-6 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                                         {t.language[course.language] ?? course.language} · {course.moduleCount} {t.modules} · {course.lessonCount} {t.lessons} · {formatHours(course.totalMinutes)}
                                     </span>

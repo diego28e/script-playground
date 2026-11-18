@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { composeGraph, type DiscoveryExtension, type Evidence, type GraphExtension, type PracticeEvent, type PracticeItem, type PracticeState, type ReviewLogEntry, type SkillGraph, type SkillNode } from "@intellectif/lk-practice";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { courseVisibleTo, viewerById } from "@/lib/course-access";
 import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
 import { gradeCode, type GradeTest } from "@/lib/practice/grader";
@@ -275,7 +276,12 @@ export async function practiceStreak(learnerId: string, today: string): Promise<
  */
 export async function practiceDue(userId: string, timeZone: string) {
   const learners = await prisma.practiceLearner.findMany({ where: { userId }, select: { id: true, courseId: true, course: { select: { slug: true, title: true } } } });
-  const enrolled = await prisma.enrollment.findMany({ where: { userId, course: { skillGraphs: { some: {} } } }, select: { courseId: true, course: { select: { slug: true, title: true } } } });
+  // Only courses the learner may still see: a private course they were taken off the list of stops counting.
+  const viewer = await viewerById(userId);
+  const enrolled = await prisma.enrollment.findMany({
+    where: { userId, course: { skillGraphs: { some: {} }, ...courseVisibleTo(viewer) } },
+    select: { courseId: true, course: { select: { slug: true, title: true } } },
+  });
   const day = localDay(timeZone);
   const courses: { slug: string; title: string; due: number }[] = [];
   for (const { courseId, course } of enrolled) {

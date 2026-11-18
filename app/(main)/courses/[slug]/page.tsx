@@ -1,7 +1,6 @@
 import { Metadata } from "next";
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { currentViewer } from "@/lib/viewer";
 import { getCourseBySlug } from "@/actions/courses";
 import { CourseOverview } from "@/components/courses/course-overview";
 
@@ -17,9 +16,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function CoursePage({ params }: Props) {
     const { slug } = await params;
-    const session = await auth.api.getSession({ headers: await headers() });
-    const result = await getCourseBySlug(slug, session?.user?.id);
+    const result = await getCourseBySlug(slug);
     if (!result.success) throw new Error(result.error);
+    // Also a private course this person isn't on the list of: it doesn't say it exists.
     if (!result.data) notFound();
-    return <CourseOverview course={result.data} signedIn={Boolean(session)} />;
+    return <CourseOverview course={result.data} signedIn={Boolean(await currentViewer())} />;
 }

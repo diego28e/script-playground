@@ -1,11 +1,11 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { courseVisibleTo } from "@/lib/course-access";
+import { currentViewer } from "@/lib/viewer";
 import { storedVideoTitle } from "@/lib/lesson-video";
 import { pythonInLesson } from "@/lib/compass/lesson";
 
@@ -14,12 +14,15 @@ export type LessonStatus = "IN_PROGRESS" | "COMPLETED";
 /**
  * Everything the lesson workspace shows: the course outline (every module and lesson, with the learner's
  * progress), the open lesson in full, and its neighbours in course order.
- * `data: null` means no such published course, module or lesson.
+ * `data: null` means no such published course, module or lesson for this person (a private course is only there for
+ * the people on its list, lib/course-access.ts). Who is asking is read from the session, never taken as an argument.
  */
-export async function getLessonWorkspace(courseSlug: string, moduleSlug: string, lessonSlug: string, userId?: string) {
+export async function getLessonWorkspace(courseSlug: string, moduleSlug: string, lessonSlug: string) {
   try {
+    const viewer = await currentViewer();
+    const userId = viewer?.id;
     const course = await prisma.course.findFirst({
-      where: { slug: courseSlug, status: "PUBLISHED" },
+      where: { slug: courseSlug, status: "PUBLISHED", ...courseVisibleTo(viewer) },
       select: {
         id: true,
         slug: true,
@@ -127,18 +130,19 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
 
 /** The signed-in learner, if enrolled in the course that holds the lesson. Progress is only kept for them. */
 async function enrolledLearner(lessonId: string) {
-  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
-  if (!session) return { error: "Sign in to track your progress" } as const;
+  const viewer = await currentViewer();
+  if (!viewer) return { error: "Sign in to track your progress" } as const;
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     select: { module: { select: { slug: true, course: { select: { id: true, slug: true } } } }, slug: true },
   });
   if (!lesson) return { error: "Lesson not found" } as const;
-  const enrollment = await prisma.enrollment.findUnique({
-    where: { userId_courseId: { userId: session.user.id, courseId: lesson.module.course.id } },
+  // Enrolled, and still allowed to see the course: being taken off a private course's list ends it.
+  const enrollment = await prisma.enrollment.findFirst({
+    where: { userId: viewer.id, courseId: lesson.module.course.id, course: courseVisibleTo(viewer) },
   });
   if (!enrollment) return { error: "Enroll in the course to track your progress" } as const;
-  return { userId: session.user.id, courseSlug: lesson.module.course.slug } as const;
+  return { userId: viewer.id, courseSlug: lesson.module.course.slug } as const;
 }
 
 /** Opening a lesson starts it (once) and always updates when it was last viewed. A completed lesson stays completed. */

@@ -1,6 +1,4 @@
 import { Metadata } from "next";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
 import { getPublishedCourses } from "@/actions/courses";
 import { CourseCatalog } from "@/components/courses/course-catalog";
 
@@ -12,8 +10,7 @@ export const metadata: Metadata = {
 };
 
 export default async function CoursesPage() {
-    const session = await auth.api.getSession({ headers: await headers() });
-    const result = await getPublishedCourses(session?.user?.id);
+    const result = await getPublishedCourses();
     // A failed query is an error (error.tsx), not an empty catalog.
     if (!result.success) throw new Error(result.error);
     return <CourseCatalog courses={result.data ?? []} />;

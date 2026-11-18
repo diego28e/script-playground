@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { courseVisibleTo } from "@/lib/course-access";
 import { TUTOR_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
 import { gradeCode } from "@/lib/practice/grader";
 import type { TaskContent } from "@/lib/practice/tasks";
@@ -162,7 +163,8 @@ export async function askScratch(input: z.input<typeof AskSchema>): Promise<Resu
   // What the learner sees of the task, never its key: the prompt, the options, a code task's starter.
   let task = "";
   if (taskId) {
-    const row = await prisma.practiceTask.findUnique({ where: { id: taskId }, select: { form: true, content: true } });
+    // Only a task of a course the learner may see (lib/course-access.ts).
+    const row = await prisma.practiceTask.findFirst({ where: { id: taskId, course: courseVisibleTo(user) }, select: { form: true, content: true } });
     if (row) {
       const content = row.content as unknown as TaskContent;
       const es = language === "es";

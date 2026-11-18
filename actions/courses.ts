@@ -1,14 +1,20 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { courseVisibleTo } from "@/lib/course-access";
+import { currentViewer } from "@/lib/viewer";
 
-export async function getPublishedCourses(userId?: string) {
+// Who is asking is read from the session here, never taken as an argument: these are server actions, so an argument
+// could come from anyone. A private course is only ever returned to the people it is for (lib/course-access.ts).
+
+/** The catalog: the published courses the person may see, with their own progress when signed in. */
+export async function getPublishedCourses() {
   try {
+    const viewer = await currentViewer();
+    const userId = viewer?.id;
     const courses = await prisma.course.findMany({
-      where: { status: "PUBLISHED" },
+      where: { status: "PUBLISHED", ...courseVisibleTo(viewer) },
       orderBy: { title: "asc" },
       select: {
         id: true,
@@ -16,6 +22,7 @@ export async function getPublishedCourses(userId?: string) {
         title: true,
         summary: true,
         language: true,
+        visibility: true,
         modules: { select: { lessons: { select: { id: true, estimatedMinutes: true } } } },
       },
     });
@@ -51,16 +58,20 @@ export async function getPublishedCourses(userId?: string) {
   }
 }
 
-export async function getCourseBySlug(slug: string, userId?: string) {
+/** A course's page. `data: null` means there's no such course for this person: unpublished, private, or not there. */
+export async function getCourseBySlug(slug: string) {
   try {
+    const viewer = await currentViewer();
+    const userId = viewer?.id;
     const course = await prisma.course.findFirst({
-      where: { slug, status: "PUBLISHED" },
+      where: { slug, status: "PUBLISHED", ...courseVisibleTo(viewer) },
       select: {
         id: true,
         slug: true,
         title: true,
         summary: true,
         language: true,
+        visibility: true,
         sourceRepoUrl: true,
         sourceRef: true,
         modules: {
@@ -115,15 +126,15 @@ export async function getCourseBySlug(slug: string, userId?: string) {
 
 export async function enrollInCourse(courseId: string) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) return { success: false, error: "Sign in to enroll" };
+    const viewer = await currentViewer();
+    if (!viewer) return { success: false, error: "Sign in to enroll" };
 
-    const course = await prisma.course.findFirst({ where: { id: courseId, status: "PUBLISHED" }, select: { slug: true } });
+    const course = await prisma.course.findFirst({ where: { id: courseId, status: "PUBLISHED", ...courseVisibleTo(viewer) }, select: { slug: true } });
     if (!course) return { success: false, error: "Course not found" };
 
     await prisma.enrollment.upsert({
-      where: { userId_courseId: { userId: session.user.id, courseId } },
-      create: { userId: session.user.id, courseId },
+      where: { userId_courseId: { userId: viewer.id, courseId } },
+      create: { userId: viewer.id, courseId },
       update: {},
     });
     revalidatePath("/courses");

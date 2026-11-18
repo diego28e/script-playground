@@ -4,6 +4,8 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { courseVisibleTo } from "@/lib/course-access";
+import { currentViewer } from "@/lib/viewer";
 import { afterAnswer, prepareDiscovery, runDiagnosis, type DiscoveryNote } from "@/lib/practice/discovery";
 import { RECIPE_HINT_NUMBER, recipeView, revealRecipe } from "@/lib/practice/recipes";
 import { pendingTutorRequests, tutorRequestedSkills } from "@/lib/practice/tutor-requests";
@@ -18,13 +20,14 @@ import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 type Result<T = object> = ({ success: true } & T) | { success: false; error: string };
 
 async function learnerFor(courseSlug: string) {
-  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
-  if (!session) return { error: "Sign in to practise." } as const;
-  const course = await prisma.course.findUnique({ where: { slug: courseSlug }, select: { id: true, title: true, slug: true } });
+  const viewer = await currentViewer();
+  if (!viewer) return { error: "Sign in to practise." } as const;
+  // A private course is "not found" for anyone it isn't for, enrolled or not (lib/course-access.ts).
+  const course = await prisma.course.findFirst({ where: { slug: courseSlug, ...courseVisibleTo(viewer) }, select: { id: true, title: true, slug: true } });
   if (!course) return { error: "Course not found." } as const;
-  const enrolled = await prisma.enrollment.findUnique({ where: { userId_courseId: { userId: session.user.id, courseId: course.id } } });
-  if (!enrolled && session.user.role !== "ADMIN") return { error: "Enrol in the course to practise it." } as const;
-  return { userId: session.user.id, course } as const;
+  const enrolled = await prisma.enrollment.findUnique({ where: { userId_courseId: { userId: viewer.id, courseId: course.id } } });
+  if (!enrolled && viewer.role !== "ADMIN") return { error: "Enrol in the course to practise it." } as const;
+  return { userId: viewer.id, course } as const;
 }
 
 /** A task as the learner sees it: the question, the choices or the starter code; nothing that gives the answer away. */

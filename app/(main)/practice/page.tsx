@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { courseVisibleTo } from "@/lib/course-access";
 import { PracticeCourses } from "@/components/practice/practice-courses";
 
 export const runtime = "nodejs";
@@ -11,7 +12,7 @@ export default async function PracticeIndexPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect(`/login?next=${encodeURIComponent("/practice")}`);
   const enrolled = await prisma.enrollment.findMany({
-    where: { userId: session.user.id, course: { skillGraphs: { some: {} } } },
+    where: { userId: session.user.id, course: { skillGraphs: { some: {} }, ...courseVisibleTo(session.user) } },
     select: { course: { select: { slug: true, title: true } } },
     orderBy: { enrolledAt: "desc" },
   });

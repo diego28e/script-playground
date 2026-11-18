@@ -132,6 +132,10 @@ model Course {
   // The language the course's content is written in (BCP 47), e.g. "en".
   language         String                   @default("en")
   status           CourseStatus             @default(DRAFT)
+  // Who may see a published course (lib/course-access.ts, docs/private-courses.md): everyone, or only the people on
+  // its access list (and admins).
+  visibility       CourseVisibility         @default(PUBLIC)
+  access           CourseAccess[]
   sourceRepoUrl    String?
   // The commit the course was last imported from.
   sourceRef        String?
@@ -151,6 +155,22 @@ model Course {
   practiceJobs     PracticeJob[]
 
   @@map("course")
+}
+
+// One person who may open a private course, by the email they sign in with. The email is stored lower-cased, and may
+// be added before the person has an account: they see the course from their first sign-in.
+model CourseAccess {
+  id        String   @id @default(cuid())
+  courseId  String
+  email     String
+  // The admin who added it (a user id).
+  addedById String?
+  createdAt DateTime @default(now())
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, email])
+  @@index([email])
+  @@map("course_access")
 }
 
 model CourseModule {
@@ -463,6 +483,13 @@ enum Role {
 enum CourseStatus {
   DRAFT
   PUBLISHED
+}
+
+enum CourseVisibility {
+  // Anyone sees it in the catalog and can enrol.
+  PUBLIC
+  // Only the people on its access list, and admins. For everyone else it doesn't exist.
+  PRIVATE
 }
 
 enum LessonKind {

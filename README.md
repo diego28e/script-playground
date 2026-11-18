@@ -212,6 +212,7 @@ Every feature degrades gracefully when its keys are missing. The lab and the med
 | [`docs/notebook-embed.md`](docs/notebook-embed.md) | The lesson's notebook inside the page |
 | [`docs/lesson-videos.md`](docs/lesson-videos.md) | Videos per skill, uploads, captions and the player |
 | [`docs/compass.md`](docs/compass.md) | The Python guide |
+| [`docs/private-courses.md`](docs/private-courses.md) | Courses only some people can see: the access list and the one rule every query uses |
 
 ---
 

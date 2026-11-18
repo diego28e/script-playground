@@ -1,7 +1,7 @@
 import { Metadata } from "next";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { currentViewer } from "@/lib/viewer";
 import { lessonPath } from "@/lib/lab";
 import { getLessonWorkspace } from "@/actions/lessons";
 import { LessonWorkspace } from "@/components/courses/lesson-workspace";
@@ -25,8 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function LessonPage({ params }: Props) {
     const { slug, module: moduleSlug, lesson: lessonSlug } = await params;
-    const session = await auth.api.getSession({ headers: await headers() });
-    const result = await getLessonWorkspace(slug, moduleSlug, lessonSlug, session?.user?.id);
+    const result = await getLessonWorkspace(slug, moduleSlug, lessonSlug);
     if (!result.success) throw new Error(result.error);
     if (!result.data) notFound();
     const { videos: storedVideos, ...lesson } = result.data.lesson;
@@ -73,5 +72,5 @@ export default async function LessonPage({ params }: Props) {
     // The outline's width and fold, as the learner left them: rendered so from the start, with no jump.
     const outline = readOutlinePreference((await cookies()).get(OUTLINE_COOKIE)?.value);
 
-    return <LessonWorkspace data={data} signedIn={Boolean(session)} reading={reading} videos={videos} outline={outline} />;
+    return <LessonWorkspace data={data} signedIn={Boolean(await currentViewer())} reading={reading} videos={videos} outline={outline} />;
 }

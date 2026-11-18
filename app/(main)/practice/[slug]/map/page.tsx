@@ -3,6 +3,8 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { courseVisibleTo } from "@/lib/course-access";
+import { currentViewer } from "@/lib/viewer";
 import { getPracticeMap } from "@/actions/practice-learner";
 import { PracticeMap } from "@/components/practice/practice-map";
 
@@ -12,7 +14,7 @@ type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const course = await prisma.course.findUnique({ where: { slug }, select: { title: true } });
+  const course = await prisma.course.findFirst({ where: { slug, ...courseVisibleTo(await currentViewer()) }, select: { title: true } });
   return course ? { title: `Mapa · ${course.title}` } : {};
 }
 

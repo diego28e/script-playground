@@ -39,6 +39,17 @@ export function AdminNav() {
                     </Link>
                     <nav className="flex items-center space-x-6 text-sm font-medium">
                         <Link
+                            href="/admin/courses"
+                            className={cn(
+                                "transition-colors hover:text-foreground/80",
+                                pathname?.startsWith("/admin/courses")
+                                    ? "text-foreground"
+                                    : "text-foreground/60"
+                            )}
+                        >
+                            Courses
+                        </Link>
+                        <Link
                             href="/admin/challenges"
                             className={cn(
                                 "transition-colors hover:text-foreground/80",

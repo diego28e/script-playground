@@ -2,6 +2,7 @@ import type { Content, ThinkingLevel } from "@google/genai";
 import type { Prisma, TutorMode } from "@prisma/client";
 import { z } from "zod";
 import { TUTOR_CHAIN, chainStartingAt, generateWithFallback, logAi } from "@/lib/ai/gemini";
+import { courseVisibleTo, viewerById } from "@/lib/course-access";
 import { labGroups } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import { SYSTEM_PROMPT, buildContext, learnerTurn, type TurnContext } from "@/lib/tutor/prompt";
@@ -75,8 +76,9 @@ function isLabAdmin(groups: string[]) {
 }
 
 async function courseContext(userId: string, notebookPath: string): Promise<{ lessonId: string | null; course: TurnContext["course"]; lesson: TurnContext["lesson"] }> {
+  // Only a lesson of a course the learner may see: the tutor never describes a private course to anyone else.
   const lesson = await prisma.lesson.findFirst({
-    where: { sourcePath: notebookPath, module: { course: { status: "PUBLISHED" } } },
+    where: { sourcePath: notebookPath, module: { course: { status: "PUBLISHED", ...courseVisibleTo(await viewerById(userId)) } } },
     select: { id: true, code: true, title: true, objectives: true, prerequisites: true, module: { select: { courseId: true } } },
   });
   if (!lesson) return { lessonId: null, course: null, lesson: null };
