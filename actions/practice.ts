@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
+import { AUTHORING_MODELS } from "@/lib/ai/gemini";
 import { addDiscoveryToCourse, courseDiscoveries, setDiscoveryStatus, type CourseDiscovery } from "@/lib/practice/discovery";
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
 import { publishGraph, type PublishedGraph } from "@/lib/practice/graph";
@@ -77,7 +77,7 @@ export async function getPracticeGraph() {
   // Missing prerequisites learners' diagnoses proposed that wait for the admin's decision.
   const discovered = await prisma.practiceDiscoveredEdge.groupBy({ by: ["courseId"], where: { status: "PROPOSED" }, _count: { _all: true } });
   return {
-    models: AUTHORING_CHAIN.map(({ model, label }) => ({ id: model, label })),
+    models: AUTHORING_MODELS.map(({ model, label }) => ({ id: model, label })),
     courses: courses.map(({ skillGraphs, ...course }) => {
       const latest = skillGraphs[0] ?? null;
       const graph = latest ? (latest.graph as unknown as PublishedGraph).graph : null;

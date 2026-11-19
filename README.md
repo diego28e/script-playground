@@ -193,7 +193,7 @@ pnpm dev                                         # http://localhost:3000
 | Needed for | Environment variables |
 |---|---|
 | The app | `DATABASE_URL`, `DIRECT_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
-| AI features | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` |
+| AI features | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`; optional: `DOLPHINGO_API_KEY` (two more models an admin can pick for authoring) |
 | Voice and captions | `DEEPGRAM_API_KEY` |
 | Code grading and the scratchbook | `GRADER_URL`, `GRADER_SECRET` |
 | Videos | `MEDIA_BASE_URL`, `MEDIA_KEY_PAIR_ID`, `MEDIA_PRIVATE_KEY_B64`, `MEDIA_BUCKET`, `MEDIA_CONVERT_ROLE_ARN` |

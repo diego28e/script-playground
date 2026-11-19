@@ -1,6 +1,6 @@
 import { Type, type Content, type Schema, type ThinkingLevel } from "@google/genai";
 import { z } from "zod";
-import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
+import { authoringChain, generateWithFallback, isAuthoringModel } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
@@ -190,12 +190,12 @@ export async function draftLesson(lessonId: string, userId: string, model?: stri
   ].join("\n\n");
   const contents: Content[] = [{ role: "user", parts: [{ text: context }, { text: "Propose this lesson's skills as the JSON object." }] }];
 
-  const chosen = AUTHORING_CHAIN.some((entry) => entry.model === model) ? model : undefined;
+  const chosen = isAuthoringModel(model) ? model : undefined;
   const result = await generateWithFallback({
     feature: "graph",
     pool: "AUTHORING",
     userId,
-    models: chainStartingAt(AUTHORING_CHAIN, chosen),
+    models: authoringChain(chosen),
     chosenFirst: Boolean(chosen),
     deadline,
     contents,

@@ -47,7 +47,7 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 // Not top-level await: tsx runs the project as CommonJS on a PC (pnpm practice-worker:dev).
 async function main() {
   await recoverOrphans();
-  log("info", "practice.worker.start", { tickMs: TICK_MS, grader: Boolean(process.env.GRADER_URL), models: { anthropic: Boolean(process.env.ANTHROPIC_API_KEY), gemini: Boolean(process.env.GEMINI_API_KEY), deepseek: Boolean(process.env.DEEPSEEK_API_KEY) } });
+  log("info", "practice.worker.start", { tickMs: TICK_MS, grader: Boolean(process.env.GRADER_URL), models: { anthropic: Boolean(process.env.ANTHROPIC_API_KEY), gemini: Boolean(process.env.GEMINI_API_KEY), deepseek: Boolean(process.env.DEEPSEEK_API_KEY), dolphingo: Boolean(process.env.DOLPHINGO_API_KEY) } });
   await loop();
 }
 

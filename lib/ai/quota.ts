@@ -27,6 +27,9 @@ export const MODEL_LIMITS: Record<string, { rpm: number; rpd: number }> = {
   // about 130 requests (about US$0.04 each on Opus 5.5 at low effort; check the drafting runs for real figures).
   "claude-opus-5-5": { rpm: 30, rpd: 400 },
   "claude-sonnet-5-5": { rpm: 30, rpd: 400 },
+  // DolphinGo's models, for authoring by choice only (AUTHORING_PICK_ONLY). Our own caps, the same as Claude's.
+  "dolphingo-deepseek-v4.1-flash": { rpm: 30, rpd: 400 },
+  "dolphingo-qwen4-max": { rpm: 30, rpd: 400 },
 };
 
 /**
@@ -42,6 +45,8 @@ const SHARES: Record<string, Partial<Record<Exclude<AiPool, "TUTOR">, number>>> 
   // All of Claude's allowance is authoring's: the tutor and the platform's features never use it.
   "claude-opus-5-5": { AUTHORING: 400 },
   "claude-sonnet-5-5": { AUTHORING: 400 },
+  "dolphingo-deepseek-v4.1-flash": { AUTHORING: 400 },
+  "dolphingo-qwen4-max": { AUTHORING: 400 },
 };
 
 /** Requests a day for each person, in the platform's other features. The tutor has no per-person count: its share is. */
@@ -58,6 +63,8 @@ const PRICES: Record<string, { input: number; output: number }> = {
   // Anthropic's pricing (2026-11-06). Thinking is billed as output and already counted in output tokens.
   "claude-opus-5-5": { input: 4, output: 20 },
   "claude-sonnet-5-5": { input: 2, output: 10 },
+  // DolphinGo's two models have no price here yet: its price list wasn't available when they were added
+  // (2026-11-18), so their requests are counted in the ledger with a cost of 0. Add the prices to see their spend.
 };
 
 /** DeepSeek's peak hours: 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday. Everything else is half price. */

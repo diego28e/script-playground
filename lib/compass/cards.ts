@@ -1,6 +1,6 @@
 import { Type, type Schema } from "@google/genai";
 import { z } from "zod";
-import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
+import { authoringChain, generateWithFallback, isAuthoringModel } from "@/lib/ai/gemini";
 import { gradeCode, type GradeOutcome } from "@/lib/practice/grader";
 import { COURSE_INVENTORY } from "@/lib/compass/concepts";
 import { DOCS_VERSION, docCandidates, docLink, type DocLink } from "@/lib/compass/docs";
@@ -169,7 +169,7 @@ export async function draftCard(input: {
   userId: string;
   deadline: number;
 }): Promise<{ ok: true; card: CardDraft; model: string; dropped: string[] } | { ok: false; error: string }> {
-  const chosen = AUTHORING_CHAIN.some((entry) => entry.model === input.model) ? input.model! : DEFAULT_CARD_MODEL;
+  const chosen = isAuthoringModel(input.model) ? input.model : DEFAULT_CARD_MODEL;
   const parts = [{ text: draftContext(input.concept, input.allConcepts) }];
   if (input.previous && input.instruction) {
     parts.push({ text: `# THE CURRENT CARD\n${JSON.stringify(input.previous)}\n\n# THE ADMIN'S INSTRUCTION\n${input.instruction}\n\nRewrite the card following the instruction; keep everything it doesn't mention.` });
@@ -180,7 +180,7 @@ export async function draftCard(input: {
     feature: "compass",
     pool: "AUTHORING",
     userId: input.userId,
-    models: chainStartingAt(AUTHORING_CHAIN, chosen),
+    models: authoringChain(chosen),
     chosenFirst: true,
     deadline: input.deadline,
     contents: [{ role: "user", parts }],

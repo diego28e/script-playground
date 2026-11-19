@@ -3,8 +3,19 @@ import type { Content, GenerateContentConfig } from "@google/genai";
 // DeepSeek V4.1 Flash (`deepseek-flash`), the tutor's last fallback after the free Gemini models. Its API is
 // OpenAI-style (https://api-docs.deepseek.com); called with fetch, so it needs no SDK. Thinking is switched off:
 // the tutor answers in seconds, and the free Gemini models before it do the same.
+//
+// The same client serves any other OpenAI-style endpoint listed here. DolphinGo (token.dolphingo.ai) is a reseller:
+// one key for many models, among them DeepSeek V4.1 Flash and Qwen4-Max, which admins can pick for authoring
+// (AUTHORING_PICK_ONLY in lib/ai/gemini.ts). Checked with the project's key on 2026-11-18: both take JSON mode and
+// the same `thinking` switch as DeepSeek's own API. With thinking off a task-writing request took about 5 s on
+// DeepSeek and 9 s on Qwen; with it on, Qwen took 15 s, too close to what an Amplify request allows.
 
-const BASE_URL = "https://api.deepseek.com";
+const ENDPOINTS = {
+  deepseek: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", keyEnv: "DEEPSEEK_API_KEY" },
+  dolphingo: { name: "DolphinGo", baseUrl: "https://token.dolphingo.ai/v1", keyEnv: "DOLPHINGO_API_KEY" },
+} as const;
+
+export type OpenAiStyleEndpoint = keyof typeof ENDPOINTS;
 
 export class DeepSeekError extends Error {
   constructor(
@@ -48,12 +59,15 @@ export async function deepSeekGenerate(
      * no answer and sent down the chain to slower models.
      */
     acceptProse?: boolean;
+    /** Which OpenAI-style endpoint serves the model. DeepSeek's own, unless said otherwise. */
+    endpoint?: OpenAiStyleEndpoint;
   } = {},
 ): Promise<DeepSeekResult> {
   const json = config.responseMimeType === "application/json";
-  const answer = await complete(model, contents, config, signal, json, options.onText);
+  const endpoint = options.endpoint ?? "deepseek";
+  const answer = await complete(endpoint, model, contents, config, signal, json, options.onText);
   if (!json || !options.acceptProse || answer.text) return answer;
-  const retry = await complete(model, contents, config, signal, false, options.onText);
+  const retry = await complete(endpoint, model, contents, config, signal, false, options.onText);
   // Both were billed.
   const tokens = {
     input: answer.tokens.input + retry.tokens.input,
@@ -65,6 +79,7 @@ export async function deepSeekGenerate(
 }
 
 async function complete(
+  endpoint: OpenAiStyleEndpoint,
   model: string,
   contents: Content[],
   config: GenerateContentConfig,
@@ -72,8 +87,9 @@ async function complete(
   json: boolean,
   onText?: (text: string) => void,
 ): Promise<DeepSeekResult> {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new DeepSeekError("DEEPSEEK_API_KEY is not set", 401);
+  const { name, baseUrl, keyEnv } = ENDPOINTS[endpoint];
+  const apiKey = process.env[keyEnv];
+  if (!apiKey) throw new DeepSeekError(`${keyEnv} is not set`, 401);
 
   const messages = [
     ...(systemText(config) ? [{ role: "system", content: systemText(config) }] : []),
@@ -82,7 +98,7 @@ async function complete(
       content: (item.parts ?? []).map((part) => part.text ?? "").join("\n\n"),
     })),
   ];
-  const response = await fetch(`${BASE_URL}/chat/completions`, {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -98,7 +114,7 @@ async function complete(
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new DeepSeekError(`DeepSeek ${response.status}: ${body.slice(0, 300)}`, response.status);
+    throw new DeepSeekError(`${name} ${response.status}: ${body.slice(0, 300)}`, response.status);
   }
   if (onText) return readStream(response, onText);
   const data = (await response.json()) as {

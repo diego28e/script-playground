@@ -23,7 +23,9 @@ export type ModelEntry = {
   /** How the lab's tutor panel names it in its model list. */
   label: string;
   timeoutMs: number;
-  provider?: "gemini" | "deepseek" | "anthropic";
+  provider?: "gemini" | "deepseek" | "anthropic" | "dolphingo";
+  /** The id the provider knows the model by, when it isn't `model` (which must be unique across providers). */
+  upstream?: string;
   /** The lowest thinking level the model accepts, when it isn't MINIMAL (gemini-3.8-flash refuses MINIMAL with a 400). */
   minThinking?: "LOW";
 };
@@ -63,6 +65,32 @@ export const AUTHORING_CHAIN: ReadonlyArray<ModelEntry> = [
   { model: "deepseek-flash", label: "DeepSeek V4.1 Flash", timeoutMs: 25_000, provider: "deepseek" },
   ...MODEL_CHAIN,
 ];
+
+/**
+ * Models an admin can pick for authoring, and that nothing else ever tries: they are in no chain, so no call falls
+ * back to them and no learner's text reaches them. They are served by DolphinGo, a reseller (lib/ai/deepseek.ts);
+ * DeepSeek V4.1 Flash is the same model as `deepseek-flash` above, through that key and not DeepSeek's own.
+ */
+export const AUTHORING_PICK_ONLY: ReadonlyArray<ModelEntry> = [
+  { model: "dolphingo-deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash (DolphinGo)", timeoutMs: 25_000, provider: "dolphingo", upstream: "DeepSeek-V4.1-Flash-1017" },
+  { model: "dolphingo-qwen4-max", label: "Qwen4-Max (DolphinGo)", timeoutMs: 25_000, provider: "dolphingo", upstream: "qwen4-max" },
+];
+
+/** Every model the authoring pickers offer: the chain, then the pick-only ones. */
+export const AUTHORING_MODELS: ReadonlyArray<ModelEntry> = [...AUTHORING_CHAIN, ...AUTHORING_PICK_ONLY];
+
+export function isAuthoringModel(model: string | null | undefined): model is string {
+  return AUTHORING_MODELS.some((entry) => entry.model === model);
+}
+
+/**
+ * The chain for an authoring call that starts at `model`. A pick-only model is tried first and, if it fails, the
+ * whole authoring chain follows from its top. Any other model starts the chain where it stands (chainStartingAt).
+ */
+export function authoringChain(model: string | undefined): ReadonlyArray<ModelEntry> {
+  const picked = AUTHORING_PICK_ONLY.find((entry) => entry.model === model);
+  return picked ? [picked, ...AUTHORING_CHAIN] : chainStartingAt(AUTHORING_CHAIN, model);
+}
 
 /**
  * The chain started at a chosen model (the lab's model picker, for admins): that model first, then the ones after it
@@ -200,7 +228,7 @@ export async function generateWithFallback({
   // If every model is cooling down, try them all anyway: a cool-down is a guess, never a reason to fail.
   const allCooling = models.every(({ model }) => (coolingUntil.get(model) ?? 0) > Date.now());
   const refusedProviders = new Set<string>();
-  for (const [index, { model, timeoutMs, provider = "gemini", minThinking }] of models.entries()) {
+  for (const [index, { model, timeoutMs, provider = "gemini", minThinking, upstream }] of models.entries()) {
     const attemptStarted = Date.now();
     const chosen = chosenFirst && index === 0;
     if (refusedProviders.has(provider)) continue;
@@ -230,12 +258,12 @@ export async function generateWithFallback({
       return finishRequest(requestId, { ok, model, tokens }).catch((error) => log("warn", { event: "ai.ledger", traceId, error: String(error) }));
     };
     try {
-      if (provider === "deepseek" || provider === "anthropic") {
+      if (provider === "deepseek" || provider === "dolphingo" || provider === "anthropic") {
         const signal = AbortSignal.timeout(attemptMs);
         const answer =
-          provider === "deepseek"
-            ? await deepSeekGenerate(model, contents, config, signal, { onText: onText && ((text) => onText(text, index)), acceptProse })
-            : await claudeGenerate(model, contents, config, signal);
+          provider === "anthropic"
+            ? await claudeGenerate(model, contents, config, signal)
+            : await deepSeekGenerate(upstream ?? model, contents, config, signal, { onText: onText && ((text) => onText(text, index)), acceptProse, endpoint: provider });
         const outcome: Attempt["outcome"] = answer.text ? "ok" : "empty";
         attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted, tokens: answer.tokens });
         await record(outcome === "ok", answer.tokens);

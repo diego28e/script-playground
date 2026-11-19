@@ -3,7 +3,7 @@ import { Type, type Schema, type ThinkingLevel } from "@google/genai";
 import { admitCandidate, validateItems, type CandidateItem, type CandidateProof, type PracticeItem, type SkillNode } from "@intellectif/lk-practice";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { AUTHORING_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
+import { AUTHORING_CHAIN, authoringChain, chainStartingAt, generateWithFallback, isAuthoringModel } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
@@ -598,14 +598,14 @@ export async function generateTask(input: {
     `# EXISTING TASKS (don't repeat)\n${existing.map((task) => `- (${task.form}) ${String((task.content as TaskContent).promptEn).replace(/\s+/g, " ").slice(0, 160)}`).join("\n") || "(none yet)"}`,
   ].join("\n\n");
 
-  const chosen = AUTHORING_CHAIN.some((entry) => entry.model === input.model) ? input.model! : DEFAULT_TASK_MODEL;
+  const chosen = isAuthoringModel(input.model) ? input.model : DEFAULT_TASK_MODEL;
   // Leave room for the proof: running code or asking a second model takes a few seconds.
   const writeDeadline = input.deadline - (form === "choice" || form === "fill" ? 9_000 : 6_000);
   const written = await generateWithFallback({
     feature: "graph",
     pool: "AUTHORING",
     userId: input.userId,
-    models: chainStartingAt(AUTHORING_CHAIN, chosen),
+    models: authoringChain(chosen),
     chosenFirst: true,
     deadline: writeDeadline,
     contents: [{ role: "user", parts: [{ text: context }, { text: `Write the ${form} task as the JSON object.` }] }],
@@ -660,7 +660,7 @@ async function repairTask(input: {
     feature: "graph",
     pool: "AUTHORING",
     userId: input.userId,
-    models: chainStartingAt(AUTHORING_CHAIN, input.model),
+    models: authoringChain(input.model),
     chosenFirst: true,
     deadline,
     contents: [
@@ -711,12 +711,12 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
     `# THE TASK NOW\n${JSON.stringify(row.content, null, 1)}`,
     `# WHAT THE ADMIN WANTS CHANGED\n${input.instruction}`,
   ].join("\n\n");
-  const chosen = AUTHORING_CHAIN.some((entry) => entry.model === input.model) ? input.model : DEFAULT_TASK_MODEL;
+  const chosen = isAuthoringModel(input.model) ? input.model : DEFAULT_TASK_MODEL;
   const written = await generateWithFallback({
     feature: "graph",
     pool: "AUTHORING",
     userId: input.userId,
-    models: chainStartingAt(AUTHORING_CHAIN, chosen),
+    models: authoringChain(chosen),
     chosenFirst: true,
     deadline: input.deadline,
     contents: [
@@ -761,7 +761,7 @@ export async function saveTaskEdit(input: { taskId: string; task: unknown; edite
   if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
   const form = row.form as TaskForm;
   // The writer decides who checks a question: a model other than the one that wrote it.
-  const writer = input.editedWith && AUTHORING_CHAIN.some((entry) => entry.model === input.editedWith) ? input.editedWith : "admin";
+  const writer = isAuthoringModel(input.editedWith) ? input.editedWith : "admin";
   const result = await proveAndStore({
     courseId: row.courseId,
     skillKey: row.skillKey,

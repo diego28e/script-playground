@@ -126,6 +126,17 @@ offline. DeepSeek V4.1 Flash (about 7 s) covered every objective, judged runnabl
 questions only) and gave sensible prerequisites. The page therefore defaults to DeepSeek, at about US$0.004 a
 lesson (about US$0.60 for the whole course); its list can choose the free models instead.
 
+**Two models by choice only (2026-11-18).** The authoring lists (drafting a lesson, writing and editing a task, the
+Python guide's cards) also offer **DeepSeek V4.1 Flash (DolphinGo)** and **Qwen4-Max (DolphinGo)**
+(`AUTHORING_PICK_ONLY` in `lib/ai/gemini.ts`). They are served by DolphinGo, a reseller with one OpenAI-style
+endpoint and one key (`DOLPHINGO_API_KEY`), through the same client as DeepSeek (`lib/ai/deepseek.ts`). They are in
+no chain: nothing falls back to them, and the tutor, hints and diagnoses never use them, so no learner's text
+reaches that provider. When an admin picks one, it is tried first, and if it fails the usual authoring chain follows
+from Opus 5.5 (`authoringChain`). A task written by one of them is still proved by Claude Sonnet 5.5, a model from
+another provider. Thinking is switched off for both, as for DeepSeek: with it on, Qwen4-Max took 15 s for one task,
+too close to what an Amplify request allows. Their price isn't in `lib/ai/quota.ts` yet, so the ledger counts their
+requests and shows a cost of 0. The practice worker needs the key in its own `.env` to use them in bulk jobs.
+
 **Claude (2026-11-06).** Drafting now starts with Claude Opus 5.5, on the platform's Anthropic credit, and the page's
 list can start it at Claude Sonnet 5.5, DeepSeek or a free model instead (kept per browser). The authoring chain
 (`lib/ai/gemini.ts` `AUTHORING_CHAIN`) is Opus 5.5, Sonnet 5.5, DeepSeek, then the free models; a model that fails

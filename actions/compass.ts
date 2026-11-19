@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { AUTHORING_CHAIN } from "@/lib/ai/gemini";
+import { AUTHORING_MODELS } from "@/lib/ai/gemini";
 import { COURSE_INVENTORY, syncConcepts } from "@/lib/compass/concepts";
 import { CardSchema, checkDraft, draftCard, fromColumns, proveCard, toColumns, type CardDraft, type CardProof } from "@/lib/compass/cards";
 import { docCandidates, docLink, type DocLink } from "@/lib/compass/docs";
@@ -49,7 +49,7 @@ export async function listCompassConcepts() {
     missing,
     commit: COURSE_INVENTORY.commit,
     lessons: COURSE_INVENTORY.taughtNotebooks,
-    models: AUTHORING_CHAIN.filter((entry) => entry.provider === "anthropic" || entry.provider === "deepseek").map(({ model, label }) => ({ id: model, label })),
+    models: AUTHORING_MODELS.filter((entry) => entry.provider !== undefined && entry.provider !== "gemini").map(({ model, label }) => ({ id: model, label })),
     concepts: concepts.map(({ cards, ...concept }) => ({
       ...concept,
       need: demand.get(concept.key) ?? { views: 0, searches: 0, errors: 0, score: 0 },
@@ -88,7 +88,7 @@ export async function getCompassConcept(key: string) {
     })),
     links: [...links.values()],
     concepts: all,
-    models: AUTHORING_CHAIN.filter((entry) => entry.provider === "anthropic" || entry.provider === "deepseek").map(({ model, label }) => ({ id: model, label })),
+    models: AUTHORING_MODELS.filter((entry) => entry.provider !== undefined && entry.provider !== "gemini").map(({ model, label }) => ({ id: model, label })),
   };
 }
 export type CompassConceptView = NonNullable<Awaited<ReturnType<typeof getCompassConcept>>>;
