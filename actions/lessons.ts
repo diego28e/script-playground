@@ -18,9 +18,10 @@ export type LessonStatus = "IN_PROGRESS" | "COMPLETED";
  * the people on its list, lib/course-access.ts). Who is asking is read from the session, never taken as an argument.
  */
 export async function getLessonWorkspace(courseSlug: string, moduleSlug: string, lessonSlug: string) {
+  // Read before the try, so a catch below can't swallow Next's own per-request signal (actions/courses.ts).
+  const viewer = await currentViewer();
+  const userId = viewer?.id;
   try {
-    const viewer = await currentViewer();
-    const userId = viewer?.id;
     const course = await prisma.course.findFirst({
       where: { slug: courseSlug, status: "PUBLISHED", ...courseVisibleTo(viewer) },
       select: {

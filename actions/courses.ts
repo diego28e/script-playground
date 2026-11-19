@@ -10,9 +10,11 @@ import { currentViewer } from "@/lib/viewer";
 
 /** The catalog: the published courses the person may see, with their own progress when signed in. */
 export async function getPublishedCourses() {
+  // Read before the try: on a page Next would otherwise prerender, reading the session is how Next learns the page
+  // is per request, by an error of its own that a catch below would swallow (the build then fails on that page).
+  const viewer = await currentViewer();
+  const userId = viewer?.id;
   try {
-    const viewer = await currentViewer();
-    const userId = viewer?.id;
     const courses = await prisma.course.findMany({
       where: { status: "PUBLISHED", ...courseVisibleTo(viewer) },
       orderBy: { title: "asc" },
@@ -60,9 +62,10 @@ export async function getPublishedCourses() {
 
 /** A course's page. `data: null` means there's no such course for this person: unpublished, private, or not there. */
 export async function getCourseBySlug(slug: string) {
+  // Read before the try, so a catch below can't swallow Next's own per-request signal (see getPublishedCourses).
+  const viewer = await currentViewer();
+  const userId = viewer?.id;
   try {
-    const viewer = await currentViewer();
-    const userId = viewer?.id;
     const course = await prisma.course.findFirst({
       where: { slug, status: "PUBLISHED", ...courseVisibleTo(viewer) },
       select: {
