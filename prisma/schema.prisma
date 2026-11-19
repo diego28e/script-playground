@@ -220,6 +220,8 @@ model Lesson {
   tutorSessions    TutorSession[]
   practiceSkills   PracticeSkill[]
   practiceDraft    PracticeLessonDraft?
+  // The lesson told as audio by a teacher (docs/lesson-audio.md).
+  audio            LessonAudio?
 
   @@unique([moduleId, slug])
   @@index([moduleId, position])
@@ -291,6 +293,68 @@ model VideoUpload {
 
   @@index([lessonId, createdAt])
   @@map("video_upload")
+}
+
+enum LessonAudioStatus {
+  // Waiting for the practice worker to write the script.
+  SCRIPT_QUEUED
+  WRITING
+  // Written: waiting for an admin to read it and approve it.
+  REVIEW
+  // Approved (or written in a run that voices without review): waiting to be voiced.
+  VOICE_QUEUED
+  VOICING
+  // Voiced: learners hear it.
+  DONE
+  // A step failed on every attempt; `error` says which and why.
+  FAILED
+}
+
+// A lesson's audio (docs/lesson-audio.md): a model writes what a teacher would say to explain the whole lesson
+// (lib/lesson-audio/script.ts), an admin approves the script, and Deepgram voices it (lib/lesson-audio/voice.ts). The
+// practice worker does both steps, one lesson at a time, in queue order (`priority` first, then `queuedAt`). Learners
+// hear `audioPath` whenever it is set: rewriting or re-voicing replaces it only when the new audio is ready.
+model LessonAudio {
+  id            String            @id @default(cuid())
+  lessonId      String            @unique
+  status        LessonAudioStatus @default(SCRIPT_QUEUED)
+  // What the steps use: the script model (lib/lesson-audio/script.ts NARRATION_MODELS) and the Deepgram voice.
+  model         String
+  voice         String
+  // Voice right after writing, without waiting for review (a run started with "voice them too").
+  autoVoice     Boolean           @default(false)
+  // A lesson asked for on its own goes before a whole-course run.
+  priority      Int               @default(0)
+  queuedAt      DateTime?
+  attempts      Int               @default(0)
+  notBefore     DateTime?
+  startedAt     DateTime?
+  // What the worker is doing right now ("Writing part 2 of 5"), or the last reason a step will be retried.
+  progress      String?
+  error         String?
+  script        String?
+  scriptModel   String?
+  scriptWords   Int?
+  scriptedAt    DateTime?
+  approvedAt    DateTime?
+  approvedById  String?
+  // The voiced lesson: a /media/ path (lib/media.ts), its length, the script it says, and how many characters were
+  // voiced (what Deepgram bills).
+  audioPath     String?
+  audioSeconds  Float?
+  audioScript   String?
+  audioChars    Int?
+  audioVoice    String?
+  voicedAt      DateTime?
+  // Bumped on every voicing: part of the file's name, so a new version never meets an old one in a cache.
+  revision      Int               @default(0)
+  requestedById String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  lesson        Lesson            @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([status, priority, queuedAt])
+  @@map("lesson_audio")
 }
 
 model Enrollment {

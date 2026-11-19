@@ -10,6 +10,7 @@ import { LessonMarkdown } from "@/components/courses/lesson-markdown";
 import { parseLessonVideo } from "@/lib/lesson-video";
 import type { PlayableVideo } from "@/components/courses/lesson-videos";
 import { resolveMediaUrls } from "@/lib/media";
+import type { LessonAudioTrack } from "@/components/courses/lesson-audio";
 
 export const runtime = "nodejs";
 
@@ -28,8 +29,13 @@ export default async function LessonPage({ params }: Props) {
     const result = await getLessonWorkspace(slug, moduleSlug, lessonSlug);
     if (!result.success) throw new Error(result.error);
     if (!result.data) notFound();
-    const { videos: storedVideos, ...lesson } = result.data.lesson;
+    const { videos: storedVideos, audio: storedAudio, ...lesson } = result.data.lesson;
     const data = { ...result.data, lesson };
+
+    // The lesson's audio, signed here like the videos (docs/lesson-audio.md).
+    const audio: LessonAudioTrack | null = storedAudio?.audioPath
+        ? { src: resolveMediaUrls(storedAudio.audioPath), seconds: storedAudio.audioSeconds, transcript: storedAudio.audioScript, key: `${lesson.id}:${storedAudio.revision}` }
+        : null;
 
     // The lesson's videos (one per skill as a rule), each checked again and with its /media/ paths turned into signed
     // URLs here, so the signing key never leaves the server. A broken one is left out, not the lesson.
@@ -72,5 +78,5 @@ export default async function LessonPage({ params }: Props) {
     // The outline's width and fold, as the learner left them: rendered so from the start, with no jump.
     const outline = readOutlinePreference((await cookies()).get(OUTLINE_COOKIE)?.value);
 
-    return <LessonWorkspace data={data} signedIn={Boolean(await currentViewer())} reading={reading} videos={videos} outline={outline} />;
+    return <LessonWorkspace data={data} signedIn={Boolean(await currentViewer())} reading={reading} videos={videos} audio={audio} outline={outline} />;
 }

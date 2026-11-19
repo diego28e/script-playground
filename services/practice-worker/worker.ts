@@ -1,10 +1,11 @@
 import { logAi } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { recoverOrphans, runWorkerTick, type WorkerState } from "@/lib/practice/jobs";
+import { recoverAudioOrphans, runAudioTick } from "@/lib/lesson-audio/queue";
 
 // The practice worker (docs/practice.md, "Jobs"): carries out the bulk practice work the admin page starts (writing
-// every missing task, drafting every remaining lesson), on the lab server beside the grader, with no request time
-// limit. It polls the database for the oldest active job, keeps a few of its items in progress, retries what fails
+// every missing task, drafting every remaining lesson), and the lessons' audio (docs/lesson-audio.md: writing each
+// script, voicing it), on the lab server beside the grader, with no request time limit. It polls the database for the oldest active job, keeps a few of its items in progress, retries what fails
 // for a passing reason, and keeps going until the job is done or the admin stops it; the admin page only shows the
 // progress. One worker runs at a time.
 //
@@ -16,6 +17,8 @@ const TICK_MS = 4_000;
 const DRAIN_MS = 170_000;
 
 const state: WorkerState = { inFlight: new Map(), stopping: false };
+/** Lesson audio in progress, by LessonAudio id: its own slots, beside the practice job's. */
+const audioInFlight = new Map<string, Promise<void>>();
 const log = (level: "info" | "warn" | "error", event: string, entry: Record<string, unknown> = {}) => logAi(level, { event, ...entry });
 
 async function loop() {
@@ -26,6 +29,11 @@ async function loop() {
       // A database blip: log it and try again on the next tick.
       log("error", "practice.worker.tick", { error: error instanceof Error ? error.message : String(error) });
     }
+    try {
+      await runAudioTick(audioInFlight, state.stopping);
+    } catch (error) {
+      log("error", "lesson-audio.tick", { error: error instanceof Error ? error.message : String(error) });
+    }
     await new Promise((resolve) => setTimeout(resolve, TICK_MS));
   }
 }
@@ -33,9 +41,9 @@ async function loop() {
 async function shutdown(signal: string) {
   if (state.stopping) return;
   state.stopping = true;
-  log("info", "practice.worker.stopping", { signal, inFlight: state.inFlight.size });
+  log("info", "practice.worker.stopping", { signal, inFlight: state.inFlight.size, audio: audioInFlight.size });
   // Let the items in progress finish (they record their outcome); anything cut off is recovered on the next start.
-  await Promise.race([Promise.allSettled([...state.inFlight.values()]), new Promise((resolve) => setTimeout(resolve, DRAIN_MS))]);
+  await Promise.race([Promise.allSettled([...state.inFlight.values(), ...audioInFlight.values()]), new Promise((resolve) => setTimeout(resolve, DRAIN_MS))]);
   await prisma.$disconnect().catch(() => undefined);
   log("info", "practice.worker.stopped");
   process.exit(0);
@@ -47,7 +55,14 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 // Not top-level await: tsx runs the project as CommonJS on a PC (pnpm practice-worker:dev).
 async function main() {
   await recoverOrphans();
-  log("info", "practice.worker.start", { tickMs: TICK_MS, grader: Boolean(process.env.GRADER_URL), models: { anthropic: Boolean(process.env.ANTHROPIC_API_KEY), gemini: Boolean(process.env.GEMINI_API_KEY), deepseek: Boolean(process.env.DEEPSEEK_API_KEY), dolphingo: Boolean(process.env.DOLPHINGO_API_KEY) } });
+  await recoverAudioOrphans();
+  log("info", "practice.worker.start", {
+    tickMs: TICK_MS,
+    grader: Boolean(process.env.GRADER_URL),
+    models: { anthropic: Boolean(process.env.ANTHROPIC_API_KEY), gemini: Boolean(process.env.GEMINI_API_KEY), deepseek: Boolean(process.env.DEEPSEEK_API_KEY), dolphingo: Boolean(process.env.DOLPHINGO_API_KEY) },
+    // Lesson audio needs all three: the voice, and the platform to store the file through.
+    audio: { deepgram: Boolean(process.env.DEEPGRAM_API_KEY), platform: process.env.PLATFORM_URL ?? null, secret: Boolean(process.env.LAB_WORKER_SECRET) },
+  });
   await loop();
 }
 

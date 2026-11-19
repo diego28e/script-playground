@@ -72,6 +72,17 @@ export function AdminNav() {
                             Videos
                         </Link>
                         <Link
+                            href="/admin/audio"
+                            className={cn(
+                                "transition-colors hover:text-foreground/80",
+                                pathname?.startsWith("/admin/audio")
+                                    ? "text-foreground"
+                                    : "text-foreground/60"
+                            )}
+                        >
+                            Audio
+                        </Link>
+                        <Link
                             href="/admin/practice"
                             className={cn(
                                 "transition-colors hover:text-foreground/80",

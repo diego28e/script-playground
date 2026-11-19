@@ -30,12 +30,13 @@ import { LessonSidebar, MobileOutline } from "@/components/courses/lesson-outlin
 import type { OutlinePreference } from "@/lib/outline-preference";
 import { LessonPythonSection } from "@/components/compass/lesson-python";
 import { LessonVideos, type PlayableVideo } from "@/components/courses/lesson-videos";
+import { LessonAudio, type LessonAudioTrack } from "@/components/courses/lesson-audio";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
 import { cn } from "@/lib/utils";
 
 type WorkspaceResult = NonNullable<Extract<Awaited<ReturnType<typeof getLessonWorkspace>>, { success: true }>["data"]>;
-// The page takes the stored videos off the lesson and passes them checked and signed, as `videos`.
-export type LessonWorkspaceData = Omit<WorkspaceResult, "lesson"> & { lesson: Omit<WorkspaceResult["lesson"], "videos"> };
+// The page takes the stored videos and audio off the lesson and passes them checked and signed, as `videos` and `audio`.
+export type LessonWorkspaceData = Omit<WorkspaceResult, "lesson"> & { lesson: Omit<WorkspaceResult["lesson"], "videos" | "audio"> };
 
 const COPY = {
     es: {
@@ -125,6 +126,8 @@ type Props = {
     reading?: ReactNode;
     /** The lesson's videos in order, with URLs the browser can load (app/(main)/courses/[slug]/[module]/[lesson]/page.tsx). */
     videos: PlayableVideo[];
+    /** The lesson told by a teacher, signed, or null (docs/lesson-audio.md). */
+    audio: LessonAudioTrack | null;
     /** The outline's saved width and whether it's folded (lesson-outline.tsx), read from a cookie by the page. */
     outline: OutlinePreference;
 };
@@ -140,7 +143,7 @@ const INLINE_MARKDOWN = {
 };
 const CODE_SPANS = "[&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em]";
 
-export function LessonWorkspace({ data, signedIn, reading, videos, outline }: Props) {
+export function LessonWorkspace({ data, signedIn, reading, videos, audio, outline }: Props) {
     const { language } = useLanguage();
     const t = COPY[language];
     const router = useRouter();
@@ -318,6 +321,7 @@ export function LessonWorkspace({ data, signedIn, reading, videos, outline }: Pr
                         )}
                     </div>
                     {inLab && <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted-foreground">{notebookTab ? t.labHintTabs : t.labHint}</p>}
+                    {audio && <LessonAudio key={audio.key} track={audio} lessonId={lesson.id} lessonTitle={lesson.title.replaceAll("`", "")} language={language} />}
                     {notebookTab && (
                         <div role="tablist" aria-label={t.tabs} className="mt-6 inline-flex rounded-full bg-muted p-1">
                             {(["lesson", "notebook"] as const).map((id) => (

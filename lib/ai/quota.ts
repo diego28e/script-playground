@@ -30,6 +30,8 @@ export const MODEL_LIMITS: Record<string, { rpm: number; rpd: number }> = {
   // DolphinGo's models, for authoring by choice only (AUTHORING_PICK_ONLY). Our own caps, the same as Claude's.
   "dolphingo-deepseek-v4.1-flash": { rpm: 30, rpd: 400 },
   "dolphingo-qwen4-max": { rpm: 30, rpd: 400 },
+  // Writing lesson audio scripts only (lib/lesson-audio/script.ts): a lesson takes one request per part, about five.
+  "dolphingo-qwen3.8-flash": { rpm: 30, rpd: 1000 },
 };
 
 /**
@@ -47,6 +49,7 @@ const SHARES: Record<string, Partial<Record<Exclude<AiPool, "TUTOR">, number>>> 
   "claude-sonnet-5-5": { AUTHORING: 400 },
   "dolphingo-deepseek-v4.1-flash": { AUTHORING: 400 },
   "dolphingo-qwen4-max": { AUTHORING: 400 },
+  "dolphingo-qwen3.8-flash": { AUTHORING: 1000 },
 };
 
 /** Requests a day for each person, in the platform's other features. The tutor has no per-person count: its share is. */
@@ -63,8 +66,11 @@ const PRICES: Record<string, { input: number; output: number }> = {
   // Anthropic's pricing (2026-11-06). Thinking is billed as output and already counted in output tokens.
   "claude-opus-5-5": { input: 4, output: 20 },
   "claude-sonnet-5-5": { input: 2, output: 10 },
-  // DolphinGo's two models have no price here yet: its price list wasn't available when they were added
-  // (2026-11-18), so their requests are counted in the ledger with a cost of 0. Add the prices to see their spend.
+  // DolphinGo's list prices (token.dolphingo.ai/api/pricing, 2026-11-19), at its standard rate: DeepSeek V4.1 Flash is
+  // cheaper off-peak in China, so its figure is an upper bound.
+  "dolphingo-deepseek-v4.1-flash": { input: 0.149, output: 0.596 },
+  "dolphingo-qwen4-max": { input: 1.413, output: 4.24 },
+  "dolphingo-qwen3.8-flash": { input: 0.119, output: 0.403 },
 };
 
 /** DeepSeek's peak hours: 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday. Everything else is half price. */

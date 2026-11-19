@@ -181,10 +181,11 @@ to `infra/lab/.env`.
 ## The practice worker
 
 `practice-worker` carries out the practice jobs the platform's admin page starts (`docs/practice.md`, "Jobs"): writing
-every missing practice task, drafting every remaining lesson. It runs here, beside the grader, because a job takes
-hours and a request on the platform (Amplify) may take 28 s at most; the admin page only starts, stops and watches it.
-It reaches the grader on the lab's own network and the platform's database and the model APIs over the internet;
-nothing reaches it (no port).
+every missing practice task, drafting every remaining lesson. It also writes and voices the lessons' audio
+(`docs/lesson-audio.md`), storing each file through the platform (`PLATFORM_URL`, signed with `LAB_WORKER_SECRET`), so
+it holds no AWS credentials. It runs here, beside the grader, because a job takes hours and a request on the platform
+(Amplify) may take 28 s at most; the admin page only starts, stops and watches it. It reaches the grader on the lab's
+own network and the platform's database, the model APIs and Deepgram over the internet; nothing reaches it (no port).
 
 To deploy or update it, build its bundle on your PC (`pnpm practice-worker:build`, which writes
 `practice-worker/dist/worker.mjs` and `practice-worker/schema.prisma`), copy `infra/lab` to the server as for the rest

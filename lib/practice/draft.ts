@@ -2,6 +2,7 @@ import { Type, type Content, type Schema, type ThinkingLevel } from "@google/gen
 import { z } from "zod";
 import { authoringChain, generateWithFallback, isAuthoringModel } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
+import { lessonText } from "@/lib/lesson-text";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // Drafting a lesson's practice skills (docs/practice.md, "The skill graph"): a model reads the lesson (objectives,
@@ -83,7 +84,6 @@ export const RESPONSE_SCHEMA: Schema = {
 };
 
 const SOURCE_LIMIT = 30_000;
-const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text);
 
 /** A key the graph accepts: lowercase kebab-case. */
 export function normaliseKey(key: string): string {
@@ -94,36 +94,6 @@ export function normaliseKey(key: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
-}
-
-/** The notebook as text: Markdown cells whole, code cells shortened, outputs left out. */
-function notebookText(raw: string): string {
-  const cells = (JSON.parse(raw) as { cells?: { cell_type: string; source: string | string[] }[] }).cells ?? [];
-  return cells
-    .map((cell) => {
-      const source = Array.isArray(cell.source) ? cell.source.join("") : cell.source;
-      return cell.cell_type === "code" ? `\`\`\`python\n${clip(source, 1500)}\n\`\`\`` : source;
-    })
-    .join("\n\n");
-}
-
-/** The lesson's own text: the reading's body, or its notebook from the course repository at the imported commit. */
-async function lessonText(
-  course: { sourceRepoUrl: string | null; sourceRef: string | null },
-  lesson: { body: string | null; sourcePath: string | null },
-): Promise<string | null> {
-  if (lesson.body) return clip(lesson.body, SOURCE_LIMIT);
-  const repo = course.sourceRepoUrl?.match(/github\.com\/([^/]+\/[^/.]+)/)?.[1];
-  if (!repo || !course.sourceRef || !lesson.sourcePath) return null;
-  const url = `https://raw.githubusercontent.com/${repo}/${course.sourceRef}/${lesson.sourcePath.split("/").map(encodeURIComponent).join("/")}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-  if (!response?.ok) return null;
-  const raw = await response.text();
-  try {
-    return clip(lesson.sourcePath.endsWith(".ipynb") ? notebookText(raw) : raw, SOURCE_LIMIT);
-  } catch {
-    return null;
-  }
 }
 
 export type DraftResult =
@@ -179,7 +149,7 @@ export async function draftLesson(lessonId: string, userId: string, model?: stri
     other.module.position < lesson.module.position || (other.module.position === lesson.module.position && other.position < lesson.position);
   const earlier = allSkills.filter((skill) => skill.lessonId !== lesson.id && isEarlier(skill.lesson));
 
-  const text = await lessonText(course, lesson);
+  const text = await lessonText(course, lesson, SOURCE_LIMIT);
   const context = [
     `# Course: ${course.title}\n${course.modules.map((m) => `- Module ${String(m.position).padStart(2, "0")}: ${m.title}`).join("\n")}`,
     `# Lesson ${lesson.code ?? ""}: ${lesson.title} (module ${String(lesson.module.position).padStart(2, "0")}: ${lesson.module.title})`,
