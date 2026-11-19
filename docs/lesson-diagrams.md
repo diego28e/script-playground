@@ -51,9 +51,15 @@ light and dark switch. Nothing here rules them out later for a drawing that text
 
 ## Writing diagrams that read well
 
-- **Prefer tall to wide.** `flowchart TB` and sequence diagrams with two or three participants fit a phone. A long
-  `flowchart LR` chain ends up scrolling.
-- **Keep labels short.** A group's title that is wider than what it contains spills past its border.
+- **Keep it under about 1,000 pixels wide**: four boxes of three short lines in a row, or a sequence diagram with
+  three or four participants. The page shrinks a wider drawing to fit, and its text gets small. Break long labels
+  with `<br/>`.
+- **Arrows into a group: draw left to right.** In `flowchart TB`, an arrow that enters a `subgraph` from above is
+  drawn across the group's title. `flowchart LR` brings it in from the side. A diagram with no arrows into groups
+  can be tall, which suits a phone better.
+- **Order and stacking.** Groups, and boxes with no link between them, come out in the reverse of the order they
+  are written. Boxes in the same group sit side by side unless an invisible link (`a ~~~ b`) stacks them.
+- **An arrow's label wraps at about 30 characters.** Keep it shorter, or put the words in a box.
 - **Sequence diagrams** suit anything that happens over time between two or three parties. **Flowcharts with
   `subgraph`** suit architecture: a network, what sits inside what, and the paths between them.
 - **Some pictures are better as text** in an ordinary code block: a number line, a table of bits, a packet capture.
