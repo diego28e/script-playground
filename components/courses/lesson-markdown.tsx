@@ -4,10 +4,11 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink } from "lucide-react";
 import { sourceFileUrl } from "@/lib/lab";
+import { MermaidDiagram } from "@/components/courses/mermaid-diagram";
 
 // A course guide (a Markdown file in the course repository) rendered in the lesson page, with GitHub's
 // extensions (tables, task lists, strikethrough) and the platform's tokens, since the app has no typography
-// plugin. Relative links are resolved against the guide's own folder: one to another lesson's file opens that
+// plugin. A fenced block tagged `mermaid` is drawn as a diagram (docs/lesson-diagrams.md). Relative links are resolved against the guide's own folder: one to another lesson's file opens that
 // lesson's page, anything else opens the file on GitHub at the imported commit.
 
 type Props = {
@@ -95,11 +96,19 @@ export function LessonMarkdown({ markdown, ...context }: Props) {
       );
     },
     // Code blocks use the fixed dark code panel, like the challenge editor; inline code sits in the text.
-    pre: ({ children }) => (
-      <pre className="my-5 overflow-x-auto rounded-2xl border border-code-border bg-code p-4 font-mono text-[13px] leading-6 text-code-foreground">
-        {children}
-      </pre>
-    ),
+    // A block tagged `mermaid` is a diagram, drawn in the browser from its text (docs/lesson-diagrams.md).
+    pre: ({ children }) => {
+      const block = Children.toArray(children)[0];
+      const blockProps = isValidElement(block) ? (block.props as { className?: string; children?: ReactNode }) : null;
+      if (blockProps?.className?.split(" ").includes("language-mermaid")) {
+        return <MermaidDiagram source={textOf(blockProps.children).trimEnd()} />;
+      }
+      return (
+        <pre className="my-5 overflow-x-auto rounded-2xl border border-code-border bg-code p-4 font-mono text-[13px] leading-6 text-code-foreground">
+          {children}
+        </pre>
+      );
+    },
     code: ({ children, className }) =>
       className?.startsWith("language-") || String(children).includes("\n") ? (
         <code className="font-mono">{children}</code>
