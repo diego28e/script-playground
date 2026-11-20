@@ -644,7 +644,7 @@ function SkillView({
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
             <code className="text-xs">{skill.key}</code>
             <span>{skill.knowledge === "PROCEDURAL" ? "Doing" : "Knowing"}</span>
-            <span>{skill.runnable ? "Code tasks and questions" : "Questions only (needs a live service)"}</span>
+            <span>{skill.runnable ? "Python code tasks and questions" : "Questions and spoken explanations (no code)"}</span>
             {skill._count.requiredBy > 0 && <span>Unlocks {skill._count.requiredBy} later</span>}
           </p>
           {skill.criteriaHint && <p className="text-sm text-muted-foreground">Grader hint: {skill.criteriaHint}</p>}
@@ -848,8 +848,9 @@ function SkillEditor({ skill, onClose }: { skill: Skill; onClose: () => void }) 
         </div>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={form.runnable} onChange={(event) => set("runnable", event.target.checked)} className="h-4 w-4" />
-          Code tasks can practise it offline
+          Python code tasks can practise it
         </label>
+        <span className="text-xs text-muted-foreground">Off for anything that isn&apos;t Python: it gets questions and spoken explanations.</span>
       </div>
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={save} disabled={pending}>
