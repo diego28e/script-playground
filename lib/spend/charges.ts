@@ -17,6 +17,9 @@ export type Provider = (typeof PROVIDERS)[number];
 export const WORKLOADS = {
   "lesson-audio.voice": { label: "Lesson audio: voicing", tag: "adc-lesson-audio-voice" },
   "lesson-audio.preview": { label: "Lesson audio: voice samples", tag: "adc-lesson-audio-preview" },
+  "lesson-audio.timing": { label: "Lesson audio: timing the transcript", tag: "adc-lesson-audio-timing" },
+  "lesson-tutor.speak": { label: "Lesson tutor: answers read aloud", tag: "adc-lesson-tutor-speak" },
+  "lesson-tutor.listen": { label: "Lesson tutor: microphone", tag: "adc-lesson-tutor-listen" },
   "captions.transcribe": { label: "Video captions: transcription", tag: "adc-captions" },
   "tutor.speak": { label: "Tutor: replies read aloud", tag: "adc-tutor-speak" },
   "tutor.listen": { label: "Tutor: microphone", tag: "adc-tutor-listen" },
@@ -36,9 +39,12 @@ export const workloadOfTag = (tag: string | null | undefined): Workload | null =
  */
 export const LIST_PRICES = {
   elevenlabsPer1000: 0.21,
+  // Flash v2.5 (the lesson tutor's spoken answers) costs half a credit a character.
+  elevenlabsFlashPer1000: 0.105,
   deepgramSpeakPer1000: 0.03,
   deepgramNovaPerMinute: 0.0092,
-  // Pre-recorded English with keyterms, for captions: Nova-3 monolingual US$0.0048 plus keyterms US$0.0013 a minute.
+  // Pre-recorded, one language: Nova-3 monolingual US$0.0048 a minute; captions add keyterms, US$0.0013 a minute.
+  deepgramNovaMonoPerMinute: 0.0048,
   deepgramNovaMonoKeytermsPerMinute: 0.0061,
   deepgramFluxPerMinute: 0.0078,
 } as const;

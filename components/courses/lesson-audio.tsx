@@ -1,17 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Headphones, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
+import { FileText, Headphones, MessageCircleQuestion, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tip } from "@/components/ui/tip";
 import { Scrubber } from "@/components/courses/video-player/scrubber";
 import { PlayerMenu } from "@/components/courses/video-player/player-menu";
 import { clock, rateLabel, SPEEDS, usePlayerPrefs } from "@/components/courses/video-player/player-state";
+import { LessonTranscript } from "@/components/courses/lesson-transcript";
+import { LessonTutor } from "@/components/courses/lesson-tutor";
+import { unlockSound } from "@/lib/voice/browser";
 
 // The lesson told by a teacher (docs/lesson-audio.md): an audio version of the whole lesson, for listening away from the
 // screen or alongside the page. It looks like the video player's bar and shares its speed setting. It remembers where
 // the learner stopped, follows them down the page as a small bar while it plays, and answers the phone's lock-screen
-// controls (the Media Session API).
+// controls (the Media Session API). Its transcript follows the audio (lesson-transcript.tsx), and "Ask" pauses the
+// lesson to talk to the teacher about what was just said (lesson-tutor.tsx, docs/lesson-tutor.md).
 
 export type LessonAudioTrack = {
   /** A signed URL. */
@@ -19,6 +23,10 @@ export type LessonAudioTrack = {
   seconds: number | null;
   /** What the teacher says, for reading along or searching. */
   transcript: string | null;
+  /** When each word of the transcript starts, in hundredths of a second (lib/lesson-audio/words.ts), once timed. */
+  timings: number[] | null;
+  /** The learner may ask the teacher (signed in, and the lesson tutor is set up). */
+  tutor: boolean;
   /** Changes when the audio is voiced again, so the player starts afresh. */
   key: string;
 };
@@ -43,6 +51,8 @@ const COPY = {
     close: "Cerrar la barra",
     failed: "No se pudo cargar el audio. Recarga la página para intentarlo de nuevo.",
     left: (time: string) => `quedan ${time}`,
+    ask: "Pregunta",
+    askLabel: "Pregúntale al profesor sobre lo que escuchas",
   },
   en: {
     title: "Listen to this lesson",
@@ -63,6 +73,8 @@ const COPY = {
     close: "Close the bar",
     failed: "The audio couldn't load. Reload the page to try again.",
     left: (time: string) => `${time} left`,
+    ask: "Ask",
+    askLabel: "Ask the teacher about what you're hearing",
   },
 };
 
@@ -108,6 +120,7 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
   // The card is off screen while playing: the small bar shows. Closing the bar keeps it closed until the next play.
   const [offScreen, setOffScreen] = useState(false);
   const [miniClosed, setMiniClosed] = useState(false);
+  const [tutorOpen, setTutorOpen] = useState(false);
   const lastSaved = useRef(0);
 
   // Where the learner left it, read after mounting (the server has no storage).
@@ -187,8 +200,14 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
   }, [lessonTitle, seek, t.title]);
 
   const minutes = Math.max(1, Math.round((duration || track.seconds || 0) / 60));
-  const showMini = playing && offScreen && !miniClosed;
-  const paragraphs = track.transcript?.split(/\n\s*\n/).filter((paragraph) => paragraph.trim()) ?? [];
+  const showMini = playing && offScreen && !miniClosed && !tutorOpen;
+  const hasTranscript = Boolean(track.transcript?.trim());
+
+  const openTutor = () => {
+    // Here, in the tap itself: a phone only lets the page make sound from the tap that asked for it.
+    unlockSound();
+    setTutorOpen(true);
+  };
 
   return (
     <>
@@ -207,10 +226,26 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
             <p className="flex items-center gap-2 text-sm font-semibold">
               <Headphones className="size-4 text-signal" aria-hidden="true" />
               {t.title}
-              <span className="font-mono text-xs font-normal tabular-nums text-white/60">· {t.minutes(minutes)}</span>
+              {/* On a phone the time under the bar says it, and the title keeps its line beside "Ask". */}
+              <span className={cn("font-mono text-xs font-normal tabular-nums text-white/60", track.tutor && "hidden sm:inline")}>· {t.minutes(minutes)}</span>
             </p>
             <p className="mt-0.5 truncate text-xs text-white/60">{saved > 5 && !playing && current === saved ? t.resume(clock(saved)) : t.subtitle}</p>
           </div>
+          {track.tutor && (
+            <Tip content={t.askLabel}>
+              <button
+                type="button"
+                onClick={openTutor}
+                aria-label={t.askLabel}
+                aria-haspopup="dialog"
+                aria-expanded={tutorOpen}
+                className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-white/10 px-3 text-sm font-medium text-white transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+              >
+                <MessageCircleQuestion className="size-4 text-signal" aria-hidden="true" />
+                {t.ask}
+              </button>
+            </Tip>
+          )}
         </div>
 
         <div className="px-4 pb-3 pt-3 sm:px-5">
@@ -244,7 +279,7 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
               open={speedOpen}
               onOpenChange={setSpeedOpen}
             />
-            {paragraphs.length > 0 && (
+            {hasTranscript && (
               <Tip content={transcriptOpen ? t.hideTranscript : t.showTranscript}>
                 <button
                   type="button"
@@ -261,15 +296,8 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
           {failed && <p className="mt-2 text-xs text-red-300">{t.failed}</p>}
         </div>
 
-        {transcriptOpen && (
-          <div className="max-h-80 overflow-y-auto border-t border-white/10 px-4 py-4 text-sm leading-relaxed text-white/80 sm:px-5 [scrollbar-color:rgba(255,255,255,0.25)_transparent]">
-            <h3 className="sr-only">{t.transcript}</h3>
-            {paragraphs.map((paragraph, index) => (
-              <p key={index} className="mb-3 last:mb-0">
-                {paragraph}
-              </p>
-            ))}
-          </div>
+        {transcriptOpen && track.transcript && (
+          <LessonTranscript script={track.transcript} timings={track.timings} duration={duration} audioRef={audioRef} playing={playing} onSeek={seek} language={language} />
         )}
 
         <audio
@@ -336,12 +364,41 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
             <span className="block truncate text-xs font-medium">{lessonTitle}</span>
             <span className="block font-mono text-[11px] tabular-nums text-white/60">{t.left(clock(Math.max(0, duration - current)))}</span>
           </button>
+          {track.tutor && (
+            <Tip content={t.askLabel}>
+              <button
+                type="button"
+                onClick={openTutor}
+                aria-label={t.askLabel}
+                aria-haspopup="dialog"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-signal hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+              >
+                <MessageCircleQuestion className="size-4" aria-hidden="true" />
+              </button>
+            </Tip>
+          )}
           <Tip content={t.close}>
             <button type="button" onClick={() => setMiniClosed(true)} aria-label={t.close} className="flex size-7 items-center justify-center rounded-full text-white/60 hover:bg-white/10 hover:text-white">
               <X className="size-4" aria-hidden="true" />
             </button>
           </Tip>
         </div>
+      )}
+
+      {tutorOpen && (
+        <LessonTutor
+          lessonId={lessonId}
+          language={language}
+          audioRef={audioRef}
+          at={current}
+          onClose={(resumeAt) => {
+            setTutorOpen(false);
+            if (resumeAt === null) return;
+            seek(resumeAt);
+            // Still inside the learner's tap, so the browser lets it play.
+            void audioRef.current?.play().catch(() => undefined);
+          }}
+        />
       )}
     </>
   );

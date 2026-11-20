@@ -113,6 +113,29 @@ body, refused after five minutes). The platform names the file from the database
 and a new revision never meets an old one in a cache. Learners' pages sign the `/media/` path like a video's
 (`lib/media.ts`).
 
+## Following the audio (`lib/lesson-audio/timing.ts`)
+
+Neither voice says when it said each word, so after every voicing the worker has **Deepgram listen to the finished MP3**
+(Nova-3 in the course's language, word timestamps; about US$0.07 for a 15-minute lesson, workload
+`lesson-audio.timing` in Admin → Spend) and lines what it heard up with the script (`alignWords`):
+
+- Words are compared without case, accents or punctuation. A word of five letters or more matches where it's heard; a
+  shorter one ("de", "the") only right after the last match, or when the next script word follows it, so a common word
+  further on doesn't pull the line forward. It looks at most 40 heard words ahead.
+- Words not heard as written (a number said in words, "LangGraph" heard as two words) share the time between the heard
+  words around them, by their length.
+- Stored on `LessonAudio.timings` as `{v: 1, matched, words}`: the start of each script word in hundredths of a second,
+  in the order `lib/lesson-audio/words.ts` cuts the script into words, which the player uses too. Under half the words
+  heard means the audio isn't this script's: it isn't stored.
+- The worker times one lesson at a time beside its other work (`runTimingTick`): every lesson voiced from now on (a new
+  voicing clears the old timings), and those voiced before. A failure is kept in `timingError` and tried again, three
+  times in all. It reads the audio through the platform (`app/api/lab-worker/audio-url/route.ts`, signed like the
+  upload), which gives Deepgram a signed media address; on a PC, the worker sends the file itself.
+- Until a lesson is timed, the player estimates by the script's characters, which drifts over a long lesson.
+
+Measured on lesson 00.04 (15 minutes, 2,479 words): 98% of the words heard where the script has them, the last word at
+15:02 of 15:03.
+
 ## For learners (`components/courses/lesson-audio.tsx`)
 
 On the lesson page, under its title, when the lesson has audio: a bar like the video player's (it shares its speed
@@ -120,6 +143,14 @@ setting), with 15 s back and 30 s forward, the transcript (the script that was v
 kept per browser. Nothing downloads until play. While it plays and the bar is scrolled away, a small bar follows at the
 bottom of the screen. The phone's lock screen controls it (the Media Session API). A private course's audio is only on
 pages its learners can open (`docs/private-courses.md`).
+
+**The transcript follows the audio** (`components/courses/lesson-transcript.tsx`): the word being said is lit, the
+paragraph it's in stands out (words already said brighter than the ones to come), and the panel scrolls to keep it a
+third of the way down. Tapping a word plays from there. Scrolling by hand stops the following, and "Follow the audio"
+starts it again. Only the paragraph being said re-renders as the words go by.
+
+**Ask the teacher**: "Ask", on the bar and on the small bar, pauses the lesson and opens the lesson tutor
+(`docs/lesson-tutor.md`).
 
 ## Using it (Admin → Audio)
 
@@ -141,4 +172,4 @@ pages its learners can open (`docs/private-courses.md`).
   `PLATFORM_URL` (the platform's address, `https://academiadelcodigo.com`) and the same `LAB_WORKER_SECRET`. Its start line in `docker logs
   practice-worker` says which of these it has (`audio`).
 - **On a PC**: run the worker with `pnpm practice-worker:dev` and the dev server, with `PLATFORM_URL=http://localhost:3000`
-  and a `LAB_WORKER_SECRET` of your own in both.
+  and a `LAB_WORKER_SECRET` of your own in both. Timing the transcript needs `DEEPGRAM_API_KEY` on the worker.

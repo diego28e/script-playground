@@ -66,7 +66,7 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         body: true,
         videos: { orderBy: { position: "asc" }, select: { id: true, skillKey: true, titleEs: true, titleEn: true, video: true, durationSeconds: true } },
         // The lesson told by a teacher (docs/lesson-audio.md), once voiced.
-        audio: { select: { audioPath: true, audioSeconds: true, audioScript: true, revision: true } },
+        audio: { select: { audioPath: true, audioSeconds: true, audioScript: true, revision: true, timings: true } },
       },
     });
     // A skill video's title is its skill's label unless it has one of its own.

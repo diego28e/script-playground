@@ -1,10 +1,11 @@
-import type { LessonAudio } from "@prisma/client";
+import { Prisma, type LessonAudio } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logAi } from "@/lib/ai/gemini";
 import { writeNarration } from "@/lib/lesson-audio/script";
 import { directPiece } from "@/lib/lesson-audio/delivery";
 import { uploadLessonAudio, voiceProvider, voiceScript } from "@/lib/lesson-audio/voice";
 import { recordCharge } from "@/lib/spend/charges";
+import { timeLessonAudio } from "@/lib/lesson-audio/timing";
 
 // The lesson-audio queue (docs/lesson-audio.md). Each lesson has at most one LessonAudio row, which moves through
 //   SCRIPT_QUEUED → WRITING → REVIEW → (approved) VOICE_QUEUED → VOICING → DONE
@@ -339,6 +340,10 @@ async function voiceStep(row: LessonAudio) {
       audioDirected: voiced.directed,
       voicedAt: new Date(),
       revision,
+      // The new audio's words are timed afresh (runTimingTick).
+      timings: Prisma.DbNull,
+      timingTries: 0,
+      timingError: null,
       attempts: 0,
       progress: null,
       error: null,
@@ -371,6 +376,56 @@ export async function runAudioTick(inFlight: Map<string, Promise<void>>, stoppin
       .finally(() => inFlight.delete(row.id));
     inFlight.set(row.id, work);
   }
+}
+
+/** Tries at timing a lesson's transcript before it's left with the player's estimate. */
+const TIMING_TRIES = 3;
+let timing: Promise<void> | null = null;
+
+/**
+ * Times the transcript of one voiced lesson that isn't yet (lib/lesson-audio/timing.ts), one at a time beside the
+ * voicing: every lesson voiced from now on, and those voiced before timing existed. A failure is kept on the row
+ * (timingError) and tried again on a later tick, up to TIMING_TRIES; until then the player follows an estimate.
+ */
+export function runTimingTick(stopping: boolean): Promise<void> | null {
+  if (stopping || timing || !process.env.DEEPGRAM_API_KEY) return timing;
+  timing = (async () => {
+    const row = await prisma.lessonAudio.findFirst({
+      where: { status: "DONE", audioPath: { not: null }, audioScript: { not: null }, timings: { equals: Prisma.DbNull }, timingTries: { lt: TIMING_TRIES } },
+      orderBy: [{ timingTries: "asc" }, { voicedAt: "desc" }],
+      select: {
+        id: true,
+        lessonId: true,
+        audioPath: true,
+        audioScript: true,
+        audioSeconds: true,
+        requestedById: true,
+        timingTries: true,
+        lesson: { select: { module: { select: { course: { select: { id: true, language: true } } } } } },
+      },
+    });
+    if (!row?.audioScript || !row.audioPath) return;
+    // Counted before trying, so a lesson that crashes the attempt can't be tried forever.
+    const claimed = await prisma.lessonAudio.updateMany({ where: { id: row.id, timingTries: row.timingTries, audioPath: row.audioPath }, data: { timingTries: { increment: 1 } } });
+    if (!claimed.count) return;
+    const course = row.lesson.module.course;
+    const started = Date.now();
+    try {
+      const timings = await timeLessonAudio({ ...row, audioScript: row.audioScript }, course.language, course.id);
+      // Only if the audio is still the one timed (not voiced again meanwhile).
+      await prisma.lessonAudio.updateMany({ where: { id: row.id, audioPath: row.audioPath }, data: { timings, timingError: null } });
+      log("lesson-audio.timing", { audioId: row.id, outcome: "ok", words: timings.words.length, matched: timings.matched, ms: Date.now() - started });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      await prisma.lessonAudio.updateMany({ where: { id: row.id, audioPath: row.audioPath }, data: { timingError: reason.slice(0, 500) } });
+      log("lesson-audio.timing", { audioId: row.id, outcome: "failed", attempt: row.timingTries + 1, reason: reason.slice(0, 300) });
+    }
+  })()
+    .catch((error) => log("lesson-audio.error", { step: "timing", error: String(error) }))
+    .finally(() => {
+      timing = null;
+    });
+  return timing;
 }
 
 /** On the worker's start: lessons left in progress by a worker that stopped go back in the queue, attempt given back. */

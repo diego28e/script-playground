@@ -25,7 +25,9 @@ services:
       - jupyterhub
 
   # The AI tutor's backend (docs/ai-tutor.md). Build its bundle on your PC first: `pnpm learning:build`.
-  # No published port: only containers on the jupyterhub network reach it, and it checks every learner with the hub.
+  # Learners' Jupyter servers reach it on the jupyterhub network, and it checks every learner with the hub. Its loopback
+  # port is for nginx, which publishes only the lesson tutor's routes (/learning/v1/lesson/, docs/lesson-tutor.md),
+  # whose requests carry a pass the platform signed.
   learning:
     build: learning
     image: lab-learning:1
@@ -35,6 +37,8 @@ services:
     environment:
       HUB_API_URL: http://jupyterhub:8081/hub/api
       PORT: "8080"
+    ports:
+      - "127.0.0.1:${LEARNING_PORT:-8091}:8080"
     mem_limit: 512m
     depends_on:
       - hub

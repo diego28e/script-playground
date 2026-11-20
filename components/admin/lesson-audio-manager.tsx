@@ -588,7 +588,7 @@ function ReviewDialog({
     });
     if (row?.audio?.hasAudio) {
       void getAudioForAdmin(audioId).then((result) => {
-        if (!cancelled && result.success) setTrack({ src: result.url, seconds: result.seconds, transcript: null, key: audioId });
+        if (!cancelled && result.success) setTrack({ src: result.url, seconds: result.seconds, transcript: null, timings: null, tutor: false, key: audioId });
       });
     }
     return () => {

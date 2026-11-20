@@ -8,6 +8,9 @@ import { prisma } from "@/lib/prisma";
 import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/lib/tutor/harness";
 import { canListen, canSpeak, LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
 import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, speakStream, voiceConfigured } from "@/lib/voice/deepgram";
+import { readPass } from "@/lib/lesson-tutor/pass";
+import { runLessonTurn } from "@/lib/lesson-tutor/turn";
+import { canSpeakLesson, lessonVoice, speakLesson, SPEAK_MAX_CHARS as LESSON_SPEAK_MAX_CHARS } from "@/lib/lesson-tutor/speak";
 
 // The learning service: the AI tutor's backend, beside the lab hub on the server (docs/ai-tutor.md). It is not
 // published to the internet: it listens on the lab's Docker network, and only the learners' Jupyter servers call
@@ -22,6 +25,14 @@ import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, speakStream, voiceConf
 //   POST /v1/voice/listen   a temporary grant for the panel's microphone stream (docs/voice.md)
 //   POST /v1/voice/speak    a reply read aloud: raw PCM (SPEAK_SAMPLE_RATE), streamed as Deepgram makes it
 //   GET  /healthz       for Docker's healthcheck
+//
+// And the lesson tutor (docs/lesson-tutor.md), the one part published to the internet: nginx passes the lab domain's
+// /learning/v1/lesson/ here, for learners' browsers on the platform. Those requests carry a pass the platform signed
+// with LESSON_TUTOR_SECRET (lib/lesson-tutor/pass.ts) instead of a hub token, and are answered with CORS headers for
+// the platform's origins (LESSON_TUTOR_ORIGINS).
+//   POST /v1/lesson/listen   a grant for the microphone stream
+//   POST /v1/lesson/turn     a question: lines of JSON as the answer is written ({type: delta | reset}), then {type: done}
+//   POST /v1/lesson/speak    an answer read aloud in the lesson's voice: raw PCM (SPEAK_SAMPLE_RATE), streamed
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HUB_API_URL = (process.env.HUB_API_URL ?? "http://jupyterhub:8081/hub/api").replace(/\/+$/, "");
@@ -79,10 +90,82 @@ const PracticeSchema = z.object({ sessionId: z.string().min(1), skill: z.string(
 const ModeSchema = z.object({ mode: z.enum(["GUIDE", "SHOW"]) });
 const ListenSchema = z.object({ mode: z.enum(["conversation", "dictation"]).default("conversation"), language: z.enum(["es", "en"]).default("es") });
 const SpeakSchema = z.object({ text: z.string().trim().min(1).max(SPEAK_MAX_CHARS), language: z.enum(["es", "en"]).default("es") });
+const LessonListenSchema = z.object({ language: z.enum(["es", "en"]).default("es") });
+const LessonSpeakSchema = z.object({ text: z.string().trim().min(1).max(LESSON_SPEAK_MAX_CHARS), language: z.enum(["es", "en"]).default("es") });
+
+const LESSON_PREFIX = "/v1/lesson/";
+const ORIGINS = (process.env.LESSON_TUTOR_ORIGINS ?? "https://academiadelcodigo.com,https://www.academiadelcodigo.com")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+/** The CORS headers for a platform origin; none for any other, so a browser elsewhere can't read an answer. */
+function allowOrigin(request: IncomingMessage, response: ServerResponse) {
+  const origin = request.headers.origin;
+  if (!origin || !ORIGINS.includes(origin)) return;
+  response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Vary", "Origin");
+  response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  response.setHeader("Access-Control-Max-Age", "600");
+}
+
+/** The lesson tutor's routes: the learner and the lesson come from the pass, never from the body. */
+async function handleLesson(request: IncomingMessage, response: ServerResponse, path: string) {
+  allowOrigin(request, response);
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    return response.end();
+  }
+  const secret = process.env.LESSON_TUTOR_SECRET;
+  if (!secret) return send(response, 503, { ok: false, reason: "unavailable", message: "The lesson tutor isn't set up on this lab." });
+  const pass = readPass(secret, (request.headers.authorization ?? "").match(/^pass\s+(\S+)$/i)?.[1] ?? "");
+  if (!pass) return send(response, 401, { ok: false, reason: "unauthenticated", message: "The pass is missing or has expired. Reload the page." });
+  if (request.method !== "POST") return send(response, 405, { ok: false, message: "Use POST." });
+
+  if (path === "listen") {
+    if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
+    const parsed = LessonListenSchema.safeParse(await readJson(request));
+    if (!parsed.success) return send(response, 400, { ok: false, message: "language is invalid." });
+    if (!(await canListen(pass.userId))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's microphone time." });
+    const grant = await listenGrant("conversation", parsed.data.language, "lesson-tutor.listen");
+    await recordListen(pass.userId, "conversation", "lesson-tutor-voice", "lesson-tutor.listen");
+    return send(response, 200, { ok: true, grant, maxMinutes: LISTEN_MAX_MINUTES });
+  }
+  if (path === "turn") {
+    const body = await readJson(request);
+    response.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+    const line = (event: unknown) => {
+      if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+    };
+    const result = await runLessonTurn(pass.userId, pass.lessonId, body as never, line).catch((error: Error) => {
+      logAi("error", { event: "learning.error", path: request.url, error: String(error.stack ?? error).slice(0, 1000) });
+      return { ok: false as const, reason: "unavailable" as const, message: "The teacher had a problem. Try again." };
+    });
+    line({ type: "done", result });
+    return response.end();
+  }
+  if (path === "speak") {
+    if (!voiceConfigured() && !process.env.ELEVENLABS_API_KEY) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
+    const parsed = LessonSpeakSchema.safeParse(await readJson(request));
+    if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
+    if (!(await canSpeakLesson(pass.userId, parsed.data.text.length))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
+    const listener = new AbortController();
+    response.on("close", () => listener.abort());
+    const audio = await speakLesson(parsed.data.text, await lessonVoice(pass.lessonId), parsed.data.language, listener.signal, { userId: pass.userId, lessonId: pass.lessonId });
+    response.writeHead(200, { "Content-Type": `audio/pcm;rate=${SPEAK_SAMPLE_RATE}`, "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+    await pipeline(Readable.fromWeb(audio as NodeReadableStream<Uint8Array>), response).catch(() => {
+      // Stopped by the listener, or the stream broke off: what was sent was played.
+    });
+    return;
+  }
+  return send(response, 404, { ok: false, message: "Not found." });
+}
 
 async function handle(request: IncomingMessage, response: ServerResponse) {
   const url = new URL(request.url ?? "/", "http://learning");
   if (request.method === "GET" && url.pathname === "/healthz") return send(response, 200, { ok: true });
+  if (url.pathname.startsWith(LESSON_PREFIX)) return handleLesson(request, response, url.pathname.slice(LESSON_PREFIX.length));
 
   const learner = await identify(request);
   if (!learner) return send(response, 401, { ok: false, reason: "unauthenticated", message: "The lab couldn't confirm who you are." });

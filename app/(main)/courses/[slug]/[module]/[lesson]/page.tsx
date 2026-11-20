@@ -11,6 +11,7 @@ import { parseLessonVideo } from "@/lib/lesson-video";
 import type { PlayableVideo } from "@/components/courses/lesson-videos";
 import { resolveMediaUrls } from "@/lib/media";
 import type { LessonAudioTrack } from "@/components/courses/lesson-audio";
+import { readTimings, transcriptWords } from "@/lib/lesson-audio/words";
 
 export const runtime = "nodejs";
 
@@ -34,7 +35,16 @@ export default async function LessonPage({ params }: Props) {
 
     // The lesson's audio, signed here like the videos (docs/lesson-audio.md).
     const audio: LessonAudioTrack | null = storedAudio?.audioPath
-        ? { src: resolveMediaUrls(storedAudio.audioPath), seconds: storedAudio.audioSeconds, transcript: storedAudio.audioScript, key: `${lesson.id}:${storedAudio.revision}` }
+        ? {
+              src: resolveMediaUrls(storedAudio.audioPath),
+              seconds: storedAudio.audioSeconds,
+              transcript: storedAudio.audioScript,
+              // When each word is said, once the worker has timed it; the player estimates until then.
+              timings: storedAudio.audioScript ? readTimings(storedAudio.timings, transcriptWords(storedAudio.audioScript).length) : null,
+              key: `${lesson.id}:${storedAudio.revision}`,
+              // Asking the teacher needs a signed-in learner and the lab's learning service (docs/lesson-tutor.md).
+              tutor: Boolean(process.env.LESSON_TUTOR_URL && process.env.LESSON_TUTOR_SECRET && (await currentViewer())),
+          }
         : null;
 
     // The lesson's videos (one per skill as a rule), each checked again and with its /media/ paths turned into signed

@@ -1,7 +1,7 @@
 import { logAi } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { recoverOrphans, runWorkerTick, type WorkerState } from "@/lib/practice/jobs";
-import { recoverAudioOrphans, runAudioTick } from "@/lib/lesson-audio/queue";
+import { recoverAudioOrphans, runAudioTick, runTimingTick } from "@/lib/lesson-audio/queue";
 
 // The practice worker (docs/practice.md, "Jobs"): carries out the bulk practice work the admin page starts (writing
 // every missing task, drafting every remaining lesson), and the lessons' audio (docs/lesson-audio.md: writing each
@@ -31,6 +31,8 @@ async function loop() {
     }
     try {
       await runAudioTick(audioInFlight, state.stopping);
+      // Timing a voiced lesson's transcript runs in the background, one at a time.
+      void runTimingTick(state.stopping);
     } catch (error) {
       log("error", "lesson-audio.tick", { error: error instanceof Error ? error.message : String(error) });
     }
@@ -43,7 +45,7 @@ async function shutdown(signal: string) {
   state.stopping = true;
   log("info", "practice.worker.stopping", { signal, inFlight: state.inFlight.size, audio: audioInFlight.size });
   // Let the items in progress finish (they record their outcome); anything cut off is recovered on the next start.
-  await Promise.race([Promise.allSettled([...state.inFlight.values(), ...audioInFlight.values()]), new Promise((resolve) => setTimeout(resolve, DRAIN_MS))]);
+  await Promise.race([Promise.allSettled([...state.inFlight.values(), ...audioInFlight.values(), runTimingTick(true) ?? Promise.resolve()]), new Promise((resolve) => setTimeout(resolve, DRAIN_MS))]);
   await prisma.$disconnect().catch(() => undefined);
   log("info", "practice.worker.stopped");
   process.exit(0);

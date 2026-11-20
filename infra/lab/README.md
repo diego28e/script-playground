@@ -16,7 +16,7 @@ is a change to `.env`, not a rebuild (see [Opening up](#opening-up)).
 | `kernel.json` | Registers the kernel as `lc-mastery` / "Python (lc-mastery)", the name the course's checks expect |
 | `jupyter_server_config.py` | The course kernel as the only kernel, dotfiles visible, idle kernels shut down after an hour |
 | `hub/Dockerfile`, `hub/jupyterhub_config.py` | JupyterHub 6.1.1 signing in through the platform (OAuthenticator's generic OAuth), DockerSpawner and the idle culler |
-| `compose.yaml` | Runs the hub on `127.0.0.1:8000`, and the learning service on the lab's private network |
+| `compose.yaml` | Runs the hub on `127.0.0.1:8000`, and the learning service on the lab's private network (and `127.0.0.1:8091` for the lesson tutor's routes) |
 | `tutor/` | The AI tutor in JupyterLab: the panel (`labextension/`, built inside the student image) and the server extension `academia_tutor`, which forwards to the learning service |
 | `learning/` | The learning service's image: the tutor's backend (`services/learning`), built with `pnpm learning:build`; its settings in `learning/.env` |
 | `grader/` | The practice grader: runs learners' code answers in throwaway containers from the student image, under gVisor (`grader/server.mjs`, `grader/harness.py`); its secret in `grader/.env` |
@@ -150,6 +150,11 @@ To deploy or update the learning service, build its bundle on your PC (`pnpm lea
 create `learning/.env` from `learning/.env.example` (the platform's `DATABASE_URL`, `GEMINI_API_KEY`, and
 `DEEPSEEK_API_KEY`), then `docker compose up -d --build learning`. Check it with
 `docker compose ps learning` (healthy) and `docker logs learning` (a `learning.start` line).
+
+The learning service also answers the **lesson tutor** (`docs/lesson-tutor.md`): learners' browsers on the platform,
+through nginx at `https://<lab domain>/learning/v1/lesson/` (only those routes; the snippet
+`/etc/nginx/snippets/lab-learning.conf`, the block in `nginx/lab.conf`), to its loopback port `127.0.0.1:8091`. Those
+requests carry a pass the platform signed with `LESSON_TUTOR_SECRET` (in `learning/.env` and in Amplify).
 
 To test on your PC, run the service with `HUB_API_URL=http://localhost:8100/hub/api pnpm learning:dev` against the
 local hub, and point a test lab container at it with `ACADEMIA_LEARNING_URL=http://host.docker.internal:8080`.

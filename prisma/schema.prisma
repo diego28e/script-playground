@@ -353,6 +353,11 @@ model LessonAudio {
   voicedAt      DateTime?
   // Bumped on every voicing: part of the file's name, so a new version never meets an old one in a cache.
   revision      Int               @default(0)
+  // When each word of audioScript is said (lib/lesson-audio/timing.ts), so the transcript follows the audio:
+  // {v, matched, words: [start in centiseconds per word]}. Worked out by the worker after every voicing.
+  timings       Json?
+  timingTries   Int               @default(0)
+  timingError   String?
   requestedById String
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
