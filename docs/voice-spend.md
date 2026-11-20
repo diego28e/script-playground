@@ -17,6 +17,7 @@ made it, the moment the call returns, failed calls included, with what it was fo
 | `captions.transcribe`: a video's captions | Deepgram | the platform | the response's request id |
 | `tutor.speak`: a reply read aloud | Deepgram | the lab's learning service | dg-request-id |
 | `tutor.listen`: a microphone stream | Deepgram | the learner's browser, granted by the learning service | none (by tag, below) |
+| `practice.listen`: an explanation dictated in practice | Deepgram | the learner's browser, granted by the platform | none (by tag, below) |
 
 Each row has the course, lesson, lesson audio, video, voice, model, user, characters, audio seconds and an estimate at
 list price. A lesson that fails halfway has still recorded the pieces it paid for. Writing a row never fails the work.

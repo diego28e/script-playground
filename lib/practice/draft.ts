@@ -10,7 +10,7 @@ import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 // lesson's skills with their prerequisites. The draft is saved for an admin to review on /admin/practice; nothing
 // reaches learners until a graph version is published (lib/practice/graph.ts).
 
-export const SYSTEM_PROMPT = `You design the skill graph behind spaced practice for a programming course. Learners practise each skill later with short tasks (1 to 3 minutes): multiple-choice and fill-in questions, predicting a snippet's output, writing a small piece of code, or fixing a broken snippet. A planner schedules them and unlocks a skill once its hard prerequisites are mastered.
+export const SYSTEM_PROMPT = `You design the skill graph behind spaced practice for an online course: a programming course, or one on engineering practice (site reliability, cloud, operations, interviews). Learners practise each skill later with short tasks (1 to 3 minutes): multiple-choice and fill-in questions, explaining an idea aloud in their own words, and, where Python can practise it, predicting a snippet's output, writing a small piece of code, or fixing a broken snippet. A planner schedules them and unlocks a skill once its hard prerequisites are mastered.
 
 For ONE lesson, propose the skills it teaches.
 
@@ -22,7 +22,7 @@ RULES
 - labelEn / labelEs: a short can-do label, verb first, at most 8 words, in English and in Spanish. Keep code names (functions, classes, parameters) in English in both.
 - descriptionEn / descriptionEs: one sentence on what a learner who has the skill can do.
 - knowledge: "declarative" for knowing and explaining (what, why, which, when) or "procedural" for doing (writing or running code, following a procedure).
-- runnable: true when a short task can practise it offline with plain Python and the course's packages: no network, no API keys, no GPU, no Docker. LangChain's fake chat models count as offline. False when it only makes sense against a live service (then it gets questions only).
+- runnable: true when a short task can practise it offline with plain Python and the course's packages: no network, no API keys, no GPU, no Docker. LangChain's fake chat models count as offline. False when it only makes sense against a live service, or isn't about Python at all (shell, cloud consoles, Kubernetes, incident response, interview answers): then it gets questions and explanations.
 - criteriaHint: in English, how a grader can tell from an answer that this skill, and not a neighbouring one, is shown.
 - prerequisites: only the DIRECT ones, at most 3 per skill: keys from EXISTING SKILLS, or keys of skills earlier in your own list. "hard" when the skill cannot be practised without it; "soft" when it helps. Give a short reason. Never point to a later skill.
 

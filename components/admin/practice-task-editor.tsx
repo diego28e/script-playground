@@ -186,7 +186,8 @@ export function TaskEditor({
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
             Saving proves the task again (code runs on the grader; a question is
-            answered blind by a second model). When it passes, it replaces this
+            answered blind by a second model; an explanation&apos;s points must
+            pass an expert&apos;s blind answer and fail a weak one). When it passes, it replaces this
             one, which is retired; answers already given keep pointing at the
             old version.
           </DialogDescription>
@@ -387,6 +388,58 @@ export function TaskEditor({
                 ))}
             </>
           )}
+
+          {form === "explain" &&
+            (["Es", "En"] as const).map((language) => (
+              <div key={language} className="space-y-4">
+                <Field
+                  label={`Points a good answer makes (${language === "Es" ? "Spanish" : "English"}), one per line`}
+                  hint="3 to 5, the same in both languages and in the same order. The grader checks each one."
+                >
+                  <Area
+                    value={(draft[`points${language}`] ?? []).join("\n")}
+                    onChange={(value) =>
+                      set(
+                        `points${language}`,
+                        value
+                          .split("\n")
+                          .map((line) => line.trim())
+                          .filter(Boolean),
+                      )
+                    }
+                    minRows={4}
+                  />
+                </Field>
+                <Field
+                  label={`Misconceptions (${language === "Es" ? "Spanish" : "English"}), one per line`}
+                  hint="1 to 3 wrong ideas learners hold. An answer that holds one doesn't pass."
+                >
+                  <Area
+                    value={(draft[`misconceptions${language}`] ?? []).join("\n")}
+                    onChange={(value) =>
+                      set(
+                        `misconceptions${language}`,
+                        value
+                          .split("\n")
+                          .map((line) => line.trim())
+                          .filter(Boolean),
+                      )
+                    }
+                    minRows={2}
+                  />
+                </Field>
+                <Field
+                  label={`A good answer (${language === "Es" ? "Spanish" : "English"})`}
+                  hint="60 to 150 words, shown after answering."
+                >
+                  <Area
+                    value={draft[`modelAnswer${language}`] ?? ""}
+                    onChange={(value) => set(`modelAnswer${language}`, value)}
+                    minRows={5}
+                  />
+                </Field>
+              </div>
+            ))}
 
           <Field label="Explanation (Spanish)">
             <Area

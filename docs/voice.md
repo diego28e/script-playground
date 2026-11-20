@@ -111,6 +111,16 @@ the rubric, and the grader must pass the first and fail the second. It's recorde
    dictation.
 3. Tried in production, desktop and phone; docs and tracker.
 
+**Explain in your words, as built** (2026-11-20; the task form and its grading are in `docs/practice.md`). The practice
+page asks the platform for the grant itself, with no learning service in between: `listenForExplanation`
+(`actions/practice-learner.ts`) checks the task is open in the learner's session and is an explain task, counts the
+stream in the day's allowance, and returns a Nova-3 grant (`language=multi`, interim results) tagged
+`adc-practice-listen`, the workload `practice.listen` in the spend ledger (runtime `platform`). The grant adds the task's
+own terms to the key terms: acronyms and capitalised names from its question and rubric ("TTL", "Route", "Kubernetes").
+The browser streams with the same `VoiceStream` as the tutor; Stop calls its new `end()`, which stops the microphone at
+once, sends `CloseStream` so Deepgram sends its last results, waits for it to close (3 s at most) and returns every
+word, the last ones even if they never became final. A stream lasts 5 minutes at most; Dictate again adds to the box.
+
 ## Costs and limits
 
 Counted in `ai_request` beside every other AI call (`lib/voice/allowance.ts`), per learner per day: **60 microphone

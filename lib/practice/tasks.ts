@@ -8,13 +8,15 @@ import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
 import { gradeCode, type GradeOutcome } from "@/lib/practice/grader";
+import { gradeExplanation } from "@/lib/practice/explain";
 
 // Practice tasks (docs/practice.md, "Tasks"): a model writes one task for one skill at one stage; the platform proves it
 // (code runs on the grader: the reference passes and wrong code fails; a question is answered blind by a second
-// model, from another provider, which must agree with the key); lk-practice admits it as a proven item; it joins the
-// skill's pool. One task per call, so a call fits inside one Amplify request (about 30 s).
+// model, from another provider, which must agree with the key; an explanation's rubric must pass an expert's blind
+// answer and fail a weak one, lib/practice/explain.ts); lk-practice admits it as a proven item; it joins the skill's
+// pool. One task per call, so a call fits inside one Amplify request (about 30 s).
 
-export const FORMS = ["choice", "fill", "predict", "code", "debug"] as const;
+export const FORMS = ["choice", "fill", "predict", "code", "debug", "explain"] as const;
 export type TaskForm = (typeof FORMS)[number];
 
 // The task-writing model, unless the admin picks another: fast, and good at Python and tests.
@@ -43,24 +45,29 @@ const FORM_RULES: Record<TaskForm, string> = {
     "code: code is the starter the learner edits (imports, a function signature with a docstring, and `raise NotImplementedError`). tests holds 2 to 5 functions named test_* that use plain assert with a short English message, are deterministic, print nothing and run in under 5 seconds. solution is a correct full replacement of the starter; wrongSolution is a plausible wrong one (a typical mistake) that fails at least one test. recipeEs and recipeEn are the same 3 to 7 steps (one string each, in the same order in both languages) a learner can follow to write the solution themselves, like a teacher's recipe: what to compute, in what order, and what to call each result. Plain words only: no code, no function calls, no operators or expressions; a step may name a variable, parameter or function in backticks (`max_budget`), never show how to write it. Precise enough to follow, leaving every bit of Python to the learner.",
   debug:
     "debug: code is a short program (at most 25 lines) with exactly one realistic bug. tests holds 2 to 5 functions named test_* (plain assert, short English message) that fail on the bug and pass when it is fixed. solution is the fixed program. The prompt says what the code should do and that it has a bug, without saying where.",
+  explain:
+    "explain: the learner explains an idea aloud (or types it), as they would to a colleague or in a job interview, in 30 seconds to 2 minutes. The prompt asks ONE open question: why something is so, what happens when…, how two things differ, or when to choose one over the other, in a concrete situation where possible. It never lists what to cover. pointsEs/pointsEn are the same 3 to 5 points a good answer makes (one short sentence each, in the same order): ideas, not wording, each checkable on its own, together enough to answer well. Only what an expert answering THIS question unprompted would say: an answer is checked by having an expert answer the question without seeing the points, and it must make most of them. Make the question ask for anything more. misconceptionsEs/misconceptionsEn are the same 1 to 3 wrong ideas learners commonly hold about it, each as a learner would state it. modelAnswerEs/modelAnswerEn: a good spoken answer of 60 to 150 words in plain sentences (no lists, headings or code blocks) that makes every point. The explanation says why these points are the ones that matter.",
 };
 
-export const SYSTEM_PROMPT = `You write practice tasks for a programming course (Python, LangChain, LangGraph), for spaced practice after each lesson. Learners practise on a web page: they answer questions there and their code runs in a sandbox with Python 3.12 and the course's packages (langchain, langchain-core, langgraph and their usual dependencies), with NO network and NO API keys.
+export const SYSTEM_PROMPT = `You write practice tasks for an online course, for spaced practice after each lesson; THE COURSE says what it teaches. Learners practise on a web page: they answer questions there, explain ideas aloud or in writing, and, in programming courses, write code that runs in a sandbox with Python 3.12 and the course's packages (langchain, langchain-core, langgraph and their usual dependencies), with NO network and NO API keys.
 
 Write ONE task, for the skill and stage given, in the form given.
 
 RULES
 - The task practises exactly this skill at this stage, and is answerable by someone who has the skill in 1 to 5 minutes. It doesn't need the lesson's text open.
+- Text fields come in Spanish (Es) and English (En), saying the same thing; keep code, API names, identifiers and the field's usual English terms in English in both. Write prompts in Markdown; put code in fenced blocks.
+- explanationEs/En: 2 to 4 sentences the learner reads after answering: why the answer is right, and the misconception behind the likely wrong one.
+- difficulty: your estimate for this stage, from -1 (easy for it) to 1 (hard for it); 0 is typical.
+- expectedSeconds: how long someone with the skill needs: about 30 for choice, 45 for fill, 60 for predict, 120 to 240 for code and debug, 60 to 120 for explain (thinking and saying it).
+- Leave fields that don't belong to the form out.
+- Don't repeat the tasks listed under EXISTING TASKS; vary the situation, not just the names.
+
+CODE (predict, code and debug tasks)
 - Never require the network, an API key, a real model, a GPU or files outside /tmp. Where a chat model is needed in code, use LangChain's fake models (from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel).
 - Tests run after the code, in the same namespace: they use its names directly. Never write \`import solution\` or \`from solution import …\`.
 - A run has 30 seconds including imports (importing langchain takes a few seconds in the sandbox): keep code and tests light, with no loops that wait, sleep or retry.
 - Write against the package versions listed under THE SANDBOX when given: APIs change between versions (in recent langchain-core, for example, a message's .text is a TextAccessor, not a str).
-- Code is valid Python 3.12, deterministic, and uses English names. Text fields come in Spanish (Es) and English (En), saying the same thing; keep code, API names and identifiers in English in both. Write prompts in Markdown; put code in fenced blocks.
-- explanationEs/En: 2 to 4 sentences the learner reads after answering: why the answer is right, and the misconception behind the likely wrong one.
-- difficulty: your estimate for this stage, from -1 (easy for it) to 1 (hard for it); 0 is typical.
-- expectedSeconds: how long someone with the skill needs: about 30 for choice, 45 for fill, 60 for predict, 120 to 240 for code and debug.
-- Leave fields that don't belong to the form out.
-- Don't repeat the tasks listed under EXISTING TASKS; vary the situation, not just the names.
+- Code is valid Python 3.12, deterministic, and uses English names.
 
 FORMS
 ${FORMS.map((form) => `- ${FORM_RULES[form]}`).join("\n")}
@@ -89,6 +96,13 @@ const TaskSchema = z.object({
   // Code tasks: the steps to the solution in plain words (docs/practice.md, "Recipes").
   recipeEs: z.array(z.string().min(1)).optional(),
   recipeEn: z.array(z.string().min(1)).optional(),
+  // Explain tasks: the rubric (docs/practice.md, "Explain in your words") and a good answer, shown after answering.
+  pointsEs: z.array(z.string().min(1)).optional(),
+  pointsEn: z.array(z.string().min(1)).optional(),
+  misconceptionsEs: z.array(z.string().min(1)).optional(),
+  misconceptionsEn: z.array(z.string().min(1)).optional(),
+  modelAnswerEs: z.string().optional(),
+  modelAnswerEn: z.string().optional(),
 });
 export type TaskContent = z.infer<typeof TaskSchema>;
 
@@ -112,6 +126,12 @@ export const RESPONSE_SCHEMA: Schema = {
     wrongSolution: { type: Type.STRING },
     recipeEs: { type: Type.ARRAY, items: { type: Type.STRING } },
     recipeEn: { type: Type.ARRAY, items: { type: Type.STRING } },
+    pointsEs: { type: Type.ARRAY, items: { type: Type.STRING } },
+    pointsEn: { type: Type.ARRAY, items: { type: Type.STRING } },
+    misconceptionsEs: { type: Type.ARRAY, items: { type: Type.STRING } },
+    misconceptionsEn: { type: Type.ARRAY, items: { type: Type.STRING } },
+    modelAnswerEs: { type: Type.STRING },
+    modelAnswerEn: { type: Type.STRING },
     explanationEs: { type: Type.STRING },
     explanationEn: { type: Type.STRING },
   },
@@ -134,6 +154,12 @@ export const RESPONSE_SCHEMA: Schema = {
     "wrongSolution",
     "recipeEs",
     "recipeEn",
+    "pointsEs",
+    "pointsEn",
+    "misconceptionsEs",
+    "misconceptionsEn",
+    "modelAnswerEs",
+    "modelAnswerEn",
     "explanationEs",
     "explanationEn",
   ],
@@ -146,6 +172,7 @@ const FORM_FIELDS: Record<TaskForm, (keyof TaskContent)[]> = {
   predict: ["code", "expectedOutput", "wrongOutput"],
   code: ["code", "tests", "solution", "wrongSolution", "recipeEs", "recipeEn"],
   debug: ["code", "tests", "solution"],
+  explain: ["pointsEs", "pointsEn", "misconceptionsEs", "misconceptionsEn", "modelAnswerEs", "modelAnswerEn"],
 };
 
 /**
@@ -185,7 +212,28 @@ function shapeProblem(task: TaskContent): string | null {
       return recipeProblem(task);
     case "debug":
       return need(["code", "tests", "solution"]) ? "debug without code, tests or solution" : null;
+    case "explain":
+      return rubricProblem(task);
   }
+}
+
+/** An explain task's rubric: 3 to 5 points and 1 to 3 misconceptions, the same in both languages, and a good answer. */
+export function rubricProblem(task: Pick<TaskContent, "pointsEs" | "pointsEn" | "misconceptionsEs" | "misconceptionsEn" | "modelAnswerEs" | "modelAnswerEn">): string | null {
+  const points = [task.pointsEs ?? [], task.pointsEn ?? []];
+  const wrong = [task.misconceptionsEs ?? [], task.misconceptionsEn ?? []];
+  if (!points[1].length || !points[0].length) return "explain without points (pointsEs and pointsEn)";
+  if (points[0].length !== points[1].length) return "the points differ in number between Spanish and English";
+  if (points[1].length < 3 || points[1].length > 5) return "an explain task needs 3 to 5 points";
+  if (!wrong[1].length || !wrong[0].length) return "explain without misconceptions (misconceptionsEs and misconceptionsEn)";
+  if (wrong[0].length !== wrong[1].length) return "the misconceptions differ in number between Spanish and English";
+  if (wrong[1].length > 3) return "an explain task needs 1 to 3 misconceptions";
+  if ([...points.flat(), ...wrong.flat()].some((line) => line.length > 300)) return "a point or misconception is longer than 300 characters";
+  for (const answer of [task.modelAnswerEs ?? "", task.modelAnswerEn ?? ""]) {
+    // 60 to 150 words asked for; some room either side, and Spanish runs longer.
+    const count = answer.trim().split(/\s+/).filter(Boolean).length;
+    if (count < 40 || count > 220) return "the model answer needs 60 to 150 words";
+  }
+  return null;
 }
 
 /**
@@ -348,7 +396,7 @@ const CheckSchema: Schema = {
 };
 
 /** Questions: a model from another provider answers blind; its answer must match the key. */
-async function proveByModel(task: TaskContent, writer: string, userId: string, deadline: number): Promise<Proof> {
+async function proveByModel(task: TaskContent, writer: string, userId: string, deadline: number, subject: string): Promise<Proof> {
   const checker = writer.startsWith("claude") ? "deepseek-flash" : "claude-sonnet-5-5";
   const question =
     task.form === "choice"
@@ -363,7 +411,7 @@ async function proveByModel(task: TaskContent, writer: string, userId: string, d
     deadline,
     contents: [{ role: "user", parts: [{ text: question }] }],
     config: {
-      systemInstruction: "You answer a practice question about Python, LangChain and LangGraph as an expert would. Reply with the JSON object only.",
+      systemInstruction: `You answer a practice question about ${subject} as an expert would. Reply with the JSON object only.`,
       responseMimeType: "application/json",
       responseSchema: CheckSchema,
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
@@ -391,6 +439,95 @@ async function proveByModel(task: TaskContent, writer: string, userId: string, d
     };
   }
   return { ok: true, proof: { kind: "model-checked", at: Date.now(), model: result.model, agreed: true }, note: `${result.model} agreed` };
+}
+
+const AnswerOnly: Schema = { type: Type.OBJECT, properties: { answer: { type: Type.STRING } }, required: ["answer"] };
+
+/**
+ * Explain tasks: a model from another provider answers the question blind, as an expert, and writes a weak answer
+ * from the rubric; the grader learners get (lib/practice/explain.ts) must pass the first and fail the second. That
+ * shows the points are what a good answer to this question says, and specific enough to tell a weak one apart.
+ */
+async function proveByExplaining(task: TaskContent, writer: string, userId: string, deadline: number, subject: string): Promise<Proof> {
+  const left = deadline - Date.now();
+  if (left < 6_000) return { ok: false, reason: "no time left to check the rubric (the writing took too long); try again" };
+  const checker = writer.startsWith("claude") ? "deepseek-flash" : "claude-sonnet-5-5";
+  const models = chainStartingAt(AUTHORING_CHAIN, checker).filter((entry) => entry.model !== writer);
+  // Leave the grading a few seconds.
+  const answerDeadline = deadline - Math.min(5_000, left / 3);
+  const ask = (system: string, text: string) =>
+    generateWithFallback({
+      feature: "graph",
+      pool: "AUTHORING",
+      userId,
+      models,
+      chosenFirst: true,
+      deadline: answerDeadline,
+      contents: [{ role: "user", parts: [{ text }] }],
+      config: { systemInstruction: system, responseMimeType: "application/json", responseSchema: AnswerOnly, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 2048 },
+    });
+  const points = (task.pointsEn ?? []).map((point, index) => `${index + 1}. ${point}`).join("\n");
+  const [good, weak] = await Promise.all([
+    ask(`You are an expert in ${subject}. Answer the question the way you would say it aloud to a colleague: 80 to 150 words, plain sentences. Answer with JSON: {"answer": "..."}.`, task.promptEn),
+    ask(
+      `You write test answers for a grader. Write the answer a learner who half-knows the topic would say aloud. Answer with JSON: {"answer": "..."}.`,
+      `${task.promptEn}\n\nA good answer makes these points:\n${points}\n\nWrite 50 to 90 words that sound sure of themselves but make at most one of the points, stay vague, and state this as if it were true: ${task.misconceptionsEn?.[0] ?? ""}`,
+    ),
+  ]);
+  // The answer as the model gave it: {"answer": ...} asked for, but a model in plain "JSON mode" may name the key
+  // otherwise, or answer in prose.
+  const read = (result: Awaited<ReturnType<typeof ask>>) => {
+    if (!result.ok) {
+      console.info(JSON.stringify({ event: "practice.explain_proof_answer_failed", reason: result.reason }));
+      return null;
+    }
+    let answer = "";
+    try {
+      const parsed = JSON.parse(result.text) as Record<string, unknown>;
+      answer = String(parsed.answer ?? Object.values(parsed).find((value) => typeof value === "string") ?? "").trim();
+    } catch {
+      answer = result.text.trim();
+    }
+    return answer.split(/\s+/).length >= 20 ? { answer, model: result.model } : null;
+  };
+  const expert = read(good);
+  const poor = read(weak);
+  if (!expert || !poor) return { ok: false, reason: "no second model could answer the question to check the rubric" };
+  const [expertGrade, poorGrade] = await Promise.all(
+    [expert, poor].map((entry) => gradeExplanation({ content: task, answer: entry.answer, language: "en", userId, pool: "AUTHORING", deadline, subject })),
+  );
+  if (!expertGrade.ok || !poorGrade.ok) return { ok: false, reason: "the grader couldn't be reached to check the rubric" };
+  const percent = (score: number) => `${Math.round(score * 100)}%`;
+  if (!expertGrade.grade.passed) {
+    const missed = expertGrade.grade.points
+      .map((point, index) => (point.made === "yes" ? null : `- point ${index + 1} (${point.made}): ${task.pointsEn?.[index]}`))
+      .filter(Boolean)
+      .join("\n");
+    const errors = [...expertGrade.grade.misconceptions.map((index) => task.misconceptionsEn?.[index] ?? ""), ...expertGrade.grade.otherErrors].filter(Boolean);
+    return {
+      ok: false,
+      reason: `an expert's blind answer scored ${percent(expertGrade.grade.score)} and didn't pass`,
+      detail: clip(
+        `An expert (${expert.model}) answered the question without seeing the rubric, and the grader didn't pass it (${percent(expertGrade.grade.score)}).\nPoints it didn't make:\n${missed || "(none)"}\n${errors.length ? `The grader also found errors: ${errors.join("; ")}\n` : ""}The expert's answer:\n${expert.answer}\n\nThe points must be what any good answer to THIS question says: drop or rewrite a point the question doesn't ask for, or make the question ask for it.`,
+      ),
+      fixable: true,
+    };
+  }
+  if (poorGrade.grade.passed) {
+    return {
+      ok: false,
+      reason: `a weak answer scored ${percent(poorGrade.grade.score)} and passed`,
+      detail: clip(
+        `A deliberately weak answer passed the grader (${percent(poorGrade.grade.score)}), so the rubric doesn't tell a weak answer from a good one.\nThe weak answer:\n${poor.answer}\n\nMake each point specific enough that touching the topic isn't making the point, and make the misconceptions ones a grader can recognise.`,
+      ),
+      fixable: true,
+    };
+  }
+  return {
+    ok: true,
+    proof: { kind: "model-checked", at: Date.now(), model: `${expert.model} (answers), ${expertGrade.model ?? "grader"} (grades)`, agreed: true },
+    note: `an expert's blind answer scored ${percent(expertGrade.grade.score)}, a weak one ${percent(poorGrade.grade.score)}`,
+  };
 }
 
 /**
@@ -435,7 +572,14 @@ async function skillFor(courseId: string, skillKey: string) {
   if (!node || !meta) return { error: "This skill isn't in the published graph yet: approve its lesson and publish." } as const;
   // Items are checked against a graph that has the skill: a found one joins the published graph for the check.
   const checkGraph = found ? { ...published.graph, skills: [...published.graph.skills, node] } : published.graph;
-  return { node, meta, found, checkGraph } as const;
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { title: true, summary: true } });
+  return { node, meta, found, checkGraph, subject: courseSubject(course) } as const;
+}
+
+/** The course, as a model is told what it's about: its title, and its summary when it has one. */
+export function courseSubject(course: { title: string; summary: string | null } | null): string {
+  if (!course) return "the course's subject";
+  return course.summary ? `${course.title} (${course.summary.replace(/\s+/g, " ").slice(0, 300)})` : course.title;
 }
 
 /** What a model is told about the skill, stage and form, before it writes or edits a task. */
@@ -444,6 +588,7 @@ async function taskContext(skill: Exclude<Awaited<ReturnType<typeof skillFor>>, 
   const lesson = await prisma.lesson.findUnique({ where: { id: meta.lessonId }, select: { code: true, title: true, objectives: true } });
   const ladder = Object.keys(node.forms ?? {});
   return [
+    `# THE COURSE\n${skill.subject}`,
     `# Skill: ${node.label} (key ${node.id})\n${node.description ?? ""}\nKind: ${node.knowledge}. Ladder: ${ladder.join(" → ")}.${node.criteriaHint ? `\nWhat shows the skill: ${node.criteriaHint}` : ""}`,
     `# Stage: ${stage}\n${STAGES[stage] ?? stage}`,
     `# Form: ${form}\n${FORM_RULES[form]}`,
@@ -471,6 +616,8 @@ async function proveAndStore(input: {
   userId: string;
   deadline: number;
   checkGraph: PublishedGraph["graph"];
+  /** The course, for the models that check a task (courseSubject). */
+  subject: string;
   keepRejected: boolean;
   editedFromId?: string;
   /**
@@ -486,7 +633,8 @@ async function proveAndStore(input: {
   const prove = async (candidate: TaskContent, writer: string): Promise<Proof> => {
     const shape = shapeProblem(candidate);
     if (shape) return { ok: false, reason: shape, detail: `The task's fields don't fit its form: ${shape}.`, fixable: true };
-    return form === "choice" || form === "fill" ? proveByModel(candidate, writer, input.userId, input.deadline) : proveByRunning(candidate, input.deadline);
+    if (form === "explain") return proveByExplaining(candidate, writer, input.userId, input.deadline, input.subject);
+    return form === "choice" || form === "fill" ? proveByModel(candidate, writer, input.userId, input.deadline, input.subject) : proveByRunning(candidate, input.deadline);
   };
   let proof = await prove(task, model);
   // A repair needs time for a rewrite and a second proof: about a minute.
@@ -516,7 +664,8 @@ async function proveAndStore(input: {
       difficulty,
       expectedSeconds,
       fluentSeconds: Math.round(expectedSeconds * 0.5),
-      slowSeconds: Math.round(expectedSeconds * 1.5),
+      // Saying an explanation takes as long as it takes: only a very long one counts as slow.
+      slowSeconds: Math.round(expectedSeconds * (form === "explain" ? 3 : 1.5)),
       form,
       contentHash,
       origin: "generated",
@@ -600,7 +749,9 @@ export async function generateTask(input: {
 
   const chosen = isAuthoringModel(input.model) ? input.model : DEFAULT_TASK_MODEL;
   // Leave room for the proof: running code or asking a second model takes a few seconds.
-  const writeDeadline = input.deadline - (form === "choice" || form === "fill" ? 9_000 : 6_000);
+  // A question's proof is a second model's answer; an explanation's, two answers and two grades, in parallel pairs:
+  // about 4 s with DeepSeek (measured 2026-11-20).
+  const writeDeadline = input.deadline - (form === "choice" || form === "fill" || form === "explain" ? 9_000 : 6_000);
   const written = await generateWithFallback({
     feature: "graph",
     pool: "AUTHORING",
@@ -638,7 +789,7 @@ export async function generateTask(input: {
           repairTask({ context, form, task: current, failure, userId: input.userId, model: chosen, deadline: input.deadline }),
       }
     : undefined;
-  return proveAndStore({ ...input, form, task, model: written.model, traceId: written.traceId, checkGraph: skill.checkGraph, keepRejected: true, repair });
+  return proveAndStore({ ...input, form, task, model: written.model, traceId: written.traceId, checkGraph: skill.checkGraph, subject: skill.subject, keepRejected: true, repair });
 }
 
 /**
@@ -671,7 +822,10 @@ async function repairTask(input: {
           { text: `# YOUR TASK\n${JSON.stringify(input.task, null, 1)}` },
           { text: `# WHAT HAPPENED WHEN IT WAS CHECKED\n${input.failure.reason}\n\n${input.failure.detail ?? ""}` },
           {
-            text: `The task failed its check. Fix it so it passes, as a ${input.form} task for the same skill and stage. The sandbox's output is the truth: when the code is right and teaches the skill, fix the key, the expected output or the explanation to match it; when the code or the tests are wrong, fix them (and keep the solution, the wrong solution and the recipe consistent). Keep Spanish and English saying the same thing. Answer with the whole task as the JSON object.`,
+            text:
+              input.form === "explain"
+                ? "The task failed its check. Fix it so it passes, as an explain task for the same skill and stage: align the points with what the question asks, and make each one specific (rewrite the question if it is too open). Keep the model answer making every point, and Spanish and English saying the same thing. Answer with the whole task as the JSON object."
+                : `The task failed its check. Fix it so it passes, as a ${input.form} task for the same skill and stage. The sandbox's output is the truth: when the code is right and teaches the skill, fix the key, the expected output or the explanation to match it; when the code or the tests are wrong, fix them (and keep the solution, the wrong solution and the recipe consistent). Keep Spanish and English saying the same thing. Answer with the whole task as the JSON object.`,
           },
         ],
       },
@@ -772,6 +926,7 @@ export async function saveTaskEdit(input: { taskId: string; task: unknown; edite
     userId: input.userId,
     deadline: input.deadline,
     checkGraph: skill.checkGraph,
+    subject: skill.subject,
     keepRejected: false,
     editedFromId: row.id,
   });

@@ -11,7 +11,7 @@ platform supplies the graph, the tasks, the grades and the time, and stores the 
 |---|---|
 | Where learners practise | A **Today's practice** page on academiadelcodigo.com: tasks in the page, code in an editor there, graded on the server. Any device, no lab needed. |
 | The skill graph | **Drafted by a model from each lesson's objectives; an admin reviews and approves it** before learners see it. |
-| Task kinds | **Code tasks with tests**, **recall questions** (multiple choice, fill in the blank, predict the output) and **debug a broken snippet**. "Explain in your words" waits for speech-to-text (roadmap): typing explanations is tedious. |
+| Task kinds | **Code tasks with tests**, **recall questions** (multiple choice, fill in the blank, predict the output) and **debug a broken snippet**. "Explain in your words" waited for speech-to-text: it's built now, dictated or typed (below). |
 | Session | **A short daily set**, about 10 to 15 minutes: what is due first, then a few new skills, then "done for today". |
 | Where code runs | **A grader service on the lab server**: each answer in a throwaway container with no network and capped CPU, memory, processes and time. The platform calls it over HTTPS with a shared secret. |
 | When a skill enters practice | **When its lesson is completed** (Mark as complete), and when the tutor's "practise this in a few days" names it. |
@@ -42,6 +42,7 @@ Python with the course's packages and no network: no real model calls, and LangC
 | Recall: predict the output | Says what a snippet prints | Instantly, against the key | The grader runs the snippet and must print the key |
 | Code | Writes a small function or block | Tests, in the grader | The reference solution passes, a wrong solution fails |
 | Debug | Fixes a broken snippet | Tests, in the grader | The broken snippet fails, the reference passes |
+| Explain | Explains an idea, dictated or typed | A model, against the task's rubric | An expert's blind answer passes, a weak one fails |
 
 - **The pool.** Each skill keeps a pool of proven tasks per stage and difficulty (lk-practice's `generationRequest`,
   `checkCandidates`, `admitCandidate`). When a skill's pool runs low, a background job writes more. Generation uses
@@ -490,9 +491,59 @@ recipe waits behind "Show the recipe", the page gets its steps only once it's sh
 0 of the task: it counts in the answer's evidence like a hint (a right answer with it counts a little less), without
 using one of the three written hints.
 
+## Explain in your words
+
+A task form, `explain`, for the top stages: producing and applying what a learner knows (declarative ladder) and
+transferring what they can do (procedural). One open question, asked as a colleague or an interviewer would: why
+something is so, what happens when, how two things differ, when to choose one. The learner says the answer
+(dictation, `docs/voice.md`) or types it, corrects any word the speech model got wrong, and checks.
+
+**The task** (`lib/practice/tasks.ts`, `FORM_RULES.explain`) carries a rubric beside the prompt: 3 to 5 **points** a
+good answer makes (ideas, not wording, each checkable on its own, in both languages), 1 to 3 **misconceptions** to
+watch for, and a **good answer** of 60 to 150 words, shown after answering.
+
+**Grading** (`lib/practice/explain.ts`). DeepSeek V4.1 Flash, then the free Gemini models, reads the answer against the
+rubric, ignoring transcription slips and filler words, and returns for each point "yes", "partly" or "no" with a short
+note in the learner's language, a true/false per misconception, any other clearly false claim, a word to the learner
+(what was strong, then the one thing to add or fix), and its confidence. The platform scores it, not the model: a point
+made counts 1, in part a half, over the number of points, minus a quarter for each misconception held or wrong claim. It
+passes at **60%** with no misconception or wrong claim. An answer under 12 words fails with no model call. It's recorded
+as lk-practice `ai` evidence with the grader's confidence. A learner can have 60 explanations graded a day (`ai_request`,
+feature `grade`); about two seconds each.
+
+**Proof** before a task joins the pool: a model from another provider than the writer answers the question **blind**,
+as an expert, and writes a **weak** answer from the rubric (vague, one point at most, the first misconception stated as
+true). The learners' grader must pass the first and fail the second. That shows the points are what a good answer to
+this question says, and specific enough to tell a weak answer apart. The proof's two answers and two grades run in
+pairs, in parallel: about 4 seconds. When the expert's answer fails, the repair (on the worker) is told which points it
+didn't make and why the rubric must follow the question.
+
+**The page.** The answer box takes typing, or Dictate: the words appear as they're heard and join what's in the box,
+with a timer, a level meter, the word count and the time to aim for (`expectedSeconds`). It keeps listening through
+pauses until Stop, then the box is the learner's to fix. Feedback shows "Well explained" or "Not there yet", the points
+made, the grader's word, each point with a tick, a dash (in part) or a cross and its note, anything that isn't so, a good
+answer behind a button, and the task's explanation. The Python scratchbook is hidden on these tasks. Hints work as for
+other forms and never give the points away.
+
+**Courses that aren't Python.** The skill drafting prompt now covers engineering-practice courses (SRE, cloud,
+operations, interviews): a skill that isn't about Python is `runnable: false`, and gets questions and explanations
+(`skillForms`, `lib/practice/graph.ts`). Task writing, the blind check of questions and hints are told the course's title
+and summary instead of assuming Python and LangChain. A published graph keeps its forms: republish a course to add
+`explain` to its skills' stages.
+
+Tried locally on 2026-11-20, on the SRE course's lesson 03.08 (DNS): the draft gave 5 skills, all not runnable; of 8
+explain tasks written, 2 were proven (an expert's blind answer 100% and 60%, the weak one 0%), 3 failed the expert check
+(0% to 50%; the first run's 0% was the grader's verdicts not being read, fixed), and 3 met a transient "no model could
+answer". Writing within one admin request took 13 to 19 s. Graded by hand: the good answer and a rambling spoken
+version of it 100%, a vague one 25%, a wrong one 0% with all three misconceptions found. On the page, typed answers were
+graded in about 4 s (5 of 5; and 0 of 5 with one in part, the "48 hours, nothing to do" claim counted as a wrong claim),
+recorded as `ai` evidence, and Dictate minted a grant (recorded in the spend ledger) and showed the "allow the
+microphone" message where the browser refused it. Dictation itself wasn't tried with a real microphone.
+
 ## Roadmap
 
-- "Explain in your words" by voice, once speech-to-text is in the platform: graded by a model against a rubric.
+- A mock screening: an interviewer that asks a course's screening questions aloud, listens to a long answer, asks one
+  or two follow-ups, and grades against the lesson's model answer (`docs/voice.md`).
 - A placement quiz, so someone who already knows a topic can skip ahead (lk-practice supports placement credit).
 - Reminders by email.
 - Closing hypotheses left open for weeks (a probe whose task couldn't be written), with `close-hypothesis`.

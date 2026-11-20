@@ -72,6 +72,8 @@ export class VoiceStream {
   private paused = false;
   private stopped = false;
   private words = "";
+  /** Dictation: the words heard since the last final result, not final yet. */
+  private interim = "";
   private limit: number | null = null;
 
   private constructor(
@@ -154,7 +156,12 @@ export class VoiceStream {
       }
     } else if (this.protocol === "nova" && message.type === "Results") {
       const text = (message.channel?.alternatives?.[0]?.transcript ?? "").trim();
-      if (message.is_final && text) this.words = `${this.words} ${text}`.trim();
+      if (message.is_final) {
+        if (text) this.words = `${this.words} ${text}`.trim();
+        this.interim = "";
+      } else {
+        this.interim = text;
+      }
       this.events.onWords(message.is_final ? this.words : `${this.words} ${text}`.trim());
     }
   }
@@ -176,6 +183,46 @@ export class VoiceStream {
   /** The words so far (dictation). */
   get text(): string {
     return this.words;
+  }
+
+  /**
+   * Dictation's way to stop: the microphone stops at once, the provider gets to send the words it still has (its last
+   * results come after CloseStream, before it closes the stream), and every word is returned, the last ones even if
+   * they never became final.
+   */
+  async end(waitMs = 3000): Promise<string> {
+    if (this.stopped) return this.words;
+    this.stopped = true;
+    if (this.limit !== null) window.clearTimeout(this.limit);
+    this.media.getTracks().forEach((track) => track.stop());
+    this.events.onLevel(0);
+    if (this.socket.readyState === WebSocket.OPEN) {
+      await new Promise<void>((resolve) => {
+        const timer = window.setTimeout(resolve, waitMs);
+        this.socket.addEventListener(
+          "close",
+          () => {
+            window.clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
+        try {
+          this.socket.send(JSON.stringify({ type: "CloseStream" }));
+        } catch {
+          resolve();
+        }
+      });
+    }
+    try {
+      this.socket.close();
+    } catch {
+      // Already closed.
+    }
+    void this.context.close();
+    const text = `${this.words} ${this.interim}`.trim();
+    this.interim = "";
+    return text;
   }
 
   stop(): void {

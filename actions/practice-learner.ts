@@ -13,6 +13,8 @@ import { askHint, MAX_HINTS } from "@/lib/practice/hints";
 import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
+import { listenGrant, voiceConfigured, type ListenGrant } from "@/lib/voice/deepgram";
+import { canListen, recordListen } from "@/lib/voice/allowance";
 
 // The learner's side of practice (/practice/<course>, docs/practice.md "A session"). Learners only ever get a task's
 // question side: never its key, tests or solutions.
@@ -132,8 +134,10 @@ export type PracticeTaskView = PracticeToday["items"][number];
 
 const AnswerSchema = z.object({
   index: z.number().int().min(0).max(9).optional(),
-  text: z.string().max(4000).optional(),
+  // An explanation: two minutes spoken is about 2,000 characters.
+  text: z.string().max(8000).optional(),
   code: z.string().max(60_000).optional(),
+  spoken: z.boolean().optional(),
 });
 
 export async function submitPracticeAnswer(
@@ -143,13 +147,14 @@ export async function submitPracticeAnswer(
   answer: z.infer<typeof AnswerSchema>,
   durationMs: number,
   attempts = 1,
+  language: "es" | "en" = "en",
 ): Promise<Result<{ feedback: Feedback; explanationEs: string; explanationEn: string; diagnosisId: string | null; discovery: DiscoveryNote | null }>> {
   const who = await learnerFor(courseSlug);
   if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
   const parsed = AnswerSchema.safeParse(answer);
   if (!parsed.success) return { success: false, error: "That answer can't be read." };
   try {
-    const result = await answerTask(who.userId, sessionId, taskId, parsed.data, durationMs, Math.min(Math.max(Math.round(attempts) || 1, 1), 50));
+    const result = await answerTask(who.userId, sessionId, taskId, parsed.data, durationMs, Math.min(Math.max(Math.round(attempts) || 1, 1), 50), language === "es" ? "es" : "en");
     if (!result.ok) return { success: false, error: result.error };
     // A diagnosis to run, or a hypothesis this answer settled (docs/practice.md, "Missing prerequisites"). The answer
     // is recorded either way: a problem here only skips the discovery.
@@ -239,6 +244,51 @@ export async function revealPracticeRecipe(courseSlug: string, sessionId: string
   if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
   const shown = await revealRecipe(who.userId, sessionId, taskId);
   return "error" in shown ? { success: false, error: shown.error } : { success: true, ...shown };
+}
+
+/** A dictation stream for an explanation lasts at most this long; the learner can start another. */
+const EXPLAIN_LISTEN_MINUTES = 5;
+
+/** The task's own terms for the speech model to listen for: acronyms and capitalised names in its question and rubric. */
+function taskTerms(content: TaskContent): string[] {
+  const text = [content.promptEn, ...(content.pointsEn ?? [])].join(" ").replace(/`/g, " ");
+  const found = text.match(/\b(?:[A-Z]{2,}[a-z]?s?|[A-Z][a-z]+[A-Z][A-Za-z]*|(?<![.!?]\s)(?<!^)[A-Z][a-z]{3,})\b/g) ?? [];
+  return [...new Set(found)].slice(0, 20);
+}
+
+/**
+ * A microphone stream for an open explain task (docs/voice.md, "Explain in your words"): Nova-3 dictation, words as
+ * they come, stopped by the learner. The key stays here; the browser gets a 30-second token for its own stream.
+ */
+export async function listenForExplanation(
+  courseSlug: string,
+  sessionId: string,
+  taskId: string,
+  language: "es" | "en",
+): Promise<Result<{ grant: ListenGrant; maxMinutes: number }>> {
+  const who = await learnerFor(courseSlug);
+  if ("error" in who) return { success: false, error: who.error ?? "Sign in to practise." };
+  const es = language === "es";
+  if (!voiceConfigured()) return { success: false, error: es ? "El dictado no está disponible ahora: escribe tu explicación." : "Dictation isn't available right now: type your explanation." };
+  const session = await prisma.practiceSession.findUnique({
+    where: { id: sessionId },
+    select: { items: true, learner: { select: { userId: true } }, answers: { where: { taskId }, select: { id: true } } },
+  });
+  if (!session || session.learner.userId !== who.userId || session.answers.length || !(session.items as unknown as SessionItem[]).some((item) => item.taskId === taskId)) {
+    return { success: false, error: es ? "Esa tarea no está abierta en tu práctica." : "That task isn't open in your practice." };
+  }
+  const task = await prisma.practiceTask.findUnique({ where: { id: taskId }, select: { content: true } });
+  const content = task?.content as unknown as TaskContent | undefined;
+  if (content?.form !== "explain") return { success: false, error: es ? "Esta tarea no se responde en voz alta." : "This task isn't answered aloud." };
+  if (!(await canListen(who.userId))) return { success: false, error: es ? "Por hoy no quedan más grabaciones: escribe tu explicación." : "No more recordings today: type your explanation." };
+  try {
+    const grant = await listenGrant("dictation", language === "es" ? "es" : "en", "practice.listen", taskTerms(content));
+    await recordListen(who.userId, "dictation", "practice-explain", "practice.listen", "platform");
+    return { success: true, grant, maxMinutes: EXPLAIN_LISTEN_MINUTES };
+  } catch (error) {
+    console.error(JSON.stringify({ event: "practice.listen_failed", error: error instanceof Error ? error.message : String(error) }));
+    return { success: false, error: es ? "No pudimos abrir el micrófono. Inténtalo de nuevo o escribe tu explicación." : "We couldn't start the microphone. Try again, or type your explanation." };
+  }
 }
 
 /** Whether the learner has practice from their tutor: requests waiting, or skills it asked them to practise. */

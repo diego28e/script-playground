@@ -21,7 +21,13 @@ export async function canListen(userId: string): Promise<boolean> {
   return today < LISTEN_STREAMS_PER_DAY;
 }
 
-export async function recordListen(userId: string, mode: "conversation" | "dictation", feature: string, workload: "tutor.listen" | "lesson-tutor.listen" = "tutor.listen") {
+export async function recordListen(
+  userId: string,
+  mode: "conversation" | "dictation",
+  feature: string,
+  workload: "tutor.listen" | "lesson-tutor.listen" | "practice.listen" = "tutor.listen",
+  runtime: "lab" | "platform" = "lab",
+) {
   // The price of one full-length stream: an upper bound, since most are much shorter.
   const perMinute = (mode === "conversation" ? VOICE_PRICES.fluxPerMinute : VOICE_PRICES.novaMultiPerMinute) + VOICE_PRICES.keytermsPerMinute;
   await prisma.aiRequest.create({
@@ -35,7 +41,7 @@ export async function recordListen(userId: string, mode: "conversation" | "dicta
     model: mode === "conversation" ? "flux-general-multi" : "nova-3",
     ok: true,
     estimatedUsd: (perMinute * LISTEN_MAX_MINUTES) / 1_000_000,
-    runtime: "lab",
+    runtime,
     userId,
     detail: { mode, upperBound: true },
   });

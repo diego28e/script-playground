@@ -17,10 +17,10 @@ const DAILY_HINTS = 40;
 const HINT_MODEL = "deepseek-flash";
 const MAX_LENGTH = 600;
 
-const SYSTEM_PROMPT = `You are a patient programming tutor (Python, LangChain, LangGraph). A learner is working on a practice task and asked for a hint before answering.
+const SYSTEM_PROMPT = `You are a patient tutor for the learner's course. A learner is working on a practice task and asked for a hint before answering.
 
 Write ONE hint: one to three short sentences, in the learner's language.
-- Never give the answer: not the right option, not the word or value that fills the blank, not what the code prints, and no code that solves the task (no code blocks; inline names of functions, parameters or types in backticks are fine).
+- Never give the answer: not the right option, not the word or value that fills the blank, not what the code prints, no code that solves the task (no code blocks; inline names of functions, parameters or types in backticks are fine), and for an explanation not the points themselves: point to the idea to think about.
 - Use your own words. Don't reuse the distinctive words or phrases of the right option or of the key: a learner who matches your words against the options must not find the answer that way.
 - Hint 1 stays general: which idea from the lesson applies, or what kind of thing the question is really about. Hint 2 narrows down where to look or what to check. Hint 3 is nearly there, but still leaves the last step to the learner.
 - Plain sentences: no headings, lists or bold; backticks only for code names.
@@ -87,12 +87,15 @@ function keyFor(content: TaskContent): string {
       return `Starter:\n${content.code}\nHidden tests:\n${content.tests}\nReference solution:\n${content.solution}`;
     case "debug":
       return `Buggy code:\n${content.code}\nHidden tests:\n${content.tests}\nFixed code:\n${content.solution}`;
+    case "explain":
+      return `Points a good explanation makes:\n${(content.pointsEn ?? []).map((point, index) => `${index + 1}. ${point}`).join("\n")}\nMisconceptions to steer away from:\n${(content.misconceptionsEn ?? []).join("\n")}`;
   }
 }
 
 function attemptFor(content: TaskContent, attempt: Answer): string {
   if (content.form === "choice") return attempt.index === undefined ? "(no option picked yet)" : `Leaning towards option ${attempt.index}.`;
   if (content.form === "code" || content.form === "debug") return attempt.code?.trim() ? `Their code now:\n${attempt.code.slice(0, 3000)}` : "(no code changed yet)";
+  if (content.form === "explain") return attempt.text?.trim() ? `Their explanation so far:\n${attempt.text.slice(0, 3000)}` : "(nothing said or typed yet)";
   return attempt.text?.trim() ? `They typed: ${JSON.stringify(attempt.text.slice(0, 300))}` : "(nothing typed yet)";
 }
 

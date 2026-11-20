@@ -9,22 +9,24 @@ import { prisma } from "@/lib/prisma";
 /**
  * The task forms a skill's stages accept (lk-practice's `forms`), from its ladder and whether code can practise it
  * offline. choice: multiple choice; fill: fill in the blank; predict: say what a snippet prints; code: write a small
- * piece of code; debug: fix a broken snippet. A skill that only makes sense against a live service gets questions.
+ * piece of code; debug: fix a broken snippet; explain: explain an idea in your own words, aloud or typed. A skill that
+ * only makes sense against a live service gets questions and explanations. Explaining is for the top stages
+ * (docs/practice.md, "Explain in your words"): producing and applying what you know, and transferring what you can do.
  */
 export function skillForms(knowledge: "DECLARATIVE" | "PROCEDURAL", runnable: boolean): Record<string, string[]> {
   if (knowledge === "DECLARATIVE") {
     return {
       recognise: ["choice"],
       recall: ["fill"],
-      produce: runnable ? ["predict", "code"] : ["fill"],
-      apply: runnable ? ["code", "debug"] : ["choice"],
+      produce: runnable ? ["predict", "code", "explain"] : ["fill", "explain"],
+      apply: runnable ? ["code", "debug", "explain"] : ["explain", "choice"],
     };
   }
   return {
     example: runnable ? ["predict"] : ["choice"],
     complete: runnable ? ["fill", "debug"] : ["fill"],
     write: runnable ? ["code"] : ["fill"],
-    transfer: runnable ? ["code", "debug"] : ["choice"],
+    transfer: runnable ? ["code", "debug", "explain"] : ["explain", "choice"],
   };
 }
 

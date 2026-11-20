@@ -223,6 +223,22 @@ export function TaskCard({
               {c.wrongSolution && <Code title="Wrong solution (must fail)" text={c.wrongSolution} />}
             </>
           )}
+          {task.form === "explain" && (
+            <>
+              <div>
+                <p className="font-medium">Points a good answer makes</p>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-5">{(es ? c.pointsEs : c.pointsEn)?.map((point, index) => <li key={index}>{point}</li>)}</ol>
+              </div>
+              <div>
+                <p className="font-medium">Misconceptions</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted-foreground">{(es ? c.misconceptionsEs : c.misconceptionsEn)?.map((wrong, index) => <li key={index}>{wrong}</li>)}</ul>
+              </div>
+              <div>
+                <p className="font-medium">A good answer</p>
+                <p className="mt-1 text-muted-foreground">{es ? c.modelAnswerEs : c.modelAnswerEn}</p>
+              </div>
+            </>
+          )}
           <div className={cn("rounded-lg bg-background/60 p-3", MARKDOWN)}>
             <ReactMarkdown>{es ? c.explanationEs : c.explanationEn}</ReactMarkdown>
           </div>

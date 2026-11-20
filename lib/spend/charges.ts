@@ -23,6 +23,7 @@ export const WORKLOADS = {
   "captions.transcribe": { label: "Video captions: transcription", tag: "adc-captions" },
   "tutor.speak": { label: "Tutor: replies read aloud", tag: "adc-tutor-speak" },
   "tutor.listen": { label: "Tutor: microphone", tag: "adc-tutor-listen" },
+  "practice.listen": { label: "Practice: explanations dictated", tag: "adc-practice-listen" },
 } as const;
 export type Workload = keyof typeof WORKLOADS;
 

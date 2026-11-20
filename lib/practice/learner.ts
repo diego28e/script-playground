@@ -6,11 +6,13 @@ import { courseVisibleTo, viewerById } from "@/lib/course-access";
 import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
 import { gradeCode, type GradeTest } from "@/lib/practice/grader";
-import { normaliseAnswer, sameOutput, type TaskContent } from "@/lib/practice/tasks";
+import { normaliseAnswer, sameOutput, courseSubject, type TaskContent } from "@/lib/practice/tasks";
+import { canGrade, gradeExplanation, type PointMade } from "@/lib/practice/explain";
 
 // A learner's daily practice (docs/practice.md, "A session"): lk-practice plans the set from the learner's state, the
 // skills of the lessons they've completed and the proven task pool; each answer is graded here (questions against the
-// key, code on the grader) and recorded as evidence; the state and its log are saved together.
+// key, code on the grader, explanations by a model against their rubric) and recorded as evidence; the state and its
+// log are saved together.
 
 // `probe`: the hypothesis this task probes (docs/practice.md, "Missing prerequisites"). `added`: put in the set after it
 // was planned (a probe or a confirmed prerequisite's practice), so it answers no plan target.
@@ -395,7 +397,8 @@ export async function todaysSession(userId: string, courseId: string, day: strin
   return { session, loaded };
 }
 
-export type Answer = { index?: number; text?: string; code?: string };
+/** `spoken`: an explanation dictated rather than typed (it may have been corrected by hand). */
+export type Answer = { index?: number; text?: string; code?: string; spoken?: boolean };
 export type Feedback = {
   passed: boolean;
   score: number;
@@ -407,10 +410,28 @@ export type Feedback = {
   error?: { type: string; message: string } | null;
   stdout?: string;
   status?: string;
+  // Explanations (lib/practice/explain.ts): each point of the rubric and whether it was made, with the grader's note
+  // (in the learner's language when they answered); the misconceptions held; other wrong claims; the grader's word to
+  // the learner; and a good answer to compare with.
+  rubric?: { es: string; en: string; made: PointMade; note: string }[];
+  misconceptions?: { es: string; en: string }[];
+  otherErrors?: string[];
+  comment?: string;
+  modelAnswer?: { es: string; en: string };
+};
+
+/** Who is answering, for the tasks a model grades. */
+type GradeContext = { userId: string; courseId: string; language: "es" | "en" };
+type Graded = {
+  feedback: Feedback;
+  maxScore: number;
+  checks?: { passed: number; total: number };
+  /** A model's grade: recorded as `ai` evidence, with its confidence. */
+  ai?: { confidence: "high" | "medium" | "low"; graderId: string };
 };
 
 /** Grades one answer. Throws when the grader can't be reached: nothing is recorded then. */
-async function grade(content: TaskContent, answer: Answer): Promise<{ feedback: Feedback; maxScore: number; checks?: { passed: number; total: number } }> {
+async function grade(content: TaskContent, answer: Answer, context?: GradeContext): Promise<Graded> {
   switch (content.form) {
     case "choice": {
       const passed = answer.index === content.answerIndex;
@@ -437,6 +458,43 @@ async function grade(content: TaskContent, answer: Answer): Promise<{ feedback: 
         checks: { passed: passedTests, total },
       };
     }
+    case "explain": {
+      const es = context?.language === "es";
+      if (!context) throw new Error("An explanation needs a learner to grade it.");
+      if (!(await canGrade(context.userId))) throw new Error(es ? "Por hoy ya no podemos valorar más explicaciones. Vuelve mañana." : "No more explanations can be graded today. Come back tomorrow.");
+      const course = await prisma.course.findUnique({ where: { id: context.courseId }, select: { title: true, summary: true } });
+      const result = await gradeExplanation({
+        content,
+        answer: answer.text ?? "",
+        language: context.language,
+        userId: context.userId,
+        pool: "TUTOR",
+        deadline: Date.now() + 22_000,
+        subject: courseSubject(course),
+      });
+      if (!result.ok) {
+        throw new Error(
+          es ? "Ahora no podemos valorar tu explicación. No se guardó: inténtalo de nuevo en un momento." : "We can't grade your explanation right now. It wasn't recorded: try again in a moment.",
+        );
+      }
+      const { grade: graded } = result;
+      const pointsEs = content.pointsEs ?? [];
+      const pointsEn = content.pointsEn ?? [];
+      return {
+        feedback: {
+          passed: graded.passed,
+          score: graded.score,
+          rubric: pointsEn.map((en, index) => ({ en, es: pointsEs[index] ?? en, made: graded.points[index]?.made ?? "no", note: graded.points[index]?.note ?? "" })),
+          misconceptions: graded.misconceptions.map((index) => ({ en: content.misconceptionsEn?.[index] ?? "", es: content.misconceptionsEs?.[index] ?? content.misconceptionsEn?.[index] ?? "" })),
+          otherErrors: graded.otherErrors,
+          comment: graded.feedback,
+          modelAnswer: { es: content.modelAnswerEs ?? "", en: content.modelAnswerEn ?? "" },
+        },
+        maxScore: 1,
+        // A too-short answer is failed without a model: certain, and graded by no one.
+        ai: { confidence: graded.confidence, graderId: result.model ?? "length-check" },
+      };
+    }
   }
 }
 
@@ -458,7 +516,7 @@ export async function tryCode(userId: string, sessionId: string, taskId: string,
 }
 
 /** Grades and records one answer of a session; answering the same task twice returns the first answer's feedback. */
-export async function answerTask(userId: string, sessionId: string, taskId: string, answer: Answer, durationMs: number, attempts = 1) {
+export async function answerTask(userId: string, sessionId: string, taskId: string, answer: Answer, durationMs: number, attempts = 1, language: "es" | "en" = "en") {
   const session = await prisma.practiceSession.findUnique({
     where: { id: sessionId },
     select: { id: true, items: true, learner: { select: { id: true, userId: true, courseId: true } }, answers: { select: { taskId: true, passed: true, score: true, result: true } } },
@@ -474,7 +532,7 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
   if (!task?.item) return { ok: false as const, error: "That task is no longer available." };
   const content = task.content as unknown as TaskContent;
   const item = task.item as unknown as PracticeItem;
-  const graded = await grade(content, answer);
+  const graded = await grade(content, answer, { userId, courseId: session.learner.courseId, language });
 
   const loaded = await loadLearner(userId, session.learner.courseId);
   if (!loaded) return { ok: false as const, error: "Practice isn't set up for this course yet." };
@@ -492,7 +550,9 @@ export async function answerTask(userId: string, sessionId: string, taskId: stri
     durationMs: Math.max(0, Math.round(durationMs)),
     attempts: Math.max(1, Math.round(attempts)),
     ...(hintsUsed ? { hintsUsed } : {}),
-    source: { kind: "auto", score: graded.feedback.score, maxScore: graded.maxScore, passed: graded.feedback.passed, ...(graded.checks ? { checks: graded.checks } : {}) },
+    source: graded.ai
+      ? { kind: "ai", score: graded.feedback.score, maxScore: graded.maxScore, passed: graded.feedback.passed, confidence: graded.ai.confidence, graderId: graded.ai.graderId }
+      : { kind: "auto", score: graded.feedback.score, maxScore: graded.maxScore, passed: graded.feedback.passed, ...(graded.checks ? { checks: graded.checks } : {}) },
   };
   const recorded = practice.record(loaded.state, { graph: loaded.published.graph, evidence, item });
   let state: PracticeState = loaded.state;

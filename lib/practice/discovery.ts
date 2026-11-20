@@ -187,6 +187,11 @@ function describeAttempt(content: TaskContent, answer: Answer | null, feedback: 
     lines.push(`Accepted: ${(content.answers ?? []).join(" | ")}. Learner wrote: ${JSON.stringify(answer?.text ?? "")}.`);
   } else if (content.form === "predict") {
     lines.push(`Code:\n${content.code}\nIt prints: ${JSON.stringify(content.expectedOutput)}. Learner predicted: ${JSON.stringify(answer?.text ?? "")}.`);
+  } else if (content.form === "explain") {
+    lines.push(`Learner's explanation:\n${(answer?.text ?? "").slice(0, 2500)}`);
+    const rubric = (feedback?.rubric ?? []).map((point) => `- ${point.made}: ${point.en}`);
+    if (rubric.length) lines.push(`Points made:\n${rubric.join("\n")}`);
+    if (feedback?.misconceptions?.length) lines.push(`Misconceptions held: ${feedback.misconceptions.map((wrong) => wrong.en).join("; ")}`);
   } else {
     lines.push(`Learner's code:\n${(answer?.code ?? "").slice(0, 2500)}`);
     const failed = (feedback?.tests ?? []).filter((test) => !test.passed).map((test) => `${test.name}: ${test.message}`);

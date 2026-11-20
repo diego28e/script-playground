@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { Editor } from "@monaco-editor/react";
-import { ArrowLeft, ArrowRight, Check, Flame, GraduationCap, Layers, Lightbulb, ListOrdered, Map as MapIcon, Play, RotateCcw, ScanSearch, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Flame, GraduationCap, Layers, Lightbulb, ListOrdered, Map as MapIcon, Mic, Minus, Play, RotateCcw, ScanSearch, Sparkles, Square, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   askPracticeHint,
   getPracticeToday,
+  listenForExplanation,
   preparePracticeDiscovery,
   revealPracticeRecipe,
   runPracticeCode,
@@ -27,10 +28,12 @@ import { DotLoader } from "@/components/ui/dot-loader";
 import { defineAcademiaTheme } from "@/lib/monaco-theme";
 import type { DiscoveryNote } from "@/lib/practice/discovery";
 import type { Feedback } from "@/lib/practice/learner";
+import { VoiceStream } from "@/lib/voice/browser";
 import { cn } from "@/lib/utils";
 
 // Today's practice (docs/practice.md, "A session"): the day's short set, one task at a time. The learner answers
-// (picks, types, predicts, or edits code that runs on the grader), sees right away whether it was right and why, and
+// (picks, types, predicts, edits code that runs on the grader, or explains an idea aloud or typed, graded against its
+// rubric), sees right away whether it was right and why, and
 // moves on; when the set is done, the page says so and offers a few more. When a skill fails twice in a row, the page
 // asks for a diagnosis in the background and adds the check questions it brings to the end of the set
 // (docs/practice.md, "Missing prerequisites").
@@ -45,7 +48,7 @@ const COPY = {
     progress: (done: number, total: number) => `${done} de ${total}`,
     newSkill: "Nueva",
     stage: { recognise: "Reconocer", recall: "Recordar", produce: "Producir", apply: "Aplicar", example: "Ejemplo", complete: "Completar", write: "Escribir", transfer: "Transferir" } as Record<string, string>,
-    form: { choice: "Elige una", fill: "Completa", predict: "¿Qué imprime?", code: "Escribe el código", debug: "Corrige el error" } as Record<string, string>,
+    form: { choice: "Elige una", fill: "Completa", predict: "¿Qué imprime?", code: "Escribe el código", debug: "Corrige el error", explain: "Explícalo" } as Record<string, string>,
     check: "Comprobar",
     run: "Ejecutar las pruebas",
     checking: "Comprobando…",
@@ -98,6 +101,29 @@ const COPY = {
     hintNumber: (number: number) => `Pista ${number}`,
     noMoreHints: "No quedan más pistas para esta tarea",
     hintsUsed: (count: number) => (count === 1 ? "Usaste 1 pista: un acierto con pista cuenta un poco menos." : `Usaste ${count} pistas: un acierto con pistas cuenta un poco menos.`),
+    explainPlaceholder: "Explícalo aquí, o pulsa Dictar y dilo en voz alta, como se lo contarías a un colega.",
+    dictate: "Dictar",
+    dictateMore: "Seguir dictando",
+    stopDictating: "Parar",
+    micOpening: "Abriendo el micrófono…",
+    micFinishing: "Terminando…",
+    listening: "Escuchando",
+    dictationNote: "Las pausas no cortan nada: sigue escuchando hasta que pulses Parar. Corrige cualquier palabra mal oída antes de comprobar.",
+    micDenied: "El navegador no deja usar el micrófono. Permítelo en la barra de direcciones, o escribe tu explicación.",
+    micFailed: "No pudimos abrir el micrófono. Inténtalo de nuevo, o escribe tu explicación.",
+    micEnded: "La grabación se cortó. Lo que dijiste está en el cuadro: puedes seguir dictando.",
+    words: (count: number) => (count === 1 ? "1 palabra" : `${count} palabras`),
+    aim: (clock: string) => `unos ${clock} en voz alta`,
+    grading: "Valorando…",
+    explainedWell: "Bien explicado",
+    notYet: "Aún le falta",
+    pointsMade: (yes: number, partly: number, total: number) => `${yes} de ${total} puntos${partly ? `, y ${partly} a medias` : ""}`,
+    rubric: "Lo que dice una buena respuesta",
+    made: { yes: "Lo dijiste", partly: "A medias", no: "Faltó" } as Record<string, string>,
+    watchOut: "No es así",
+    goodAnswer: "Una buena respuesta",
+    showGoodAnswer: "Ver una buena respuesta",
+    hideGoodAnswer: "Ocultar la buena respuesta",
   },
   en: {
     eyebrow: "Today's practice",
@@ -108,7 +134,7 @@ const COPY = {
     progress: (done: number, total: number) => `${done} of ${total}`,
     newSkill: "New",
     stage: { recognise: "Recognise", recall: "Recall", produce: "Produce", apply: "Apply", example: "Example", complete: "Complete", write: "Write", transfer: "Transfer" } as Record<string, string>,
-    form: { choice: "Pick one", fill: "Fill the blank", predict: "What does it print?", code: "Write the code", debug: "Fix the bug" } as Record<string, string>,
+    form: { choice: "Pick one", fill: "Fill the blank", predict: "What does it print?", code: "Write the code", debug: "Fix the bug", explain: "Explain it" } as Record<string, string>,
     check: "Check",
     run: "Run the tests",
     checking: "Checking…",
@@ -161,6 +187,29 @@ const COPY = {
     hintNumber: (number: number) => `Hint ${number}`,
     noMoreHints: "No hints left for this task",
     hintsUsed: (count: number) => (count === 1 ? "You used 1 hint: a right answer with a hint counts a little less." : `You used ${count} hints: a right answer with hints counts a little less.`),
+    explainPlaceholder: "Explain it here, or press Dictate and say it out loud, as you would to a colleague.",
+    dictate: "Dictate",
+    dictateMore: "Keep dictating",
+    stopDictating: "Stop",
+    micOpening: "Opening the microphone…",
+    micFinishing: "Finishing…",
+    listening: "Listening",
+    dictationNote: "Pauses are fine: it keeps listening until you press Stop. Fix any word it got wrong before you check.",
+    micDenied: "The browser won't let the page use the microphone. Allow it in the address bar, or type your explanation.",
+    micFailed: "We couldn't start the microphone. Try again, or type your explanation.",
+    micEnded: "The recording stopped. What you said is in the box: you can keep dictating.",
+    words: (count: number) => (count === 1 ? "1 word" : `${count} words`),
+    aim: (clock: string) => `about ${clock} aloud`,
+    grading: "Grading…",
+    explainedWell: "Well explained",
+    notYet: "Not there yet",
+    pointsMade: (yes: number, partly: number, total: number) => `${yes} of ${total} points made${partly ? `, ${partly} in part` : ""}`,
+    rubric: "What a good answer says",
+    made: { yes: "You said it", partly: "In part", no: "Missing" } as Record<string, string>,
+    watchOut: "That isn't so",
+    goodAnswer: "A good answer",
+    showGoodAnswer: "Show a good answer",
+    hideGoodAnswer: "Hide the good answer",
   },
 };
 
@@ -437,7 +486,8 @@ export function PracticeToday({
           )}
         </div>
       </div>
-      {state === "ready" && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} />}
+      {/* Python beside a task, except while explaining an idea, where running code doesn't help. */}
+      {state === "ready" && items[index]?.form !== "explain" && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} />}
     </div>
   );
 }
@@ -487,13 +537,17 @@ function TaskCard({
   const answer = item.answer;
   const options = (es ? item.optionsEs : item.optionsEn) ?? [];
   const isCode = item.form === "code" || item.form === "debug";
+  const isExplain = item.form === "explain";
+  // Explanations: whether any of it was dictated, and whether the microphone is on now.
+  const [spoken, setSpoken] = useState(false);
+  const [recording, setRecording] = useState(false);
   const nextRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (answer) nextRef.current?.focus();
   }, [answer]);
 
-  const ready = item.form === "choice" ? choice !== null : isCode ? code.trim().length > 0 : text.trim().length > 0;
+  const ready = item.form === "choice" ? choice !== null : isCode ? code.trim().length > 0 : text.trim().length > 0 && !recording;
 
   // The recipe (lib/practice/recipes.ts): open at the skill's first stages; later, shown on request, counted as a hint.
   const [revealed, setRevealed] = useState<{ es: string[]; en: string[] } | null>(null);
@@ -531,7 +585,7 @@ function TaskCard({
     </Button>
   );
   const record = async (given: { index?: number; text?: string; code?: string }, attempts: number) => {
-    const result = await submitPracticeAnswer(courseSlug, sessionId, item.id, given, Date.now() - shownAt.current, attempts).catch(() => null);
+    const result = await submitPracticeAnswer(courseSlug, sessionId, item.id, given, Date.now() - shownAt.current, attempts, language).catch(() => null);
     if (!result || !result.success) {
       toast.error(result && !result.success ? result.error : t.error);
       return;
@@ -568,8 +622,8 @@ function TaskCard({
     if (isCode) return runCode();
     if (!ready || sending || answer) return;
     setSending(true);
-    const given = item.form === "choice" ? { index: choice! } : { text };
-    const result = await submitPracticeAnswer(courseSlug, sessionId, item.id, given, Date.now() - shownAt.current).catch(() => null);
+    const given = item.form === "choice" ? { index: choice! } : isExplain && spoken ? { text, spoken: true } : { text };
+    const result = await submitPracticeAnswer(courseSlug, sessionId, item.id, given, Date.now() - shownAt.current, 1, language).catch(() => null);
     setSending(false);
     if (!result || !result.success) {
       toast.error(result && !result.success ? result.error : t.error);
@@ -663,6 +717,25 @@ function TaskCard({
           />
         )}
 
+        {isExplain && (
+          <ExplainBox
+            value={answer ? (answer.given.text ?? "") : text}
+            onChange={setText}
+            onSpoken={() => setSpoken(true)}
+            recording={recording}
+            onRecording={setRecording}
+            answered={Boolean(answer)}
+            busy={sending}
+            expectedSeconds={item.expectedSeconds}
+            courseSlug={courseSlug}
+            sessionId={sessionId}
+            taskId={item.id}
+            language={language}
+            t={t}
+            onSubmit={() => void submit()}
+          />
+        )}
+
         {recipe && (
           <section aria-label={t.recipe} className="mb-4 rounded-2xl border border-border bg-muted/40 px-4 py-3">
             <h3 className="flex items-center gap-2 text-sm font-medium">
@@ -737,7 +810,7 @@ function TaskCard({
               </Tip>
             )}
             {item.hints.length < item.maxHints ? (
-              <Button variant="outline" onClick={() => void askHint()} disabled={hinting || sending}>
+              <Button variant="outline" onClick={() => void askHint()} disabled={hinting || sending || recording}>
                 {hinting ? <DotLoader className="mr-2" /> : <Lightbulb className="mr-2 size-4" />}
                 {hinting ? t.hintLoading : t.hint}
               </Button>
@@ -751,7 +824,7 @@ function TaskCard({
             )}
             <Button onClick={() => void submit()} disabled={!ready || sending}>
               {sending ? <DotLoader className="mr-2" /> : isCode ? <Play className="mr-2 size-4" /> : <Check className="mr-2 size-4" />}
-              {sending ? (isCode ? t.running : t.checking) : isCode ? (runs > 0 ? t.runAgain : t.run) : t.check}
+              {sending ? (isCode ? t.running : isExplain ? t.grading : t.checking) : isCode ? (runs > 0 ? t.runAgain : t.run) : t.check}
             </Button>
           </div>
         )}
@@ -769,6 +842,266 @@ function TaskCard({
         )}
       </div>
     </article>
+  );
+}
+
+/** m:ss, for the dictation timer and the time to aim for. */
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds) % 60).padStart(2, "0")}`;
+const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+const joinText = (before: string, after: string) => [before.trim(), after.trim()].filter(Boolean).join(" ");
+
+/**
+ * An explanation's answer box (docs/voice.md, "Explain in your words"): typed, or dictated with Nova-3, the words
+ * appearing as they're heard and joining what's already in the box. Dictation goes on until the learner presses Stop,
+ * since an explanation has pauses; then the box is theirs to correct before checking.
+ */
+function ExplainBox({
+  value,
+  onChange,
+  onSpoken,
+  recording,
+  onRecording,
+  answered,
+  busy,
+  expectedSeconds,
+  courseSlug,
+  sessionId,
+  taskId,
+  language,
+  t,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (text: string) => void;
+  onSpoken: () => void;
+  recording: boolean;
+  onRecording: (on: boolean) => void;
+  answered: boolean;
+  busy: boolean;
+  expectedSeconds: number;
+  courseSlug: string;
+  sessionId: string;
+  taskId: string;
+  language: "es" | "en";
+  t: Copy;
+  onSubmit: () => void;
+}) {
+  const stream = useRef<VoiceStream | null>(null);
+  // What was in the box when dictation started: the words heard are added after it. Kept twice: for the stream's
+  // callbacks (a ref, always current) and for rendering (state).
+  const before = useRef("");
+  const [typedBefore, setTypedBefore] = useState("");
+  const [heard, setHeard] = useState("");
+  const [level, setLevel] = useState(0);
+  const [phase, setPhase] = useState<"idle" | "opening" | "finishing">("idle");
+  const [seconds, setSeconds] = useState(0);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => () => stream.current?.stop(), []);
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => setSeconds((current) => current + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  const keep = (words: string) => {
+    onChange(joinText(before.current, words));
+    setHeard("");
+    stream.current = null;
+    onRecording(false);
+  };
+
+  const start = async () => {
+    if (phase !== "idle" || recording || answered || busy) return;
+    setProblem(null);
+    setPhase("opening");
+    const result = await listenForExplanation(courseSlug, sessionId, taskId, language).catch(() => null);
+    if (!result || !result.success) {
+      setPhase("idle");
+      setProblem(result && !result.success ? result.error : t.micFailed);
+      return;
+    }
+    before.current = value;
+    setTypedBefore(value);
+    try {
+      stream.current = await VoiceStream.open(result.grant, result.maxMinutes, {
+        onWords: setHeard,
+        onTurn: () => {},
+        onLevel: setLevel,
+        // Cut off (the time limit, or the provider closed it): keep what was heard.
+        onEnd: () => {
+          keep(stream.current?.text ?? "");
+          setProblem(t.micEnded);
+        },
+      });
+      onSpoken();
+      onRecording(true);
+    } catch (error) {
+      setProblem(error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError") ? t.micDenied : t.micFailed);
+    }
+    setPhase("idle");
+  };
+
+  const stop = async () => {
+    const current = stream.current;
+    if (!current || phase === "finishing") return;
+    setPhase("finishing");
+    keep(await current.end());
+    setPhase("idle");
+  };
+
+  const shown = recording || phase === "finishing" ? joinText(typedBefore, heard) : value;
+  const count = countWords(shown);
+
+  return (
+    <div>
+      <textarea
+        value={shown}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            onSubmit();
+          }
+        }}
+        readOnly={recording || phase === "finishing"}
+        disabled={answered || busy}
+        rows={7}
+        placeholder={t.explainPlaceholder}
+        aria-describedby={answered ? undefined : `explain-note-${taskId}`}
+        className={cn(
+          "w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          recording && "border-ring/60",
+        )}
+        autoFocus
+      />
+      {!answered && (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {recording || phase === "finishing" ? (
+              <Button variant="outline" onClick={() => void stop()} disabled={phase === "finishing"}>
+                {phase === "finishing" ? <DotLoader className="mr-2" /> : <Square className="mr-2 size-3.5 fill-current" aria-hidden="true" />}
+                {phase === "finishing" ? t.micFinishing : t.stopDictating}
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => void start()} disabled={phase === "opening" || busy}>
+                {phase === "opening" ? <DotLoader className="mr-2" /> : <Mic className="mr-2 size-4" aria-hidden="true" />}
+                {phase === "opening" ? t.micOpening : value.trim() && seconds > 0 ? t.dictateMore : t.dictate}
+              </Button>
+            )}
+            {recording && (
+              <span role="status" className="inline-flex items-center gap-2 text-sm text-foreground">
+                <span className="relative flex size-2.5" aria-hidden="true">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/60 motion-reduce:animate-none" />
+                  <span className="relative inline-flex size-2.5 rounded-full bg-destructive" />
+                </span>
+                {t.listening}
+                <span className="font-mono tabular-nums text-muted-foreground">{clock(seconds)}</span>
+                <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                  <span className="block h-full rounded-full bg-ring transition-[width] duration-100" style={{ width: `${Math.round(level * 100)}%` }} />
+                </span>
+              </span>
+            )}
+            <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
+              {t.words(count)} · {t.aim(clock(expectedSeconds))}
+            </span>
+          </div>
+          <p id={`explain-note-${taskId}`} className="mt-2 text-xs text-muted-foreground">
+            {t.dictationNote}
+          </p>
+          {problem && (
+            <p role="alert" className="mt-2 flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" /> {problem}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** A line of a rubric, a misconception or a grader's note: plain text that may name code in backticks. */
+function InlineMarkdown({ children }: { children: string }) {
+  return (
+    <span className="[&_code]:rounded [&_code]:bg-background/70 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em]">
+      <ReactMarkdown allowedElements={["p", "code", "em", "strong"]} unwrapDisallowed components={{ p: ({ children: inner }) => <>{inner}</> }}>
+        {children}
+      </ReactMarkdown>
+    </span>
+  );
+}
+
+/** An explanation's grade: each point of the rubric and whether it was made, what isn't so, a word from the grader, and a good answer. */
+function ExplainFeedback({ feedback, t, es }: { feedback: Feedback; t: Copy; es: boolean }) {
+  const [showAnswer, setShowAnswer] = useState(false);
+  const rubric = feedback.rubric ?? [];
+  const yes = rubric.filter((point) => point.made === "yes").length;
+  const partly = rubric.filter((point) => point.made === "partly").length;
+  const wrong = [...(feedback.misconceptions ?? []).map((entry) => (es ? entry.es : entry.en)), ...(feedback.otherErrors ?? [])].filter(Boolean);
+  const good = feedback.modelAnswer ? (es ? feedback.modelAnswer.es : feedback.modelAnswer.en) : "";
+  return (
+    <div className="mt-3 space-y-4 text-sm">
+      <p className="text-muted-foreground">{t.pointsMade(yes, partly, rubric.length)}</p>
+      {feedback.comment && (
+        <p className="text-base leading-relaxed">
+          <InlineMarkdown>{feedback.comment}</InlineMarkdown>
+        </p>
+      )}
+      <section aria-label={t.rubric}>
+        <h3 className="font-medium">{t.rubric}</h3>
+        <ul className="mt-2 space-y-2">
+          {rubric.map((point, index) => (
+            <li key={index} className="flex gap-3">
+              {point.made === "yes" ? (
+                <Check className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              ) : point.made === "partly" ? (
+                <Minus className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+              ) : (
+                <X className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+              )}
+              <span className="min-w-0">
+                <span className="sr-only">{t.made[point.made]}: </span>
+                <span className={cn("block", point.made === "no" && "text-foreground/80")}>
+                  <InlineMarkdown>{es ? point.es : point.en}</InlineMarkdown>
+                </span>
+                {point.note && (
+                  <span className="mt-0.5 block text-muted-foreground">
+                    <InlineMarkdown>{point.note}</InlineMarkdown>
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {wrong.length > 0 && (
+        <section aria-label={t.watchOut} className="rounded-xl bg-destructive/10 px-4 py-3">
+          <h3 className="flex items-center gap-2 font-medium">
+            <TriangleAlert className="size-4 text-destructive" aria-hidden="true" /> {t.watchOut}
+          </h3>
+          <ul className="mt-1.5 list-disc space-y-1 pl-5">
+            {wrong.map((entry, index) => (
+              <li key={index}>
+                <InlineMarkdown>{entry}</InlineMarkdown>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {good && (
+        <div>
+          <Button variant="ghost" size="sm" className="-ml-3" onClick={() => setShowAnswer(!showAnswer)} aria-expanded={showAnswer}>
+            {showAnswer ? t.hideGoodAnswer : t.showGoodAnswer}
+          </Button>
+          {showAnswer && (
+            <blockquote className="mt-2 border-l-2 border-ring/50 pl-4 text-base leading-relaxed text-foreground/90">
+              <span className="sr-only">{t.goodAnswer}: </span>
+              {good}
+            </blockquote>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -813,8 +1146,9 @@ function FeedbackPanel({ answer, form, t, es }: { answer: Answered; form: string
     >
       <p className={cn("flex items-center gap-2 text-lg font-semibold", feedback.passed ? "text-emerald-700 dark:text-emerald-300" : "text-amber-800 dark:text-amber-200")}>
         {feedback.passed ? <Check className="size-5" aria-hidden="true" /> : <X className="size-5" aria-hidden="true" />}
-        {feedback.passed ? t.right : tests.length ? t.partly(passedTests, tests.length) : t.wrong}
+        {form === "explain" ? (feedback.passed ? t.explainedWell : t.notYet) : feedback.passed ? t.right : tests.length ? t.partly(passedTests, tests.length) : t.wrong}
       </p>
+      {form === "explain" && <ExplainFeedback feedback={feedback} t={t} es={es} />}
 
       {!feedback.passed && form === "fill" && feedback.accepted && (
         <p className="mt-3 text-sm">

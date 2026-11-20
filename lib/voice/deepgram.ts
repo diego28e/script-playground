@@ -74,11 +74,18 @@ async function grantToken(): Promise<{ token: string; expiresIn: number }> {
 }
 
 /** Everything a browser needs to stream the microphone for `mode`. */
-export async function listenGrant(mode: ListenMode, language: VoiceLanguage, workload: "tutor.listen" | "lesson-tutor.listen" = "tutor.listen"): Promise<ListenGrant> {
+export async function listenGrant(
+  mode: ListenMode,
+  language: VoiceLanguage,
+  workload: "tutor.listen" | "lesson-tutor.listen" | "practice.listen" = "tutor.listen",
+  /** More words to listen for: a practice task's own terms ("SLO", "Kubernetes"). */
+  extraTerms: string[] = [],
+): Promise<ListenGrant> {
   const { token, expiresIn } = await grantToken();
   // The tag names the workload in Deepgram's own request log (lib/spend/charges.ts), so these browser streams, which
   // the platform never sees end, are still the platform's in Admin → Spend.
-  const terms = VOICE_KEYTERMS.map((term) => `&keyterm=${encodeURIComponent(term)}`).join("") + `&tag=${WORKLOADS[workload].tag}`;
+  const keyterms = [...new Set([...extraTerms, ...VOICE_KEYTERMS])].slice(0, 50);
+  const terms = keyterms.map((term) => `&keyterm=${encodeURIComponent(term)}`).join("") + `&tag=${WORKLOADS[workload].tag}`;
   const url =
     mode === "conversation"
       ? // Patient turn-taking: a pause to think doesn't end the turn; 4 s of silence does. Both languages hinted, the
