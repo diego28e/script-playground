@@ -68,11 +68,19 @@ button does (its prompt is in "Prompting Eleven v4",
 elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices), tuned for a teacher:
 
 - **Audio tags** in square brackets for tone and pace (`[warmly]`, `[curious]`, `[serious]`, `[lightly amused]`,
-  `[slower, deliberate]`), pauses (`[short pause]`, `[long pause]` after a question to the learner) and the odd human
-  reaction (`[soft chuckle]`). About one every two or three sentences: v4 gets unstable when every sentence is directed.
+  `[slower, deliberate]`) and pauses (`[short pause]`, `[long pause]` after a question to the learner), only from a
+  fixed list of 17 that keep a full, normal speaking voice (`DELIVERY_TAGS`). About one every two or three sentences: v4
+  gets unstable when every sentence is directed.
 - **Emphasis** without changing words: capitals on one key word of a paragraph at most, ellipses for a thoughtful pause.
-- **Never**: whispering, shouting, accents, sound effects, SSML. v4 takes no `<break>` tags; pauses come from tags and
-  ellipses.
+- **Never**: anything softer or quieter than normal speech (whispering, gentle, soft, breathy, sighs, exhales, hums),
+  shouting, accents, sound effects, SSML. v4 takes no `<break>` tags; pauses come from tags and ellipses.
+- **The tags are checked too**: any tag not on the list is taken out before voicing (`keepDeliveryTags`, logged as
+  `lesson_audio.delivery_tags_removed`), so the voice never reads one, whatever the model wrote.
+- **Why** (2026-11-20): lessons sometimes dropped into a whisper for a few seconds. The prompt already said never to
+  whisper, but it offered soft tags (`[gently]`, `[thoughtful]`, `[exhales]`, `[hmm]`, `[soft chuckle]`), and v4
+  follows a tag's sense closely. Measured on one test sentence per tag: a real `[whispers]` runs 5 to 8 dB under normal
+  speech with about half the voicing, for seconds on end; `[gently]`, `[thoughtful]` and `[exhales]` made their first
+  second that soft. A lesson already voiced keeps what it has until it's voiced again.
 - **Not a word changes, and that is checked**: the directed piece's words (tags, punctuation and capitals taken out)
   must equal the approved piece's, or the approved piece is voiced as it is.
 - You review the plain script. What the voice read, with its tags, is kept (`audioDirected`) and shown in the lesson's
