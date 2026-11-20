@@ -6,6 +6,7 @@ import { directPiece } from "@/lib/lesson-audio/delivery";
 import { uploadLessonAudio, voiceProvider, voiceScript } from "@/lib/lesson-audio/voice";
 import { recordCharge } from "@/lib/spend/charges";
 import { timeLessonAudio } from "@/lib/lesson-audio/timing";
+import { TIMINGS_VERSION } from "@/lib/lesson-audio/words";
 
 // The lesson-audio queue (docs/lesson-audio.md). Each lesson has at most one LessonAudio row, which moves through
 //   SCRIPT_QUEUED → WRITING → REVIEW → (approved) VOICE_QUEUED → VOICING → DONE
@@ -378,7 +379,7 @@ export async function runAudioTick(inFlight: Map<string, Promise<void>>, stoppin
   }
 }
 
-/** Tries at timing a lesson's transcript before it's left with the player's estimate. */
+/** Failed tries at timing a lesson's transcript in a row before it's left with the player's estimate. */
 const TIMING_TRIES = 3;
 let timing: Promise<void> | null = null;
 
@@ -391,7 +392,13 @@ export function runTimingTick(stopping: boolean): Promise<void> | null {
   if (stopping || timing || !process.env.DEEPGRAM_API_KEY) return timing;
   timing = (async () => {
     const row = await prisma.lessonAudio.findFirst({
-      where: { status: "DONE", audioPath: { not: null }, audioScript: { not: null }, timings: { equals: Prisma.DbNull }, timingTries: { lt: TIMING_TRIES } },
+      where: {
+        status: "DONE",
+        audioPath: { not: null },
+        audioScript: { not: null },
+        // Not timed yet (and not given up on), or timed by an older version of the alignment.
+        OR: [{ timings: { equals: Prisma.DbNull }, timingTries: { lt: TIMING_TRIES } }, { timings: { path: ["v"], lt: TIMINGS_VERSION }, timingTries: { lt: TIMING_TRIES } }],
+      },
       orderBy: [{ timingTries: "asc" }, { voicedAt: "desc" }],
       select: {
         id: true,
@@ -413,11 +420,16 @@ export function runTimingTick(stopping: boolean): Promise<void> | null {
     try {
       const timings = await timeLessonAudio({ ...row, audioScript: row.audioScript }, course.language, course.id);
       // Only if the audio is still the one timed (not voiced again meanwhile).
-      await prisma.lessonAudio.updateMany({ where: { id: row.id, audioPath: row.audioPath }, data: { timings, timingError: null } });
+      await prisma.lessonAudio.updateMany({ where: { id: row.id, audioPath: row.audioPath }, data: { timings, timingTries: 0, timingError: null } });
       log("lesson-audio.timing", { audioId: row.id, outcome: "ok", words: timings.words.length, matched: timings.matched, ms: Date.now() - started });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      await prisma.lessonAudio.updateMany({ where: { id: row.id, audioPath: row.audioPath }, data: { timingError: reason.slice(0, 500) } });
+      // Too little heard won't change on another try (each one paid): given up on at once.
+      const final = error instanceof Error && (error as Error & { final?: boolean }).final === true;
+      await prisma.lessonAudio.updateMany({
+        where: { id: row.id, audioPath: row.audioPath },
+        data: { timingError: reason.slice(0, 500), ...(final ? { timingTries: TIMING_TRIES } : {}) },
+      });
       log("lesson-audio.timing", { audioId: row.id, outcome: "failed", attempt: row.timingTries + 1, reason: reason.slice(0, 300) });
     }
   })()

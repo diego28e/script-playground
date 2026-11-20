@@ -119,9 +119,17 @@ Neither voice says when it said each word, so after every voicing the worker has
 (Nova-3 in the course's language, word timestamps; about US$0.07 for a 15-minute lesson, workload
 `lesson-audio.timing` in Admin → Spend) and lines what it heard up with the script (`alignWords`):
 
-- Words are compared without case, accents or punctuation. A word of five letters or more matches where it's heard; a
+- Words are compared without case, accents or punctuation, in two passes. First **anchors**: every run of four words
+  found exactly once in the script and once in what was heard, kept in an order both agree on; they pin the line every
+  few sentences. Then, between two anchors, word by word: a word of five letters or more matches where it's heard; a
   shorter one ("de", "the") only right after the last match, or when the next script word follows it, so a common word
-  further on doesn't pull the line forward. It looks at most 40 heard words ahead.
+  further on doesn't pull the line forward.
+- **Why anchors** (version 2, 2026-11-20): the first version matched word by word only, looking 40 heard words ahead.
+  On production's first 14 lessons (6,000 to 8,500 words each) it matched 50 to 93%, and one lesson failed at 49%: a
+  stretch the script and the audio didn't share threw it off for the rest of the lesson. On lesson 00.04 with such
+  stretches planted in what was heard (80 extra words, 150 misheard, 300 extra), version 1 matched 12 to 47% and was up
+  to 16 s off; version 2 matched 91 to 98%, within a second of the clean result. The worker times again any lesson
+  timed by an older version (`TIMINGS_VERSION`), keeping the old timings until the new ones are stored.
 - Words not heard as written (a number said in words, "LangGraph" heard as two words) share the time between the heard
   words around them, by their length.
 - Stored on `LessonAudio.timings` as `{v: 1, matched, words}`: the start of each script word in hundredths of a second,
@@ -129,7 +137,7 @@ Neither voice says when it said each word, so after every voicing the worker has
   heard means the audio isn't this script's: it isn't stored.
 - The worker times one lesson at a time beside its other work (`runTimingTick`): every lesson voiced from now on (a new
   voicing clears the old timings), and those voiced before. A failure is kept in `timingError` and tried again, three
-  times in all. It reads the audio through the platform (`app/api/lab-worker/audio-url/route.ts`, signed like the
+  times in a row at most; too little heard (under half) isn't tried again, since another try would hear the same. It reads the audio through the platform (`app/api/lab-worker/audio-url/route.ts`, signed like the
   upload), which gives Deepgram a signed media address; on a PC, the worker sends the file itself.
 - Until a lesson is timed, the player estimates by the script's characters, which drifts over a long lesson.
 

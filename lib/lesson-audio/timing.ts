@@ -1,54 +1,126 @@
 import { LIST_PRICES, WORKLOADS, recordCharge } from "@/lib/spend/charges";
 import { workerSignature } from "@/lib/lesson-audio/voice";
-import { comparable, transcriptWords, type WordTimings } from "@/lib/lesson-audio/words";
+import { comparable, TIMINGS_VERSION, transcriptWords, type WordTimings } from "@/lib/lesson-audio/words";
 
 // When each word of a lesson's audio is said (docs/lesson-audio.md, "Following the audio"), so the learner's transcript
 // highlights the word being said and scrolls with it. Neither voice says when it said what, so the worker has Deepgram
 // listen to the finished MP3 (Nova-3, word timestamps, about US$0.07 for a 15-minute lesson) and lines what it heard up
-// with the script: a word heard where the script has it takes the time it was heard; the words between (a number said
-// in words, a term heard as two words) are spread over the time between, by their length.
+// with the script (alignWords): a word heard where the script has it takes the time it was heard; the words between (a
+// number said in words, a term heard as two words) are spread over the time between, by their length.
 
 /** Below this share of the script heard, the timings would mislead more than help: the player keeps its estimate. */
 const MIN_MATCHED = 0.5;
-/** How far ahead in what was heard a script word is looked for. */
+/** How far ahead in what was heard a script word is looked for, between two anchors. */
 const LOOK_AHEAD = 40;
+/** An anchor: this many words in a row, found once in the script and once in what was heard. */
+const ANCHOR_WORDS = 4;
 
 export type HeardWord = { word: string; start: number; end: number };
 
+/** The positions of the longest run of pairs whose heard positions keep rising (patience sorting). */
+function increasing(pairs: [number, number][]): [number, number][] {
+  const tails: number[] = [];
+  const previous: number[] = new Array(pairs.length).fill(-1);
+  for (let index = 0; index < pairs.length; index++) {
+    const value = pairs[index][1];
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (pairs[tails[middle]][1] < value) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0) previous[index] = tails[low - 1];
+    tails[low] = index;
+  }
+  const chain: [number, number][] = [];
+  for (let index = tails.at(-1) ?? -1; index >= 0; index = previous[index]) chain.push(pairs[index]);
+  return chain.reverse();
+}
+
 /**
- * The script's words against what was heard. A heard word matches the script's when they're the same word; a short
- * one (under five letters: "de", "the") only when it comes right after the last match, or the next script word follows
- * it too, so a common word far ahead doesn't pull the line forward.
+ * The script's words against what was heard, in two passes, so a stretch where they differ (a passage misheard, a
+ * number said in words, terms in another language) can't throw the rest of the lesson off:
+ *
+ * 1. Anchors: every run of four words that occurs exactly once in the script and once in what was heard, kept only
+ *    in an order both agree on. They pin the line every few sentences.
+ * 2. Between two anchors, word by word: a heard word matches the script's when they're the same word; a short one
+ *    (under five letters: "de", "the") only right after the last match, or when the next script word follows it, so
+ *    a common word further on doesn't pull the line forward.
  */
 export function alignWords(script: string[], heard: HeardWord[], seconds: number): WordTimings {
   const said = script.map(comparable);
   const heardWords = heard.map((word) => comparable(word.word));
   const starts: (number | null)[] = said.map(() => null);
-  const nextSaid = (from: number) => {
-    for (let i = from; i < said.length; i++) if (said[i]) return said[i];
-    return null;
+  const take = (i: number, k: number) => {
+    starts[i] = Math.round(heard[k].start * 100);
   };
 
-  let next = 0;
-  let matched = 0;
-  let counted = 0;
-  for (let i = 0; i < said.length; i++) {
-    if (!said[i]) continue;
-    counted++;
-    const end = Math.min(heardWords.length, next + LOOK_AHEAD);
-    for (let k = next; k < end; k++) {
-      if (heardWords[k] !== said[i]) continue;
-      const following = nextSaid(i + 1);
-      // In step: the word right after the last one heard, with the script's word before it matched too.
-      const inStep = k === next && i > 0 && starts[i - 1] !== null;
-      const confirmed = inStep || said[i].length >= 5 || following === null || heardWords.slice(k + 1, k + 4).includes(following);
-      if (!confirmed) continue;
-      starts[i] = Math.round(heard[k].start * 100);
-      next = k + 1;
-      matched++;
-      break;
+  // Words that count (not punctuation alone), by position.
+  const saidAt = said.flatMap((word, i) => (word ? [i] : []));
+  const heardAt = heardWords.flatMap((word, k) => (word ? [k] : []));
+  const runs = (words: string[], at: number[]) => {
+    const found = new Map<string, number>();
+    for (let n = 0; n + ANCHOR_WORDS <= at.length; n++) {
+      const key = at
+        .slice(n, n + ANCHOR_WORDS)
+        .map((position) => words[position])
+        .join(" ");
+      found.set(key, found.has(key) ? -1 : n);
+    }
+    return found;
+  };
+  const saidRuns = runs(said, saidAt);
+  const heardRuns = runs(heardWords, heardAt);
+  const pairs: [number, number][] = [];
+  for (const [key, n] of saidRuns) {
+    const m = heardRuns.get(key);
+    if (n >= 0 && m !== undefined && m >= 0) pairs.push([n, m]);
+  }
+  pairs.sort((a, b) => a[0] - b[0]);
+  // Anchors in an order both agree on, and not overlapping: a later one starts after the earlier one ends.
+  const anchors: [number, number][] = [];
+  for (const [n, m] of increasing(pairs)) {
+    const last = anchors.at(-1);
+    if (last && (n < last[0] + ANCHOR_WORDS || m < last[1] + ANCHOR_WORDS)) continue;
+    anchors.push([n, m]);
+  }
+  for (const [n, m] of anchors) for (let j = 0; j < ANCHOR_WORDS; j++) take(saidAt[n + j], heardAt[m + j]);
+
+  // Between anchors (and before the first, after the last), word by word, never past the next anchor.
+  const bounds: [number, number, number, number][] = [];
+  let fromSaid = 0;
+  let fromHeard = 0;
+  for (const [n, m] of anchors) {
+    bounds.push([fromSaid, saidAt[n], fromHeard, heardAt[m]]);
+    fromSaid = saidAt[n + ANCHOR_WORDS - 1] + 1;
+    fromHeard = heardAt[m + ANCHOR_WORDS - 1] + 1;
+  }
+  bounds.push([fromSaid, said.length, fromHeard, heardWords.length]);
+  for (const [saidFrom, saidTo, heardFrom, heardTo] of bounds) {
+    const nextSaid = (from: number) => {
+      for (let i = from; i < saidTo; i++) if (said[i]) return said[i];
+      return null;
+    };
+    let next = heardFrom;
+    for (let i = saidFrom; i < saidTo; i++) {
+      if (!said[i]) continue;
+      const end = Math.min(heardTo, next + LOOK_AHEAD);
+      for (let k = next; k < end; k++) {
+        if (heardWords[k] !== said[i]) continue;
+        const following = nextSaid(i + 1);
+        // In step: the word right after the last one heard, with the script's word before it matched too.
+        const inStep = k === next && i > 0 && starts[i - 1] !== null;
+        const confirmed = inStep || said[i].length >= 5 || following === null || heardWords.slice(k + 1, k + 4).includes(following);
+        if (!confirmed) continue;
+        take(i, k);
+        next = k + 1;
+        break;
+      }
     }
   }
+  const counted = saidAt.length;
+  const matched = saidAt.filter((i) => starts[i] !== null).length;
 
   // The words between two heard ones share the time between them, by their length; before the first heard word, from
   // the start; after the last, to the end of the speech.
@@ -78,7 +150,7 @@ export function alignWords(script: string[], heard: HeardWord[], seconds: number
     i = j;
   }
   for (let k = 1; k < filled.length; k++) if (filled[k] < filled[k - 1]) filled[k] = filled[k - 1];
-  return { v: 1, matched: counted ? Math.round((matched / counted) * 1000) / 1000 : 0, words: filled };
+  return { v: TIMINGS_VERSION, matched: counted ? Math.round((matched / counted) * 1000) / 1000 : 0, words: filled };
 }
 
 /** An address Deepgram can fetch the audio from, from the platform (the worker holds no media keys). */
@@ -146,6 +218,8 @@ export async function timeLessonAudio(row: { id: string; lessonId: string; audio
   const heard = result?.results?.channels?.[0]?.alternatives?.[0]?.words ?? [];
   if (!heard.length) throw new Error("Deepgram heard no speech in the audio.");
   const timings = alignWords(transcriptWords(row.audioScript), heard, seconds ?? heard.at(-1)!.end);
-  if (timings.matched < MIN_MATCHED) throw new Error(`Only ${Math.round(timings.matched * 100)}% of the script was heard in the audio: it may not be this script's audio.`);
+  if (timings.matched < MIN_MATCHED) {
+    throw Object.assign(new Error(`Only ${Math.round(timings.matched * 100)}% of the script was heard in the audio: it may not be this script's audio.`), { final: true });
+  }
   return timings;
 }

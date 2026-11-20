@@ -2,9 +2,15 @@
 // works out when each word is said (lib/lesson-audio/timing.ts), and the learner's player, which highlights the word
 // being said: both must cut the script into the same words, so both use these. No server imports: it runs in browsers.
 
+/**
+ * How the timings were worked out. 2: anchored on phrases found once in both (2026-11-20; 1 lost its place after a
+ * stretch the script and the audio didn't share). The worker times again any lesson timed by an older version.
+ */
+export const TIMINGS_VERSION = 2;
+
 /** Word timings as stored on LessonAudio.timings. */
 export type WordTimings = {
-  v: 1;
+  v: number;
   /** The share of the script's words heard in the audio (the rest were placed between them). */
   matched: number;
   /** When each word of the script starts, in hundredths of a second, in script order. */
@@ -76,6 +82,6 @@ export function wordAt(starts: number[], seconds: number): number {
 /** Stored timings, if they fit this script (the same number of words); else null. */
 export function readTimings(value: unknown, wordCount: number): number[] | null {
   const timings = value as Partial<WordTimings> | null;
-  if (!timings || timings.v !== 1 || !Array.isArray(timings.words) || timings.words.length !== wordCount) return null;
+  if (!timings || typeof timings.v !== "number" || !Array.isArray(timings.words) || timings.words.length !== wordCount) return null;
   return timings.words;
 }
