@@ -22,6 +22,13 @@ any step that fails three times → FAILED
 - A lesson asked for on its own goes before a whole-course run (`priority`), so a test never waits behind a course.
 - A step that fails is retried after 1 and then 5 minutes; after three attempts the lesson is `FAILED`, with the reason.
   A worker that stops mid-step puts the lesson back in the queue when it starts again.
+- **A cut-off voicing picks up where it was.** Every ElevenLabs piece voiced is kept on the worker's disk (the
+  `lesson-pieces` volume, `LESSON_PIECES_DIR`) until the lesson's audio is stored; a voicing started again (after a
+  stop, a rebuild, a crash, a failure retried) reuses the pieces kept for the same script piece, voice, model, language
+  and delivery, and pays only for the rest, stitched to the kept ones. Only the piece in flight is lost. Kept pieces of
+  a voicing never finished are cleared after a week. Before this (2026-11-19), the worker, at 512 MB, ran out of memory
+  three times voicing 40 to 70 minute lessons two at a time, and each lesson cut off was voiced again from its first
+  piece: Admin → Spend's "Voiced again" counts such pieces. The worker now has 3 GB (the server has 24).
 - **Learners hear `audioPath` whenever it's set.** Writing a script again, or voicing it again, replaces the audio only
   when the new one is ready.
 - **Recording again**: one lesson from its dialog ("Voice again", with any voice), or every lesson read by another voice

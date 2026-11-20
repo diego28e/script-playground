@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAi } from "@/lib/ai/gemini";
 import { writeNarration } from "@/lib/lesson-audio/script";
 import { directPiece } from "@/lib/lesson-audio/delivery";
-import { uploadLessonAudio, voiceProvider, voiceScript } from "@/lib/lesson-audio/voice";
+import { forgetPieces, prunePieces, uploadLessonAudio, voiceProvider, voiceScript } from "@/lib/lesson-audio/voice";
 import { recordCharge } from "@/lib/spend/charges";
 import { timeLessonAudio } from "@/lib/lesson-audio/timing";
 import { TIMINGS_VERSION } from "@/lib/lesson-audio/words";
@@ -307,10 +307,14 @@ async function voiceStep(row: LessonAudio) {
     provider === "elevenlabs" && row.delivery
       ? (piece: string, previous: string | null) => directPiece(piece, { language, userId: row.requestedById, model: row.model, previous: previous?.slice(-600) })
       : undefined;
+  // The pieces of this revision a cut-off attempt already voiced are kept, and not paid for again.
+  const store = { key: `${row.id}-r${row.revision + 1}` };
   const voiced = await voiceScript(row.script, row.voice, {
     language,
     direct,
-    onProgress: (done, total) => onProgress(`${direct ? "Directing and voicing" : "Voicing"} piece ${done} of ${total}`),
+    store,
+    onProgress: (done, total, reused) =>
+      onProgress(`${direct ? "Directing and voicing" : "Voicing"} piece ${done} of ${total}${reused ? ` (${reused} kept from an earlier attempt)` : ""}`),
     // Every call, the moment it returns: a lesson that fails halfway has still paid for its first pieces.
     onCharge: (charge) =>
       recordCharge({
@@ -329,6 +333,7 @@ async function voiceStep(row: LessonAudio) {
   await onProgress("Storing the audio");
   const revision = row.revision + 1;
   const path = await uploadLessonAudio(row.id, revision, mp3);
+  await forgetPieces(store);
   await prisma.lessonAudio.updateMany({
     where: { id: row.id, status: "VOICING" },
     data: {
@@ -359,6 +364,7 @@ async function voiceStep(row: LessonAudio) {
     characters,
     bytes: mp3.length,
     pieces: voiced.pieces,
+    reusedPieces: voiced.reused,
     directedPieces: voiced.directedPieces,
     tags: voiced.tags,
   });
@@ -440,8 +446,12 @@ export function runTimingTick(stopping: boolean): Promise<void> | null {
   return timing;
 }
 
-/** On the worker's start: lessons left in progress by a worker that stopped go back in the queue, attempt given back. */
+/**
+ * On the worker's start: lessons left in progress by a worker that stopped go back in the queue, attempt given back. A
+ * voicing picks up from the pieces it had kept (lib/lesson-audio/voice.ts); those of voicings left a week are cleared.
+ */
 export async function recoverAudioOrphans() {
+  await prunePieces();
   const [writing, voicing] = await prisma.$transaction([
     prisma.lessonAudio.updateMany({ where: { status: "WRITING" }, data: { status: "SCRIPT_QUEUED", attempts: { decrement: 1 }, progress: null } }),
     prisma.lessonAudio.updateMany({ where: { status: "VOICING" }, data: { status: "VOICE_QUEUED", attempts: { decrement: 1 }, progress: null } }),

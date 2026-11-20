@@ -4,10 +4,12 @@ import { createHash } from "node:crypto";
 // Spend to set beside the platform's ledger (lib/spend/charges.ts). Read only. Checked against both APIs on 2026-11-20.
 //
 // ElevenLabs (workspace analytics, elevenlabs.io/docs/api-reference/analytics/workspace):
-//   - usage-by-product-over-time: credits, minutes, US$ billed and request counts per day, grouped by API key. Its
-//     `hashed_xi_api_key` is sha256(hex(sha256(key))); each row also carries the key's name.
+//   - usage-by-product-over-time: credits, minutes, US$ billed and request counts per hour, grouped by API key, model
+//     and product. Its `hashed_xi_api_key` is sha256(hex(sha256(key))); each row also carries the key's name.
 //   - requests: every API request, with its trace id (the x-trace-id header the platform stores per call), path,
-//     method and response code. Its `hashed_xi_api_key` is sha256(key).
+//     method, response code and latency. Its `hashed_xi_api_key` is sha256(key). No IP address or user agent: the key
+//     is all that tells callers apart.
+//   - user/subscription: the plan's credit counter (what the dashboard shows), if the key has the User: read permission.
 // Deepgram (Manage API, developers.deepgram.com/reference/manage):
 //   - requests: every request of the project, with its request id, API key id, path (with its `tag`), response code
 //     and exact US$ cost; keys: the project's keys and their comments; balances: what's left of the credit.
@@ -39,10 +41,12 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
 
 // --- ElevenLabs ---------------------------------------------------------------------------------------------------
 
-export type ElevenUsageRow = { day: string; keyHash: string; keyName: string; model: string; product: string; credits: number; minutes: number; usd: number; requests: number };
-export type ElevenRequest = { at: string; traceId: string; path: string; pathPattern: string; method: string; code: number };
+export type ElevenUsageRow = { hour: string; day: string; keyHash: string; keyName: string; model: string; product: string; credits: number; minutes: number; usd: number; requests: number };
+export type ElevenRequest = { at: string; traceId: string; path: string; pathPattern: string; method: string; code: number; latencySeconds: number | null };
+/** The plan's counter, as the dashboard shows it: credits used this period and the period's allowance. */
+export type ElevenPlan = { tier: string; used: number; limit: number; resetsAt: string | null } | { unavailable: string };
 export type ElevenReport =
-  | { ok: true; usage: ElevenUsageRow[]; ownUsageHash: string; requests: ElevenRequest[]; requestsComplete: boolean }
+  | { ok: true; usage: ElevenUsageRow[]; ownUsageHash: string; requests: ElevenRequest[]; requestsComplete: boolean; plan: ElevenPlan }
   | { ok: false; error: string };
 
 async function elevenPost(path: string, body: unknown): Promise<Record<string, unknown>[]> {
@@ -58,22 +62,50 @@ async function elevenPost(path: string, body: unknown): Promise<Record<string, u
   return table((await response.json()) as { columns?: string[]; rows?: unknown[][] });
 }
 
-/** The month's usage of the whole ElevenLabs workspace by key, and every request the platform's key made. */
+/** The plan's credit counter. Needs the key's User: read permission, which a key made for speech alone doesn't have. */
+async function elevenPlan(key: string): Promise<ElevenPlan> {
+  try {
+    const response = await fetch("https://api.elevenlabs.io/v1/user/subscription", { headers: { "xi-api-key": key }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const data = (await response.json().catch(() => ({}))) as {
+      tier?: string;
+      character_count?: number;
+      character_limit?: number;
+      next_character_count_reset_unix?: number;
+      detail?: { status?: string; message?: string };
+    };
+    if (!response.ok) return { unavailable: data.detail?.status === "missing_permissions" ? "missing-permission" : `ElevenLabs ${response.status}` };
+    return {
+      tier: String(data.tier ?? ""),
+      used: Number(data.character_count ?? 0),
+      limit: Number(data.character_limit ?? 0),
+      resetsAt: data.next_character_count_reset_unix ? new Date(data.next_character_count_reset_unix * 1000).toISOString() : null,
+    };
+  } catch (error) {
+    return { unavailable: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The month's usage of the whole ElevenLabs workspace by key and hour, and every request the platform's key made. */
 export function elevenReport(startMs: number, endMs: number): Promise<ElevenReport> {
   return cached(`eleven:${startMs}:${endMs}`, async (): Promise<ElevenReport> => {
     const key = process.env.ELEVENLABS_API_KEY;
     if (!key) return { ok: false, error: "ELEVENLABS_API_KEY isn't set on the platform." };
     try {
       const ownUsageHash = sha256(sha256(key));
-      const usageRows = await elevenPost("/v1/workspace/analytics/query/usage-by-product-over-time", {
-        start_time: startMs,
-        end_time: endMs,
-        interval_seconds: 86_400,
-        time_zone: "UTC",
-        group_by: ["hashed_xi_api_key", "model", "product_type"],
-      });
+      const [usageRows, plan] = await Promise.all([
+        elevenPost("/v1/workspace/analytics/query/usage-by-product-over-time", {
+          start_time: startMs,
+          end_time: endMs,
+          // By hour, so a peak shows when it happened; days are summed from the hours.
+          interval_seconds: 3_600,
+          time_zone: "UTC",
+          group_by: ["hashed_xi_api_key", "model", "product_type"],
+        }),
+        elevenPlan(key),
+      ]);
       const usage = usageRows
         .map((row) => ({
+          hour: String(row.timestamp ?? "").slice(0, 13),
           day: String(row.timestamp ?? "").slice(0, 10),
           keyHash: String(row.hashed_xi_api_key ?? ""),
           // No key: usage in ElevenLabs' own app (the website, Studio). A key without a name: shown by its hash.
@@ -108,6 +140,7 @@ export function elevenReport(startMs: number, endMs: number): Promise<ElevenRepo
             pathPattern: String(row.path_pattern ?? ""),
             method: String(row.method ?? ""),
             code: Number(row.response_code ?? 0),
+            latencySeconds: row.latency_seconds === null || row.latency_seconds === undefined ? null : Number(row.latency_seconds),
           });
         }
         if (rows.length < 500) {
@@ -119,7 +152,7 @@ export function elevenReport(startMs: number, endMs: number): Promise<ElevenRepo
       // Pages can meet at a shared timestamp: one row per trace id.
       const seen = new Set<string>();
       const unique = requests.filter((request) => (seen.has(request.traceId) ? false : (seen.add(request.traceId), true)));
-      return { ok: true, usage, ownUsageHash, requests: unique, requestsComplete: complete };
+      return { ok: true, usage, ownUsageHash, requests: unique, requestsComplete: complete, plan };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }

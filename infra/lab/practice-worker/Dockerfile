@@ -14,5 +14,9 @@ RUN npx prisma generate --schema prisma/schema.prisma
 
 COPY dist/worker.mjs ./worker.mjs
 
+# Where voiced pieces are kept until their lesson is stored (the lesson-pieces volume, compose.yaml): made here, owned
+# by the user the worker runs as, so the volume starts out writable.
+RUN mkdir -p /var/lib/adc/pieces && chown node:node /var/lib/adc/pieces
+
 USER node
 CMD ["node", "worker.mjs"]

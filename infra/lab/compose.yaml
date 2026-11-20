@@ -69,14 +69,24 @@ services:
   # request time limit. It reaches the grader on the lab's default network (GRADER_URL=http://grader:8080) and the
   # platform's database and model APIs over the internet; nothing reaches it. On a stop it finishes the items in
   # progress first, hence the long grace period.
+  # Memory: a long lesson's audio is 50 to 70 MB, held a few times over while it's joined and stored, and two lessons
+  # are voiced at once. At 512m the worker was killed for memory three times on 2026-11-19 mid-voicing; the server has
+  # 24 GB. The heap cap makes Node collect garbage well before the container's limit.
+  # lesson-pieces keeps each voiced piece until its lesson's audio is stored, so a voicing cut off by a stop, a rebuild
+  # or a crash picks up where it was instead of paying for its pieces again (lib/lesson-audio/voice.ts).
   practice-worker:
     build: practice-worker
     image: lab-practice-worker:1
     container_name: practice-worker
     restart: unless-stopped
     env_file: practice-worker/.env
+    environment:
+      LESSON_PIECES_DIR: /var/lib/adc/pieces
+      NODE_OPTIONS: --max-old-space-size=1536
+    volumes:
+      - lesson-pieces:/var/lib/adc/pieces
     stop_grace_period: 3m
-    mem_limit: 512m
+    mem_limit: 3g
     depends_on:
       - grader
 
@@ -86,3 +96,4 @@ networks:
 
 volumes:
   hub-data:
+  lesson-pieces:

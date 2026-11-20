@@ -199,7 +199,9 @@ keys, `GRADER_URL=http://grader:8080` and the `GRADER_SECRET` from `grader/.env`
 `docker compose up -d --build practice-worker`. Check it with `docker compose ps practice-worker` (Up) and
 `docker logs practice-worker` (a `practice.worker.start` line, then a `practice.job.item` line per task while a job
 runs). A stop or an update lets it finish the items in progress (up to 3 minutes); anything cut off goes back in the
-queue on the next start. Run one worker only.
+queue on the next start, and a lesson's voicing picks up from the pieces it had kept (the `lesson-pieces` volume,
+`docs/lesson-audio.md`). It has 3 GB of memory: a long lesson's audio is held a few times over while it's joined and
+stored. Run one worker only.
 
 To try it on your PC: `pnpm practice-worker:dev` runs it against the database in `.env.local`, with the grader in
 `.env.local`'s `GRADER_URL`.

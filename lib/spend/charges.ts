@@ -30,10 +30,27 @@ export const workloadOfTag = (tag: string | null | undefined): Workload | null =
   (Object.entries(WORKLOADS).find(([, entry]) => entry.tag === tag)?.[0] as Workload | undefined) ?? null;
 
 /**
+ * ElevenLabs plan credits per character, by model, for a call whose response didn't say what it cost. Each response's
+ * `character-cost` header says it exactly, and the ledger keeps it (detail.characterCost). Measured on this account on
+ * 2026-11-20: Eleven v4 0.485 (33,731 credits for a 69,567-character lesson in 22 pieces), Flash v2.5 0.243 (five
+ * spoken answers, 323 credits for 1,327 characters).
+ */
+export const CREDITS_PER_CHARACTER: Record<string, number> = { eleven_v4: 0.49, eleven_flash_v2_5: 0.25 };
+const DEFAULT_CREDITS_PER_CHARACTER = 0.5;
+
+/** An ElevenLabs charge's credits: what the provider's response said, else estimated from its characters. */
+export function chargeCredits(charge: { status: string; model: string | null; characters: number; detail: unknown }): { credits: number; exact: boolean } {
+  if (charge.status !== "ok") return { credits: 0, exact: true };
+  const said = Number((charge.detail as { characterCost?: unknown } | null)?.characterCost);
+  if (Number.isFinite(said) && said > 0) return { credits: said, exact: true };
+  return { credits: Math.round(charge.characters * (CREDITS_PER_CHARACTER[charge.model ?? ""] ?? DEFAULT_CREDITS_PER_CHARACTER)), exact: false };
+}
+
+/**
  * List prices in US$ per unit, for estimates when a call is made. What was billed comes from the provider:
- *   - ElevenLabs: this account's plan bills credits; its own usage report said US$2.03 for 9,235 characters and US$7.11
- *     for 37,950 of Eleven v4 (2026-11-19/20), about US$0.19 to 0.22 per 1,000 against the API's US$0.08 list price.
- *     Estimates use 0.21 until the month's own report gives the real rate.
+ *   - ElevenLabs: this account's plan bills credits (above); its own report put a US$ figure on them, US$2.03 for 9,235
+ *     credits and US$7.11 for 37,950 (2026-11-19/20). Estimates use 0.21 per 1,000 characters until the month's own
+ *     report gives the real rate.
  *   - Deepgram: deepgram.com/pricing (2026-11-06): Aura-2 US$0.030 per 1,000 characters, Nova-3 multilingual US$0.0092
  *     a minute, Flux multilingual US$0.0078 a minute.
  */

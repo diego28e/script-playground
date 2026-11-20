@@ -1,4 +1,7 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { VOICE_PRICES } from "@/lib/voice/deepgram";
 import type { DirectedPiece } from "@/lib/lesson-audio/delivery";
 import { LIST_PRICES, WORKLOADS } from "@/lib/spend/charges";
@@ -185,6 +188,67 @@ export function mp3Frames(bytes: Uint8Array): { frames: Uint8Array; seconds: num
   return { frames, seconds };
 }
 
+// --- Kept pieces ----------------------------------------------------------------------------------------------------
+
+/**
+ * Pieces already voiced, kept on the worker's disk until their lesson's audio is stored. A voicing that's cut off (the
+ * worker stopped, ran out of memory, was rebuilt) picks up at the piece it was on instead of paying for every piece
+ * again: on 2026-11-19, before this, three out-of-memory stops and a rebuild had pieces of long lessons paid for twice.
+ * On the lab server the folder is a volume (infra/lab/compose.yaml), so it outlives the container; elsewhere, the
+ * system's temporary folder.
+ */
+const PIECES_DIR = process.env.LESSON_PIECES_DIR || join(tmpdir(), "adc-lesson-pieces");
+/** Kept pieces of a lesson never finished are cleared after this. */
+const PIECES_KEPT_MS = 7 * 24 * 3_600_000;
+
+type KeptPiece = { text: string; directed: boolean; tags: number; requestId: string | null; seconds: number };
+
+/** Which pieces a voicing keeps: the lesson's audio and the revision it's voicing. */
+export type PieceStore = { key: string };
+
+const safe = (key: string) => key.replace(/[^a-zA-Z0-9_-]/g, "_");
+/** A piece is the same only if the same script piece is read by the same voice and model, in the same language, with
+ * the delivery added or not as before. */
+const pieceName = (index: number, chunk: string, voice: string, language: string, directed: boolean) =>
+  `${index}-${createHash("sha256").update(`${ELEVEN_MODEL}|${voice}|${language}|${directed ? "directed" : "plain"}|${chunk}`).digest("hex").slice(0, 20)}`;
+
+async function keptPiece(store: PieceStore, name: string): Promise<{ piece: KeptPiece; frames: Uint8Array } | null> {
+  try {
+    const folder = join(PIECES_DIR, safe(store.key));
+    const [piece, frames] = await Promise.all([readFile(join(folder, `${name}.json`), "utf8"), readFile(join(folder, `${name}.mp3`))]);
+    return { piece: JSON.parse(piece) as KeptPiece, frames: new Uint8Array(frames.buffer, frames.byteOffset, frames.byteLength) };
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps a piece: its audio first, then its details, so a piece with details always has its audio. Never throws. */
+async function keepPiece(store: PieceStore, name: string, piece: KeptPiece, frames: Uint8Array) {
+  try {
+    const folder = join(PIECES_DIR, safe(store.key));
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, `${name}.mp3`), frames);
+    await writeFile(join(folder, `${name}.json.part`), JSON.stringify(piece));
+    await rename(join(folder, `${name}.json.part`), join(folder, `${name}.json`));
+  } catch {
+    // Without the disk, a cut-off voicing starts over, as before.
+  }
+}
+
+/** Clears a voicing's kept pieces, once its audio is stored. */
+export async function forgetPieces(store: PieceStore) {
+  await rm(join(PIECES_DIR, safe(store.key)), { recursive: true, force: true }).catch(() => undefined);
+}
+
+/** On the worker's start: clears the kept pieces of voicings left unfinished for a week. */
+export async function prunePieces() {
+  const folders = await readdir(PIECES_DIR).catch(() => [] as string[]);
+  for (const folder of folders) {
+    const info = await stat(join(PIECES_DIR, folder)).catch(() => null);
+    if (info && Date.now() - info.mtimeMs > PIECES_KEPT_MS) await rm(join(PIECES_DIR, folder), { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 /** A call made, for the spend ledger (lib/spend/charges.ts): the caller adds what it was for. */
 export type PieceCharge = { provider: "elevenlabs" | "deepgram"; model: string; ok: boolean; characters: number; estimatedUsd: number; requestId: string | null; audioSeconds?: number; detail?: Record<string, unknown> };
 type OnCharge = ((charge: PieceCharge) => Promise<void> | void) | undefined;
@@ -272,7 +336,8 @@ async function elevenPiece(text: string, voice: string, language: string, previo
   throw new Error(`ElevenLabs couldn't voice a piece: ${lastError}`);
 }
 
-export type VoicedScript = { mp3: Uint8Array; seconds: number; characters: number; directed: string | null; directedPieces: number; pieces: number; tags: number };
+/** `reused`: pieces an earlier, cut-off attempt had voiced and kept, not paid for again. */
+export type VoicedScript = { mp3: Uint8Array; seconds: number; characters: number; directed: string | null; directedPieces: number; pieces: number; tags: number; reused: number };
 
 /**
  * The whole script as one MP3, with its length and the characters voiced (what the provider bills). With ElevenLabs,
@@ -284,13 +349,15 @@ export async function voiceScript(
   voice: string,
   options: {
     language: string;
-    onProgress?: (done: number, total: number) => Promise<void> | void;
+    onProgress?: (done: number, total: number, reused?: number) => Promise<void> | void;
     direct?: (piece: string, previous: string | null) => Promise<DirectedPiece>;
     /** Every call made, for the spend ledger. */
     onCharge?: (charge: PieceCharge) => Promise<void> | void;
+    /** Keeps each piece voiced, and reuses those an earlier, cut-off attempt kept (ElevenLabs only). */
+    store?: PieceStore;
   },
 ): Promise<VoicedScript> {
-  const { onProgress, onCharge } = options;
+  const { onProgress, onCharge, store } = options;
   if (voiceProvider(voice) === "elevenlabs") {
     // One after another: each piece is stitched to the ones before it.
     const chunks = chunkScript(script, ELEVEN_CHUNK_CHARS);
@@ -301,7 +368,22 @@ export async function voiceScript(
     let seconds = 0;
     let directedPieces = 0;
     let tags = 0;
+    let reused = 0;
     for (const [index, chunk] of chunks.entries()) {
+      const name = pieceName(index, chunk, voice, options.language, Boolean(options.direct));
+      const kept = store ? await keptPiece(store, name) : null;
+      if (kept) {
+        // Voiced by an attempt that was cut off: not paid for again.
+        reused += 1;
+        if (kept.piece.directed) directedPieces += 1;
+        tags += kept.piece.tags;
+        read.push(kept.piece.text);
+        if (kept.piece.requestId) ids.push(kept.piece.requestId);
+        frames.push(kept.frames);
+        seconds += kept.piece.seconds;
+        await onProgress?.(index + 1, chunks.length, reused);
+        continue;
+      }
       const directed = options.direct ? await options.direct(chunk, read.at(-1) ?? null) : { text: chunk, directed: false, tags: 0 };
       if (directed.directed) directedPieces += 1;
       tags += directed.tags;
@@ -315,9 +397,10 @@ export async function voiceScript(
       const piece = mp3Frames(bytes);
       pieceSeconds = piece.seconds;
       for (const charge of pending.splice(0)) await onCharge?.({ ...charge, audioSeconds: charge.ok ? pieceSeconds : undefined });
+      if (store) await keepPiece(store, name, { text: directed.text, directed: directed.directed, tags: directed.tags, requestId, seconds: piece.seconds }, piece.frames);
       frames.push(piece.frames);
       seconds += piece.seconds;
-      await onProgress?.(index + 1, chunks.length);
+      await onProgress?.(index + 1, chunks.length, reused);
     }
     const mp3 = new Uint8Array(frames.reduce((sum, piece) => sum + piece.length, 0));
     let offset = 0;
@@ -327,7 +410,7 @@ export async function voiceScript(
     }
     if (!mp3.length) throw new Error("ElevenLabs sent no audio.");
     const text = read.join("\n\n");
-    return { mp3, seconds, characters: read.reduce((sum, piece) => sum + piece.length, 0), directed: options.direct ? text : null, directedPieces, pieces: chunks.length, tags };
+    return { mp3, seconds, characters: read.reduce((sum, piece) => sum + piece.length, 0), directed: options.direct ? text : null, directedPieces, pieces: chunks.length, tags, reused };
   }
 
   const chunks = chunkScript(script);
@@ -360,6 +443,7 @@ export async function voiceScript(
     directedPieces: 0,
     pieces: chunks.length,
     tags: 0,
+    reused: 0,
   };
 }
 
@@ -388,8 +472,10 @@ export async function uploadLessonAudio(audioId: string, revision: number, mp3: 
   });
   const answer = (await response.json().catch(() => null)) as { url?: string; headers?: Record<string, string>; path?: string; error?: string } | null;
   if (!response.ok || !answer?.url || !answer.path) throw new Error(`The platform didn't give an upload address (${response.status}${answer?.error ? `: ${answer.error}` : ""}).`);
-  // An ArrayBuffer of exactly the file: fetch's types don't take a Uint8Array.
-  const file = mp3.buffer.slice(mp3.byteOffset, mp3.byteOffset + mp3.byteLength) as ArrayBuffer;
+  // An ArrayBuffer of exactly the file: fetch's types don't take a Uint8Array. The joined file already is one, so it
+  // isn't copied again (a long lesson's file is 50 MB or more).
+  const whole = mp3.byteOffset === 0 && mp3.byteLength === mp3.buffer.byteLength;
+  const file = (whole ? mp3.buffer : mp3.buffer.slice(mp3.byteOffset, mp3.byteOffset + mp3.byteLength)) as ArrayBuffer;
   const put = await fetch(answer.url, { method: "PUT", headers: answer.headers, body: file, signal: AbortSignal.timeout(300_000) });
   if (!put.ok) throw new Error(`The audio couldn't be stored (${put.status}: ${(await put.text().catch(() => "")).slice(0, 200)}).`);
   return answer.path;

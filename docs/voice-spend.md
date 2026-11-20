@@ -24,21 +24,40 @@ list price. A lesson that fails halfway has still recorded the pieces it paid fo
 **2. What the providers report** for the platform's keys (`lib/spend/providers.ts`, read only, cached 5 minutes):
 
 - **ElevenLabs** workspace analytics:
-  - `usage-by-product-over-time`, per key and day: credits, minutes, **the US$ actually billed**, request counts. Its
-    key hash is `sha256(hex(sha256(key)))`, so the platform finds its own key with no setting.
-  - `requests`: every request of the platform's key (hash `sha256(key)`), with its trace id, path and response code.
+  - `usage-by-product-over-time`, per key, model and hour: **credits**, minutes, the US$ figure it puts on them, request
+    counts. Its key hash is `sha256(hex(sha256(key)))`, so the platform finds its own key with no setting.
+  - `requests`: every request of the platform's key (hash `sha256(key)`), with its trace id, path, response code and
+    latency. No IP address or user agent: a key is all that tells callers apart, so each place that calls ElevenLabs
+    (the platform, the practice worker, the learning service, a PC) should have its own key.
+  - `user/subscription`: the plan's counter (credits used this period, the allowance, the reset), shown if the key
+    has the User: read permission.
 - **Deepgram** Manage API: every request of the project with its key, path, tag and **exact US$**; the project's keys
   (with their comments) and the credit balance. Every Deepgram call the platform makes carries a `tag` naming its
   workload (`WORKLOADS`), so Deepgram's own log says what each call was, the tutor's browser streams included.
 
 ## What the page shows
 
+**ElevenLabs in credits.** The plan bills credits, and credits are what the dashboard counts, so ElevenLabs comes in
+credits first, US$ second:
+
+- Each call's credits are the provider's own: its response's `character-cost` header, kept on the charge
+  (`detail.characterCost`). A call without it is estimated from its characters at the model's measured rate
+  (`CREDITS_PER_CHARACTER`: Eleven v4 about 0.49 a character, Flash v2.5 about 0.25, on this account, 2026-11-20).
+- **ElevenLabs credits**: the plan's counter (with User: read), the platform's key this month by model, the whole
+  workspace, and **Voiced again**: lesson pieces paid for twice because their voicing was cut off and started over.
+- **By key**: every key of the workspace this month, the platform's marked, with credits, requests, models and when
+  last used. A key that shouldn't be in use spending credits is how a leak shows.
+- **The last 48 hours by hour**, every key stacked, and the month's busiest hour.
+
 - **Status**: "Accounted for", or "Needs a look" with the calls the platform didn't log.
 - **Billed to the platform**: the providers' own figures for the platform's keys; per provider beside what the ledger
   logged (requests, characters, estimate), the month's billed ElevenLabs rate, and Deepgram's credit left.
 - **Unaccounted**:
   - ElevenLabs: speech requests by the platform's key whose trace id no charge has (made since per-call logging began),
-    and the characters billed beyond what the ledger logged, at the month's rate.
+    each with what it was (a streamed answer or speech, the voice), its latency, and where it most likely came from: the
+    piece in flight when a lesson's voicing was cut off (the worker stopped as it ran, so its charge was never written),
+    or a streamed answer made outside the learning service (a local test with the key). And the credits billed beyond
+    what the ledger logged, on whole days of per-call logging.
   - Deepgram: requests by the platform's key with none of the platform's tags and no charge's request id, each with its
     exact cost.
   These are calls the platform's code didn't make: a leaked key, the same key used on a PC or in a script. A local test
@@ -62,8 +81,15 @@ list price. A lesson that fails halfway has still recorded the pieces it paid fo
 ## Prices, and what this account is really billed
 
 Estimates use list prices (`LIST_PRICES`); "billed" is always the provider's figure. ElevenLabs bills this account in
-plan credits: its own report said US$2.03 for 9,235 characters and US$7.11 for 37,950 (2026-11-19/20), about US$0.19
-to 0.22 per 1,000 characters, against the API's US$0.08 list price. Lesson-audio estimates use US$0.21.
+plan credits, paid ahead with the plan; its report also puts a US$ figure on them (US$2.03 for 9,235 credits and US$7.11
+for 37,950, 2026-11-19/20), which the page shares out by credits. Lesson-audio US$ estimates use US$0.21 per 1,000
+characters.
+
+**2026-11-19, read from ElevenLabs' own reports**: 619,900 credits from 20:00 New York time to the end of the night,
+617,511 of them by the platform's key, nearly all lesson voicing with Eleven v4 (417 requests, about 1,540 credits
+each), the rest tutor answers. The SRE course's lessons run 40 to 70 minutes (about 6 characters a word, 0.49 credits a
+character). The worker was killed for memory three times that night, and the voicings in progress started over;
+kept pieces (`docs/lesson-audio.md`) now stop that.
 
 ## History
 
