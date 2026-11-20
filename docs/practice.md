@@ -494,7 +494,9 @@ using one of the three written hints.
 ## Explain in your words
 
 A task form, `explain`, for the top stages: producing and applying what a learner knows (declarative ladder) and
-transferring what they can do (procedural). One open question, asked as a colleague or an interviewer would: why
+transferring what they can do (procedural). For knowledge no code can practise (`runnable: false`, an SRE course's
+skills), recall too, beside fill in the blank: one idea the lesson taught, what it is or why, in 30 to 60 seconds with 3
+points, so a learner explains a skill from its second stage instead of after days of questions. One open question, asked as a colleague or an interviewer would: why
 something is so, what happens when, how two things differ, when to choose one. The learner says the answer
 (dictation, `docs/voice.md`) or types it, corrects any word the speech model got wrong, and checks.
 
@@ -534,8 +536,9 @@ and summary instead of assuming Python and LangChain. A published graph keeps it
 Tried locally on 2026-11-20, on the SRE course's lesson 03.08 (DNS): the draft gave 5 skills, all not runnable; of 8
 explain tasks written, 2 were proven (an expert's blind answer 100% and 60%, the weak one 0%), 3 failed the expert check
 (0% to 50%; the first run's 0% was the grader's verdicts not being read, fixed), and 3 met a transient "no model could
-answer". Writing within one admin request took 13 to 19 s. Graded by hand: the good answer and a rambling spoken
-version of it 100%, a vague one 25%, a wrong one 0% with all three misconceptions found. On the page, typed answers were
+answer". Writing within one admin request took 13 to 19 s. Then, with recall added and the graph republished, two recall tasks were
+proven at the first try (14 and 15 s; 60 seconds to say, 3 points, the expert 100%, the weak answer 25% and 0%). Graded
+by hand: the good answer and a rambling spoken version of it 100%, a vague one 25%, a wrong one 0% with all three misconceptions found. On the page, typed answers were
 graded in about 4 s (5 of 5; and 0 of 5 with one in part, the "48 hours, nothing to do" claim counted as a wrong claim),
 recorded as `ai` evidence, and Dictate minted a grant (recorded in the spend ledger) and showed the "allow the
 microphone" message where the browser refused it. Dictation itself wasn't tried with a real microphone.

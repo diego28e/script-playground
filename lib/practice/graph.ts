@@ -11,13 +11,14 @@ import { prisma } from "@/lib/prisma";
  * offline. choice: multiple choice; fill: fill in the blank; predict: say what a snippet prints; code: write a small
  * piece of code; debug: fix a broken snippet; explain: explain an idea in your own words, aloud or typed. A skill that
  * only makes sense against a live service gets questions and explanations. Explaining is for the top stages
- * (docs/practice.md, "Explain in your words"): producing and applying what you know, and transferring what you can do.
+ * (docs/practice.md, "Explain in your words"): producing and applying what you know, and transferring what you can do;
+ * and, for knowledge no code can practise (an SRE course's), recalling it too: saying what something is or why, short.
  */
 export function skillForms(knowledge: "DECLARATIVE" | "PROCEDURAL", runnable: boolean): Record<string, string[]> {
   if (knowledge === "DECLARATIVE") {
     return {
       recognise: ["choice"],
-      recall: ["fill"],
+      recall: runnable ? ["fill"] : ["fill", "explain"],
       produce: runnable ? ["predict", "code", "explain"] : ["fill", "explain"],
       apply: runnable ? ["code", "debug", "explain"] : ["explain", "choice"],
     };
