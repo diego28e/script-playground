@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CircleStop, Headphones, Mic, PenLine, RefreshCw, Sparkles, Volume2 } from "lucide-react";
+import { AlertTriangle, CircleStop, Headphones, Mic, PenLine, RefreshCw, Repeat, Sparkles, Volume2 } from "lucide-react";
 import {
   approveCourseScripts,
   approveLessonScript,
@@ -11,6 +11,7 @@ import {
   getAudioScript,
   previewVoice,
   removeLessonAudio,
+  revoiceCourse,
   requestCourseScripts,
   requestLessonScript,
   retryLessonAudio,
@@ -36,17 +37,41 @@ import { cn } from "@/lib/utils";
 type Options = NonNullable<Awaited<ReturnType<typeof getAudioOptions>>>;
 
 const POLL_MS = 4_000;
-const CHOICES_KEY = "adc.lessonAudio.admin.v1";
+// v2: ElevenLabs became the default voice, so a Deepgram voice remembered from before doesn't stick.
+const CHOICES_KEY = "adc.lessonAudio.admin.v2";
 /** Script characters per lesson text character: what scripts came to in the first runs (a guide for estimates). */
 const SCRIPT_PER_SOURCE = 0.9;
-/** Aura-2's speaking rate (lib/lesson-audio/voice.ts CHARS_PER_SECOND). */
-const CHARS_PER_SECOND = 14;
+/** Speaking rates by provider (lib/lesson-audio/voice.ts CHARS_PER_SECOND). */
+const RATE = { deepgram: 14, elevenlabs: 16.5 } as const;
+const PROVIDER_LABEL = { elevenlabs: "ElevenLabs Eleven v4", deepgram: "Deepgram Aura-2" } as const;
+
+/** The voice choices, grouped by provider, the expressive one first. */
+function VoiceOptions({ voices, prices }: { voices: Options["voices"]; prices: Options["prices"] }) {
+  return (
+    <>
+      {(["elevenlabs", "deepgram"] as const).map((provider) => {
+        const group = voices.filter((voice) => voice.provider === provider);
+        if (!group.length) return null;
+        return (
+          <optgroup key={provider} label={`${PROVIDER_LABEL[provider]} · US$${prices[provider].toFixed(2)} per 1,000 characters`}>
+            {group.map((voice) => (
+              <option key={voice.id} value={voice.id}>
+                {voice.label}
+                {voice.note ? ` · ${voice.note}` : ""}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </>
+  );
+}
 
 const SELECT = "h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground";
 const dollars = (amount: number) => (amount < 0.1 ? "under US$0.10" : `about US$${amount.toFixed(amount < 10 ? 2 : 0)}`);
 const minutes = (seconds: number) => (seconds < 3600 ? `${Math.max(1, Math.round(seconds / 60))} min` : `${(seconds / 3600).toFixed(1)} h`);
 
-type Choices = { courseId: string; model: string; voices: Record<string, string>; autoVoice: boolean };
+type Choices = { courseId: string; model: string; voices: Record<string, string>; autoVoice: boolean; delivery: boolean };
 
 function readChoices(): Partial<Choices> {
   try {
@@ -80,6 +105,7 @@ export function LessonAudioManager({ options }: { options: Options }) {
     model: options.defaults.model,
     voices: options.defaults.voices,
     autoVoice: false,
+    delivery: true,
   });
   const [overview, setOverview] = useState<AudioOverview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -96,6 +122,7 @@ export function LessonAudioManager({ options }: { options: Options }) {
         model: options.models.some((model) => model.id === stored.model) ? stored.model! : current.model,
         voices: { ...current.voices, ...Object.fromEntries(Object.entries(stored.voices ?? {}).filter(([, voice]) => options.voices.some((entry) => entry.id === voice))) },
         autoVoice: Boolean(stored.autoVoice),
+        delivery: stored.delivery !== false,
       }));
     }, 0);
     return () => clearTimeout(read);
@@ -113,8 +140,12 @@ export function LessonAudioManager({ options }: { options: Options }) {
 
   const course = options.courses.find((entry) => entry.id === choices.courseId) ?? options.courses[0];
   const language = course.language === "es" ? "es" : "en";
-  const voices = options.voices.filter((voice) => voice.language === language);
+  const voices = options.voices.filter((voice) => voice.language === "any" || voice.language === language);
   const voice = voices.some((entry) => entry.id === choices.voices[language]) ? choices.voices[language] : voices[0]?.id;
+  const voiceInfo = (id: string | null | undefined) => options.voices.find((entry) => entry.id === id);
+  const expressive = voiceInfo(voice)?.provider === "elevenlabs";
+  // The delivery only applies to the expressive voice.
+  const delivery = expressive && choices.delivery;
 
   const refresh = useCallback(async () => {
     const next = await getAudioOverview(course.id).catch(() => undefined);
@@ -156,7 +187,7 @@ export function LessonAudioManager({ options }: { options: Options }) {
     }
     setBusy("preview");
     try {
-      const result = await previewVoice(voice);
+      const result = await previewVoice(voice, language);
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -175,7 +206,10 @@ export function LessonAudioManager({ options }: { options: Options }) {
   const missing = rows.filter((row) => !row.audio || (!row.audio.scriptWords && !["SCRIPT_QUEUED", "WRITING"].includes(row.audio.status)));
   const missingChars = missing.reduce((sum, row) => sum + (row.sourceChars ?? 0) * SCRIPT_PER_SOURCE, 0);
   const missingUnknown = missing.filter((row) => row.sourceChars === null).length;
-  const voiceCostFor = (chars: number) => (chars / 1000) * options.voicePer1000;
+  const voiceCostFor = (chars: number, id = voice) => (chars / 1000) * options.prices[voiceInfo(id)?.provider ?? "deepgram"];
+  // Lessons whose audio another voice read: what "record again" would do, and cost (the script, plus about 5% for the delivery).
+  const otherVoice = view?.totals.voiced.filter((entry) => entry.voice !== voice) ?? [];
+  const otherVoiceChars = otherVoice.reduce((sum, entry) => sum + entry.chars, 0) * (delivery ? 1.05 : 1);
 
   const writeAll = async () => {
     if (!view || !missing.length || !voice) return;
@@ -183,14 +217,14 @@ export function LessonAudioManager({ options }: { options: Options }) {
     const ok = await confirm({
       title: choices.autoVoice ? "Write and voice every missing lesson?" : "Write every missing script?",
       description: choices.autoVoice
-        ? `Each script goes straight to the voice, without your review, and learners hear it as soon as it's ready. Voicing will cost ${dollars(voiceCostFor(missingChars))}${missingUnknown ? " plus the notebooks" : ""} at Aura-2's price, and the scripts a few cents each.`
+        ? `Each script goes straight to the voice, without your review, and learners hear it as soon as it's ready. Voicing will cost ${dollars(voiceCostFor(missingChars))}${missingUnknown ? " plus the notebooks" : ""} with ${voiceInfo(voice)?.label}, and the scripts a few cents each.`
         : "The scripts wait for your review; nothing is voiced until you approve. Writing costs a few cents a lesson.",
       detail: estimate,
       confirmLabel: choices.autoVoice ? "Write and voice" : "Write scripts",
       icon: choices.autoVoice ? Mic : PenLine,
     });
     if (!ok) return;
-    await run("all", () => requestCourseScripts(course.id, choices.model, voice, choices.autoVoice), "Queued. The worker writes them in course order.");
+    await run("all", () => requestCourseScripts(course.id, choices.model, voice, choices.autoVoice, delivery), "Queued. The worker writes them in course order.");
   };
 
   const approveAll = async () => {
@@ -202,7 +236,19 @@ export function LessonAudioManager({ options }: { options: Options }) {
       icon: Mic,
     });
     if (!ok) return;
-    await run("approve-all", () => approveCourseScripts(course.id, voice), "Queued for voicing.");
+    await run("approve-all", () => approveCourseScripts(course.id, voice, delivery), "Queued for voicing.");
+  };
+
+  const recordAgain = async () => {
+    if (!view || !voice || !otherVoice.length) return;
+    const ok = await confirm({
+      title: `Record ${otherVoice.length} ${otherVoice.length === 1 ? "lesson" : "lessons"} again with ${voiceInfo(voice)?.label}?`,
+      description: `Every lesson read by another voice is voiced again from its script${delivery ? ", with a teacher's delivery added" : ""}. Learners keep hearing the current audio until each new one is ready. It costs ${dollars(voiceCostFor(otherVoiceChars))}.`,
+      confirmLabel: "Record again",
+      icon: Repeat,
+    });
+    if (!ok) return;
+    await run("revoice", () => revoiceCourse(course.id, voice, delivery, false), "Queued. Each lesson is replaced as soon as its new audio is ready.");
   };
 
   const stop = async () => {
@@ -227,7 +273,7 @@ export function LessonAudioManager({ options }: { options: Options }) {
       });
       if (!ok) return;
     }
-    await run(row.lessonId, () => requestLessonScript(course.id, row.lessonId, choices.model, voice), "Queued first. It's ready for review in a few minutes.");
+    await run(row.lessonId, () => requestLessonScript(course.id, row.lessonId, choices.model, voice, delivery), "Queued first. It's ready for review in a few minutes.");
   };
 
   return (
@@ -260,12 +306,8 @@ export function LessonAudioManager({ options }: { options: Options }) {
         <div className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
           <label htmlFor="audio-voice">Voice</label>
           <div className="flex gap-2">
-            <select id="audio-voice" className={SELECT} value={voice} onChange={(event) => choose({ voices: { ...choices.voices, [language]: event.target.value } })}>
-              {voices.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.label} · {entry.note}
-                </option>
-              ))}
+            <select id="audio-voice" className={cn(SELECT, "max-w-[22rem]")} value={voice} onChange={(event) => choose({ voices: { ...choices.voices, [language]: event.target.value } })}>
+              <VoiceOptions voices={voices} prices={options.prices} />
             </select>
             <Button type="button" variant="outline" size="sm" onClick={() => void hearVoice()} loading={busy === "preview"} loadingLabel="Making a sample…">
               <Volume2 className="mr-1.5 size-4" aria-hidden="true" />
@@ -273,7 +315,22 @@ export function LessonAudioManager({ options }: { options: Options }) {
             </Button>
           </div>
         </div>
+        {expressive && (
+          <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm">
+            <input type="checkbox" checked={choices.delivery} onChange={(event) => choose({ delivery: event.target.checked })} className="size-4 accent-[var(--signal-strong)]" />
+            <Tip content="Before voicing, the script model marks tone and pauses with Eleven v4's audio tags ([warmly], [short pause], [slower, deliberate]) and never changes a word. You review the plain script; the tagged version is kept to read after.">
+              <span>Teacher&apos;s delivery: tone and pauses</span>
+            </Tip>
+          </label>
+        )}
       </div>
+
+      {expressive && !options.elevenConfigured && (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          ELEVENLABS_API_KEY isn&apos;t set on the platform, so &ldquo;Hear it&rdquo; can&apos;t play an ElevenLabs voice here. The worker voices lessons with its own key.
+        </p>
+      )}
 
       {!view ? (
         <div className="flex items-center gap-3 py-10 text-sm text-muted-foreground">
@@ -299,6 +356,14 @@ export function LessonAudioManager({ options }: { options: Options }) {
                 <CircleStop className="mr-1.5 size-4" aria-hidden="true" />
                 Stop the queue
               </Button>
+            )}
+            {otherVoice.length > 0 && (
+              <Tip content={`Lessons read by another voice than ${voiceInfo(voice)?.label}, voiced again from their scripts: ${dollars(voiceCostFor(otherVoiceChars))}.`}>
+                <Button type="button" variant="outline" size="sm" onClick={() => void recordAgain()} loading={busy === "revoice"} loadingLabel="Queueing…" disabled={Boolean(busy) && busy !== "revoice"}>
+                  <Repeat className="mr-1.5 size-4" aria-hidden="true" />
+                  Record {otherVoice.length} again with {voiceInfo(voice)?.label}
+                </Button>
+              </Tip>
             )}
             {view.counts.review > 0 && (
               <Button type="button" variant="outline" size="sm" onClick={() => void approveAll()} loading={busy === "approve-all"} loadingLabel="Queueing…" disabled={Boolean(busy) && busy !== "approve-all"}>
@@ -328,7 +393,7 @@ export function LessonAudioManager({ options }: { options: Options }) {
               </label>
               <span className="text-xs text-muted-foreground">
                 {choices.autoVoice
-                  ? `Voicing ${dollars(voiceCostFor(missingChars))}${missingUnknown ? " plus the notebooks" : ""}, about ${minutes(missingChars / CHARS_PER_SECOND)} of audio.`
+                  ? `Voicing ${dollars(voiceCostFor(missingChars))}${missingUnknown ? " plus the notebooks" : ""}, about ${minutes(missingChars / RATE[voiceInfo(voice)?.provider ?? "deepgram"])} of audio.`
                   : "Test one lesson first: write its script below, read it, then decide."}
               </span>
             </div>
@@ -345,6 +410,7 @@ export function LessonAudioManager({ options }: { options: Options }) {
                     <LessonRow
                       key={row.lessonId}
                       row={row}
+                      voiceLabel={voiceInfo(row.audio?.audioVoice)?.label ?? null}
                       busy={busy}
                       onWrite={() => void writeOne(row)}
                       onReview={() => setReviewing(row.audio!.id)}
@@ -364,7 +430,8 @@ export function LessonAudioManager({ options }: { options: Options }) {
           courseId={course.id}
           voice={voice}
           voices={voices}
-          voicePer1000={options.voicePer1000}
+          prices={options.prices}
+          delivery={choices.delivery}
           modelLabels={Object.fromEntries(options.models.map((model) => [model.id, model.label]))}
           row={rows.find((row) => row.audio?.id === reviewing) ?? null}
           onClose={() => setReviewing(null)}
@@ -379,7 +446,22 @@ export function LessonAudioManager({ options }: { options: Options }) {
   );
 }
 
-function LessonRow({ row, busy, onWrite, onReview, onRetry }: { row: AudioLessonRow; busy: string | null; onWrite: () => void; onReview: () => void; onRetry: () => void }) {
+function LessonRow({
+  row,
+  voiceLabel,
+  busy,
+  onWrite,
+  onReview,
+  onRetry,
+}: {
+  row: AudioLessonRow;
+  /** Who read the lesson's current audio. */
+  voiceLabel: string | null;
+  busy: string | null;
+  onWrite: () => void;
+  onReview: () => void;
+  onRetry: () => void;
+}) {
   const audio = row.audio;
   const status = audio ? STATUS[audio.status] : null;
   const working = audio && ["SCRIPT_QUEUED", "WRITING", "VOICE_QUEUED", "VOICING"].includes(audio.status);
@@ -394,9 +476,9 @@ function LessonRow({ row, busy, onWrite, onReview, onRetry }: { row: AudioLesson
             : working
               ? (audio.progress ?? (audio.status.endsWith("QUEUED") ? "Waiting for the worker" : "Starting"))
               : audio?.hasAudio
-                ? `${minutes(audio.audioSeconds ?? 0)} of audio${audio.status === "REVIEW" ? " · a new script waits for review" : ""}`
+                ? `${minutes(audio.audioSeconds ?? 0)} of audio${voiceLabel ? `, ${voiceLabel}` : ""}${audio.status === "REVIEW" ? " · a new script waits for review" : ""}`
                 : audio?.scriptWords
-                  ? `${audio.scriptWords.toLocaleString()} words, about ${minutes((audio.scriptChars ?? 0) / CHARS_PER_SECOND)}`
+                  ? `${audio.scriptWords.toLocaleString()} words, about ${minutes((audio.scriptChars ?? 0) / RATE.deepgram)}`
                   : row.sourceChars === null
                     ? "Notebook: read from the repository"
                     : `${Math.round(row.sourceChars / 1000)}k characters of lesson text`}
@@ -438,7 +520,8 @@ function ReviewDialog({
   courseId,
   voice: initialVoice,
   voices,
-  voicePer1000,
+  prices,
+  delivery: initialDelivery,
   modelLabels,
   row,
   onClose,
@@ -449,7 +532,8 @@ function ReviewDialog({
   courseId: string;
   voice: string;
   voices: Options["voices"];
-  voicePer1000: number;
+  prices: Options["prices"];
+  delivery: boolean;
   /** Model ids to labels; a script written by a fallback lists them all ("a, b"). */
   modelLabels: Record<string, string>;
   row: AudioLessonRow | null;
@@ -462,6 +546,10 @@ function ReviewDialog({
   const [original, setOriginal] = useState("");
   const [meta, setMeta] = useState<{ title: string; model: string | null; status: string } | null>(null);
   const [voice, setVoice] = useState(initialVoice);
+  const [delivery, setDelivery] = useState(initialDelivery);
+  // What the voice read last time, with its delivery, when it had one.
+  const [directed, setDirected] = useState<string | null>(null);
+  const [showDirected, setShowDirected] = useState(false);
   const [track, setTrack] = useState<LessonAudioTrack | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -472,6 +560,7 @@ function ReviewDialog({
       setScript(result.script ?? "");
       setOriginal(result.script ?? "");
       setMeta({ title: `${result.lesson.code ? `${result.lesson.code} · ` : ""}${result.lesson.title}`, model: result.scriptModel, status: result.status });
+      setDirected(result.audioDirected);
     });
     if (row?.audio?.hasAudio) {
       void getAudioForAdmin(audioId).then((result) => {
@@ -484,6 +573,8 @@ function ReviewDialog({
   }, [audioId, row?.audio?.hasAudio]);
 
   const chars = script?.length ?? 0;
+  const expressive = voices.find((entry) => entry.id === voice)?.provider === "elevenlabs";
+  const per1000 = prices[expressive ? "elevenlabs" : "deepgram"];
   const words = script ? script.split(/\s+/).filter(Boolean).length : 0;
   const edited = script !== null && script !== original;
 
@@ -510,12 +601,12 @@ function ReviewDialog({
     if (!script?.trim()) return;
     const ok = await confirm({
       title: row?.audio?.hasAudio ? "Voice this script and replace the audio?" : "Approve and voice this script?",
-      description: `${voices.find((entry) => entry.id === voice)?.label} reads it: about ${minutes(chars / CHARS_PER_SECOND)} of audio, ${dollars((chars / 1000) * voicePer1000)}. Learners hear it as soon as it's ready${row?.audio?.hasAudio ? "; until then they hear the current one" : ""}.`,
+      description: `${voices.find((entry) => entry.id === voice)?.label} reads it: about ${minutes(chars / RATE[expressive ? "elevenlabs" : "deepgram"])} of audio, ${dollars((chars / 1000) * per1000 * (expressive && delivery ? 1.05 : 1))}${expressive && delivery ? ", with a teacher's delivery added" : ""}. Learners hear it as soon as it's ready${row?.audio?.hasAudio ? "; until then they hear the current one" : ""}.`,
       confirmLabel: "Approve and voice",
       icon: Mic,
     });
     if (!ok) return;
-    await act("approve", () => approveLessonScript(courseId, audioId, script, voice), "Approved. It's voiced next, usually in a few minutes.", true);
+    await act("approve", () => approveLessonScript(courseId, audioId, script, voice, expressive && delivery), "Approved. It's voiced next, usually in a few minutes.", true);
   };
 
   const remove = async () => {
@@ -545,6 +636,18 @@ function ReviewDialog({
           <div className="flex items-center gap-3 py-10 text-sm text-muted-foreground">
             <DotLoader /> Reading the script…
           </div>
+        ) : showDirected && directed ? (
+          <div className="min-h-[45vh] flex-1 overflow-y-auto whitespace-pre-wrap rounded-md border border-input bg-muted/40 px-3 py-2 text-[15px] leading-relaxed">
+            {directed.split(/(\[[^\]\n]{1,80}\])/).map((piece, index) =>
+              /^\[[^\]]+\]$/.test(piece) ? (
+                <span key={index} className="rounded bg-amber-500/15 px-1 font-mono text-[12px] text-amber-800 dark:text-amber-200">
+                  {piece}
+                </span>
+              ) : (
+                piece
+              ),
+            )}
+          </div>
         ) : (
           <Textarea
             value={script}
@@ -554,16 +657,26 @@ function ReviewDialog({
           />
         )}
         <p className="text-xs tabular-nums text-muted-foreground">
-          {words.toLocaleString()} words · about {minutes(chars / CHARS_PER_SECOND)} · voicing {dollars((chars / 1000) * voicePer1000)}
+          {words.toLocaleString()} words · about {minutes(chars / RATE[expressive ? "elevenlabs" : "deepgram"])} · voicing {dollars((chars / 1000) * per1000 * (expressive && delivery ? 1.05 : 1))}
           {edited ? " · edited" : ""}
+          {directed && (
+            <>
+              {" · "}
+              <button type="button" onClick={() => setShowDirected(!showDirected)} className="font-medium text-foreground underline-offset-4 hover:underline">
+                {showDirected ? "Back to the script" : "What the voice read, with its delivery"}
+              </button>
+            </>
+          )}
         </p>
         <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-3">
-          <select aria-label="Voice" className={SELECT} value={voice} onChange={(event) => setVoice(event.target.value)}>
-            {voices.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label}
-              </option>
-            ))}
+          {expressive && (
+            <label className="mr-2 flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" checked={delivery} onChange={(event) => setDelivery(event.target.checked)} className="size-4 accent-[var(--signal-strong)]" />
+              Teacher&apos;s delivery
+            </label>
+          )}
+          <select aria-label="Voice" className={cn(SELECT, "max-w-[16rem]")} value={voice} onChange={(event) => setVoice(event.target.value)}>
+            <VoiceOptions voices={voices} prices={prices} />
           </select>
           {row && (
             <Tip content="A new script from the lesson, for your review. The current audio stays until a new one is voiced.">

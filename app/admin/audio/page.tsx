@@ -11,8 +11,8 @@ export default async function AdminAudioPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Lesson audio</h2>
         <p className="max-w-3xl text-muted-foreground">
-          A teacher explains each lesson out loud. A model writes the script from the whole lesson, you read and approve it, and Deepgram voices it.
-          Learners hear it on the lesson page. The work runs on the practice worker in the lab, so you can close this page.
+          A teacher explains each lesson out loud. A model writes the script from the whole lesson, you read and approve it, and ElevenLabs voices it
+          with a teacher&apos;s delivery. Learners hear it on the lesson page. The work runs on the practice worker in the lab, so you can close this page.
         </p>
       </div>
       {options && options.courses.length > 0 ? (

@@ -323,6 +323,9 @@ model LessonAudio {
   voice         String
   // Voice right after writing, without waiting for review (a run started with "voice them too").
   autoVoice     Boolean           @default(false)
+  // Before an expressive voice (ElevenLabs v4) reads it, a model adds delivery to the script: audio tags for tone and
+  // pauses, and emphasis, never changing a word (lib/lesson-audio/delivery.ts).
+  delivery      Boolean           @default(true)
   // A lesson asked for on its own goes before a whole-course run.
   priority      Int               @default(0)
   queuedAt      DateTime?
@@ -345,6 +348,8 @@ model LessonAudio {
   audioScript   String?
   audioChars    Int?
   audioVoice    String?
+  // What the voice actually read: the script with the delivery added, when it was.
+  audioDirected String?
   voicedAt      DateTime?
   // Bumped on every voicing: part of the file's name, so a new version never meets an old one in a cache.
   revision      Int               @default(0)

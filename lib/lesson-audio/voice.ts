@@ -1,15 +1,34 @@
 import { createHmac } from "node:crypto";
 import { VOICE_PRICES } from "@/lib/voice/deepgram";
+import type { DirectedPiece } from "@/lib/lesson-audio/delivery";
 
-// Voicing a lesson's script (docs/lesson-audio.md): Deepgram's Aura-2 reads it, at most 2,000 characters a request, as
-// MP3 (22,050 Hz, 48 kb/s, constant bit rate). The pieces are joined into one file: each piece's metadata frames are
-// taken out first (an ID3 tag, a Xing/Info frame), so the joined file is plain MP3 frames whose length every player
-// reads right. The file goes to the media bucket through a short-lived upload address the platform hands out
-// (app/api/lab-worker/audio-upload): the worker on the lab server holds no AWS credentials.
+// Voicing a lesson's script (docs/lesson-audio.md), with one of two providers:
+//   - ElevenLabs Eleven v4 (the default): the most human voice, directed with audio tags for tone and pauses
+//     (lib/lesson-audio/delivery.ts). Pieces of about 3,300 characters, one after another, each told which pieces came
+//     before it (request stitching), so the voice keeps its tone across the lesson. MP3 at 44.1 kHz, 96 kb/s.
+//   - Deepgram Aura-2, cheaper and plainer: pieces of at most 2,000 characters, as MP3 at 48 kb/s.
+// The pieces are joined into one file: each piece's metadata frames are taken out first (an ID3 tag, a Xing/Info frame),
+// so the joined file is plain MP3 frames whose length every player reads right. The file goes to the media bucket
+// through a short-lived upload address the platform hands out (app/api/lab-worker/audio-upload): the worker on the lab
+// server holds no AWS credentials.
 
 const API = "https://api.deepgram.com";
 /** Aura-2 takes at most 2,000 characters a request. */
 const CHUNK_CHARS = 1_900;
+
+const ELEVEN_API = "https://api.elevenlabs.io";
+/** Eleven v4 (elevenlabs.io/docs/overview/models, 2026-11-19): 10,000 characters a request, about 10 minutes of audio. */
+export const ELEVEN_MODEL = "eleven_v4";
+/**
+ * A piece for Eleven v4: well under its 10,000-character limit, leaving room for the delivery's tags, and short enough
+ * that one bad piece is cheap to redo.
+ */
+const ELEVEN_CHUNK_CHARS = 3_300;
+/** Speech for teaching: the docs' defaults. Lower stability is more expressive and less steady. Style and speed don't apply to v4. */
+const ELEVEN_SETTINGS = { stability: 0.5, similarity_boost: 0.75 };
+const ELEVEN_FORMAT = "mp3_44100_96";
+/** US$ per 1,000 characters on the API (elevenlabs.io/pricing/api, 2026-11-19). Tags count as characters. */
+export const ELEVEN_PER_1000 = 0.08;
 /**
  * Pieces sent at once for one lesson. Deepgram makes speech about four times faster than it plays, and doesn't always
  * work on pieces side by side (2026-11-19: three test pieces came back at 29 s, 61 s and 72 s; lesson 00.04's nine
@@ -19,38 +38,61 @@ const CONCURRENCY = 3;
 /** One piece of 1,900 characters took about 30 s; more than a few minutes means it's stuck. */
 const CHUNK_TIMEOUT_MS = 240_000;
 
-/** Voices for a teacher, from Deepgram's Aura-2 list (developers.deepgram.com/docs/tts-models, 2026-11-19). */
-export const NARRATION_VOICES: ReadonlyArray<{ id: string; label: string; language: "en" | "es"; note: string }> = [
-  { id: "aura-2-hermes-en", label: "Hermes", language: "en", note: "American man: expressive, engaging, professional" },
-  { id: "aura-2-orion-en", label: "Orion", language: "en", note: "American man: approachable, calm, polite" },
-  { id: "aura-2-jupiter-en", label: "Jupiter", language: "en", note: "American man: expressive, knowledgeable, baritone" },
-  { id: "aura-2-draco-en", label: "Draco", language: "en", note: "British man: warm, trustworthy, baritone" },
-  { id: "aura-2-hera-en", label: "Hera", language: "en", note: "American woman: smooth, warm, professional" },
-  { id: "aura-2-selene-en", label: "Selene", language: "en", note: "American woman: expressive, engaging, energetic" },
-  { id: "aura-2-athena-en", label: "Athena", language: "en", note: "American woman: calm, smooth, mature" },
-  { id: "aura-2-vesta-en", label: "Vesta", language: "en", note: "American woman: natural, patient, empathetic" },
+export type VoiceProvider = "elevenlabs" | "deepgram";
+export type NarrationVoice = { id: string; label: string; provider: VoiceProvider; language: "en" | "es" | "any"; note: string };
+
+/**
+ * The voices offered, the default first. ElevenLabs': the admin's chosen Eleven v4 voices, any language (v4 speaks each
+ * language natively); their names are read from ElevenLabs when the page loads (actions/lesson-audio.ts). Deepgram's:
+ * teacher-like Aura-2 voices (developers.deepgram.com/docs/tts-models, 2026-11-19).
+ */
+export const NARRATION_VOICES: ReadonlyArray<NarrationVoice> = [
+  // As ElevenLabs described them on 2026-11-19; the page reads the current names when it loads.
+  { id: "c6SfcYrb2t09NHXiT80T", label: "Jarnathan", provider: "elevenlabs", language: "any", note: "male, american, middle aged, confident" },
+  { id: "DODLEQrClDo8wCz460ld", label: "Lauren", provider: "elevenlabs", language: "any", note: "female, american, middle aged, pleasant" },
+  { id: "1SM7GgM6IMuvQlz2BwM3", label: "Mark", provider: "elevenlabs", language: "any", note: "male, american, middle aged, casual" },
+  { id: "NMxp5bnMnB1sL7oen8GM", label: "Chris", provider: "elevenlabs", language: "any", note: "male, american, middle aged, pleasant" },
+  { id: "ut2XM2wJyIZLTtW6lFzZ", label: "Eliza", provider: "elevenlabs", language: "any", note: "female, american, young, casual" },
+  { id: "4N8zjn9tVNuDEBFWVHAq", label: "Jesse", provider: "elevenlabs", language: "any", note: "male, american, middle aged, made for e-learning" },
+  { id: "aura-2-hermes-en", label: "Hermes", provider: "deepgram", language: "en", note: "American man: expressive, engaging, professional" },
+  { id: "aura-2-orion-en", label: "Orion", provider: "deepgram", language: "en", note: "American man: approachable, calm, polite" },
+  { id: "aura-2-jupiter-en", label: "Jupiter", provider: "deepgram", language: "en", note: "American man: expressive, knowledgeable, baritone" },
+  { id: "aura-2-draco-en", label: "Draco", provider: "deepgram", language: "en", note: "British man: warm, trustworthy, baritone" },
+  { id: "aura-2-hera-en", label: "Hera", provider: "deepgram", language: "en", note: "American woman: smooth, warm, professional" },
+  { id: "aura-2-selene-en", label: "Selene", provider: "deepgram", language: "en", note: "American woman: expressive, engaging, energetic" },
+  { id: "aura-2-athena-en", label: "Athena", provider: "deepgram", language: "en", note: "American woman: calm, smooth, mature" },
+  { id: "aura-2-vesta-en", label: "Vesta", provider: "deepgram", language: "en", note: "American woman: natural, patient, empathetic" },
   // Spanish voices that switch to English for technical terms.
-  { id: "aura-2-javier-es", label: "Javier", language: "es", note: "Mexican man: approachable, professional; says English terms in English" },
-  { id: "aura-2-aquila-es", label: "Aquila", language: "es", note: "Latin American man: expressive, confident; says English terms in English" },
-  { id: "aura-2-selena-es", label: "Selena", language: "es", note: "Latin American woman: friendly, calm; says English terms in English" },
-  { id: "aura-2-diana-es", label: "Diana", language: "es", note: "Spanish woman: professional, expressive; says English terms in English" },
+  { id: "aura-2-javier-es", label: "Javier", provider: "deepgram", language: "es", note: "Mexican man: approachable, professional; says English terms in English" },
+  { id: "aura-2-aquila-es", label: "Aquila", provider: "deepgram", language: "es", note: "Latin American man: expressive, confident; says English terms in English" },
+  { id: "aura-2-selena-es", label: "Selena", provider: "deepgram", language: "es", note: "Latin American woman: friendly, calm; says English terms in English" },
+  { id: "aura-2-diana-es", label: "Diana", provider: "deepgram", language: "es", note: "Spanish woman: professional, expressive; says English terms in English" },
 ];
-export const DEFAULT_VOICES: Record<string, string> = { en: "aura-2-hermes-en", es: "aura-2-javier-es" };
+export const DEFAULT_VOICES: Record<string, string> = { en: "c6SfcYrb2t09NHXiT80T", es: "c6SfcYrb2t09NHXiT80T" };
 
 export function isNarrationVoice(voice: string | null | undefined): voice is string {
   return NARRATION_VOICES.some((entry) => entry.id === voice);
 }
 
-/** What voicing `characters` costs, in US dollars (Aura-2's list price). */
-export const voiceCost = (characters: number) => (characters / 1000) * (VOICE_PRICES.speakPer1000Chars / 1_000_000);
+export const voiceProvider = (voice: string): VoiceProvider => NARRATION_VOICES.find((entry) => entry.id === voice)?.provider ?? "deepgram";
 
-/** Aura-2's speaking rate: 13.3 and 15.0 characters a second in two tests on 2026-11-19 (a test script, and lesson 00.04). */
-export const CHARS_PER_SECOND = 14;
-/** About how long a script plays. */
-export const estimatedSeconds = (characters: number) => characters / CHARS_PER_SECOND;
+/** US$ per 1,000 characters for a voice's provider, at list price. */
+export const per1000 = (voice: string) => (voiceProvider(voice) === "elevenlabs" ? ELEVEN_PER_1000 : VOICE_PRICES.speakPer1000Chars / 1_000_000);
 
-/** The script in pieces of at most CHUNK_CHARS: whole paragraphs, or whole sentences of a long one. */
-export function chunkScript(script: string): string[] {
+/** What voicing `characters` costs, in US dollars. */
+export const voiceCost = (characters: number, voice: string) => (characters / 1000) * per1000(voice);
+
+/**
+ * Characters a second of speech: Aura-2 read 13.3 and 15.0 in two tests (2026-11-19: a test script, and lesson 00.04);
+ * Eleven v4 read 16.9, tags included (a 9,235-character test with Jarnathan, 545 s).
+ */
+export const CHARS_PER_SECOND = { deepgram: 14, elevenlabs: 16.5 } as const;
+/** About how long a script plays, read by `voice`. */
+export const estimatedSeconds = (characters: number, voice?: string) => characters / CHARS_PER_SECOND[voice ? voiceProvider(voice) : "deepgram"];
+
+/** The script in pieces of at most `max` characters: whole paragraphs, or whole sentences of a long one. */
+export function chunkScript(script: string, max = CHUNK_CHARS): string[] {
+  const CHUNK_CHARS = max;
   const chunks: string[] = [];
   let current = "";
   const push = (piece: string) => {
@@ -88,7 +130,7 @@ const BITRATES: Record<string, number[]> = {
 };
 const SAMPLE_RATES: Record<number, number[]> = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
 
-/** An MP3 frame header at `at`, or null. Layer III only: it's all Deepgram sends. */
+/** An MP3 frame header at `at`, or null. Layer III only: it's all Deepgram and ElevenLabs send. */
 function frameAt(bytes: Uint8Array, at: number): { length: number; samples: number; sampleRate: number } | null {
   if (at + 4 > bytes.length || bytes[at] !== 0xff || (bytes[at + 1] & 0xe0) !== 0xe0) return null;
   const version = (bytes[at + 1] >> 3) & 0b11; // 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
@@ -162,8 +204,87 @@ async function speakPiece(text: string, voice: string): Promise<Uint8Array> {
   throw new Error(`Deepgram couldn't voice a piece: ${lastError}`);
 }
 
-/** The whole script as one MP3, with its length and the characters voiced. `onProgress` follows the pieces. */
-export async function voiceScript(script: string, voice: string, onProgress?: (done: number, total: number) => Promise<void> | void): Promise<{ mp3: Uint8Array; seconds: number; characters: number }> {
+/** One piece read by an Eleven v4 voice, as MP3, with the request id the next piece is stitched to. */
+async function elevenPiece(text: string, voice: string, language: string, previous: string[]): Promise<{ bytes: Uint8Array; requestId: string | null }> {
+  const key = process.env.ELEVENLABS_API_KEY;
+  if (!key) throw new Error("ELEVENLABS_API_KEY is not set on the worker.");
+  let lastError = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`${ELEVEN_API}/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=${ELEVEN_FORMAT}`, {
+        method: "POST",
+        headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
+        body: JSON.stringify({
+          text,
+          model_id: ELEVEN_MODEL,
+          language_code: language === "es" ? "es" : "en",
+          voice_settings: ELEVEN_SETTINGS,
+          // At most 3, the closest last (elevenlabs.io/docs, "Stitching multiple requests").
+          ...(previous.length ? { previous_request_ids: previous.slice(-3) } : {}),
+        }),
+        signal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
+      });
+      if (response.ok) return { bytes: new Uint8Array(await response.arrayBuffer()), requestId: response.headers.get("request-id") };
+      lastError = `ElevenLabs ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`;
+      // Busy (429) or a passing fault: wait and try again. A refused request (key, quota, a bad voice) won't change.
+      if (response.status !== 429 && response.status < 500) break;
+      await new Promise((resolve) => setTimeout(resolve, 15_000 * (attempt + 1)));
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  throw new Error(`ElevenLabs couldn't voice a piece: ${lastError}`);
+}
+
+export type VoicedScript = { mp3: Uint8Array; seconds: number; characters: number; directed: string | null; directedPieces: number; pieces: number; tags: number };
+
+/**
+ * The whole script as one MP3, with its length and the characters voiced (what the provider bills). With ElevenLabs,
+ * `direct` adds the delivery to each piece first (lib/lesson-audio/delivery.ts), and `directed` is what the voice read.
+ * `onProgress` follows the pieces.
+ */
+export async function voiceScript(
+  script: string,
+  voice: string,
+  options: {
+    language: string;
+    onProgress?: (done: number, total: number) => Promise<void> | void;
+    direct?: (piece: string, previous: string | null) => Promise<DirectedPiece>;
+  },
+): Promise<VoicedScript> {
+  const { onProgress } = options;
+  if (voiceProvider(voice) === "elevenlabs") {
+    // One after another: each piece is stitched to the ones before it.
+    const chunks = chunkScript(script, ELEVEN_CHUNK_CHARS);
+    const read: string[] = [];
+    const frames: Uint8Array[] = [];
+    const ids: string[] = [];
+    let seconds = 0;
+    let directedPieces = 0;
+    let tags = 0;
+    for (const [index, chunk] of chunks.entries()) {
+      const directed = options.direct ? await options.direct(chunk, read.at(-1) ?? null) : { text: chunk, directed: false, tags: 0 };
+      if (directed.directed) directedPieces += 1;
+      tags += directed.tags;
+      read.push(directed.text);
+      const { bytes, requestId } = await elevenPiece(directed.text, voice, options.language, ids);
+      if (requestId) ids.push(requestId);
+      const piece = mp3Frames(bytes);
+      frames.push(piece.frames);
+      seconds += piece.seconds;
+      await onProgress?.(index + 1, chunks.length);
+    }
+    const mp3 = new Uint8Array(frames.reduce((sum, piece) => sum + piece.length, 0));
+    let offset = 0;
+    for (const piece of frames) {
+      mp3.set(piece, offset);
+      offset += piece.length;
+    }
+    if (!mp3.length) throw new Error("ElevenLabs sent no audio.");
+    const text = read.join("\n\n");
+    return { mp3, seconds, characters: read.reduce((sum, piece) => sum + piece.length, 0), directed: options.direct ? text : null, directedPieces, pieces: chunks.length, tags };
+  }
+
   const chunks = chunkScript(script);
   const results: { frames: Uint8Array; seconds: number }[] = new Array(chunks.length);
   let next = 0;
@@ -184,7 +305,15 @@ export async function voiceScript(script: string, voice: string, onProgress?: (d
     offset += piece.frames.length;
   }
   if (!mp3.length) throw new Error("Deepgram sent no audio.");
-  return { mp3, seconds: results.reduce((sum, piece) => sum + piece.seconds, 0), characters: chunks.reduce((sum, chunk) => sum + chunk.length, 0) };
+  return {
+    mp3,
+    seconds: results.reduce((sum, piece) => sum + piece.seconds, 0),
+    characters: chunks.reduce((sum, chunk) => sum + chunk.length, 0),
+    directed: null,
+    directedPieces: 0,
+    pieces: chunks.length,
+    tags: 0,
+  };
 }
 
 // --- Upload, through the platform ---------------------------------------------------------------------------------

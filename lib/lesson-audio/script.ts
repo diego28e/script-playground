@@ -40,7 +40,7 @@ export function isNarrationModel(model: string | null | undefined): model is str
 }
 
 /** The chosen model first, then the others in order, so a part is still written when one provider is down. */
-function narrationChain(model: string | undefined): ModelEntry[] {
+export function narrationChain(model: string | undefined): ModelEntry[] {
   const chosen = NARRATION_MODELS.find((entry) => entry.model === model) ?? NARRATION_MODELS[0];
   return [chosen, ...NARRATION_MODELS.filter((entry) => entry !== chosen)];
 }

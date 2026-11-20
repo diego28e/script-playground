@@ -61,7 +61,7 @@ async function main() {
     grader: Boolean(process.env.GRADER_URL),
     models: { anthropic: Boolean(process.env.ANTHROPIC_API_KEY), gemini: Boolean(process.env.GEMINI_API_KEY), deepseek: Boolean(process.env.DEEPSEEK_API_KEY), dolphingo: Boolean(process.env.DOLPHINGO_API_KEY) },
     // Lesson audio needs all three: the voice, and the platform to store the file through.
-    audio: { deepgram: Boolean(process.env.DEEPGRAM_API_KEY), platform: process.env.PLATFORM_URL ?? null, secret: Boolean(process.env.LAB_WORKER_SECRET) },
+    audio: { elevenlabs: Boolean(process.env.ELEVENLABS_API_KEY), deepgram: Boolean(process.env.DEEPGRAM_API_KEY), platform: process.env.PLATFORM_URL ?? null, secret: Boolean(process.env.LAB_WORKER_SECRET) },
   });
   await loop();
 }
