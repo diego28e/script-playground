@@ -15,6 +15,7 @@ import {
   updateSkill,
   type PracticeGraphData,
   type SkillInput,
+  turnOffCodeTasks,
 } from "@/actions/practice";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -171,6 +172,26 @@ function CourseReview({
     });
   };
 
+  // Skills set to get Python code tasks. A course that isn't about Python wants none: one click turns them all off.
+  const allSkills = lessons.reduce((sum, lesson) => sum + lesson.practiceSkills.length, 0);
+  const codeSkills = lessons.reduce((sum, lesson) => sum + lesson.practiceSkills.filter((skill) => skill.runnable).length, 0);
+  const [turningOff, startTurnOff] = useTransition();
+  const noCodeTasks = async () => {
+    const ok = await confirm({
+      title: "Turn Python code tasks off for the whole course?",
+      detail: `${course.title}: ${codeSkills} of ${allSkills} skills`,
+      description:
+        "For a course that isn't about Python. Each of these skills then gets questions and spoken explanations and no code to write or run. Approvals stay as they are, any skill can be switched back on its own, and learners see the change once you publish a version.",
+      confirmLabel: "Turn off for all",
+    });
+    if (!ok) return;
+    startTurnOff(async () => {
+      const result = await turnOffCodeTasks(course.id);
+      if (!result.success) toast.error(result.error);
+      else toast.success(`${result.changed} ${result.changed === 1 ? "skill" : "skills"} now get questions and spoken explanations. Publish a version to apply it.`);
+    });
+  };
+
   const draftRemaining = () => startJob("DRAFT_LESSONS", model || undefined);
 
   // Practice tasks: the published skills' stages that have no proven task yet.
@@ -239,6 +260,24 @@ function CourseReview({
               <span className="font-medium">{counts.review}</span> to review, <span className="font-medium">{counts.todo}</span> not drafted
             </p>
           </div>
+          {allSkills > 0 && (
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              <span>
+                <span className="font-medium text-foreground">{codeSkills}</span> of {allSkills} skills get Python code tasks; the rest get questions and spoken
+                explanations.
+              </span>
+              {codeSkills > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void noCodeTasks()}
+                  disabled={turningOff || Boolean(running)}
+                  className="font-medium text-foreground underline underline-offset-4 hover:no-underline disabled:opacity-50"
+                >
+                  {turningOff ? "Turning off…" : "Turn off for all"}
+                </button>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -131,6 +131,18 @@ export async function approveAllLessons(courseId: string): Promise<Result<{ appr
   return { success: true, approved: count };
 }
 
+/**
+ * Turns Python code tasks off for every skill of a course that has them on: for a course that isn't about Python,
+ * whose skills then get questions and spoken explanations (lib/practice/graph.ts skillForms). Approvals stay as they
+ * are; it reaches learners with the next published version.
+ */
+export async function turnOffCodeTasks(courseId: string): Promise<Result<{ changed: number }>> {
+  if (!(await requireAdmin())) return denied;
+  const { count } = await prisma.practiceSkill.updateMany({ where: { courseId, runnable: true }, data: { runnable: false } });
+  refresh();
+  return { success: true, changed: count };
+}
+
 const SkillSchema = z.object({
   key: z.string().min(1).max(80),
   labelEs: z.string().trim().min(1).max(120),

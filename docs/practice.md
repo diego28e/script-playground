@@ -531,7 +531,10 @@ other forms and never give the points away.
 operations, interviews): a skill that isn't about Python is `runnable: false`, and gets questions and explanations
 (`skillForms`, `lib/practice/graph.ts`). Task writing, the blind check of questions and hints are told the course's title
 and summary instead of assuming Python and LangChain. A published graph keeps its forms: republish a course to add
-`explain` to its skills' stages.
+`explain` to its skills' stages. Skills drafted before this (with the Python-only prompt) may have code tasks on where they
+make no sense: the course bar on `/admin/practice` says how many skills get Python code tasks, and **Turn off for all**
+switches every one of the course's skills to questions and explanations in one go (`turnOffCodeTasks`), approvals
+kept; one skill can be switched back in its editor ("Python code tasks can practise it").
 
 Tried locally on 2026-11-20, on the SRE course's lesson 03.08 (DNS): the draft gave 5 skills, all not runnable; of 8
 explain tasks written, 2 were proven (an expert's blind answer 100% and 60%, the weak one 0%), 3 failed the expert check
