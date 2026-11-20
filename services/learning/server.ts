@@ -140,8 +140,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     // The listener stopping (or leaving) closes this response, which stops Deepgram too.
     const listener = new AbortController();
     response.on("close", () => listener.abort());
-    const audio = await speakStream(parsed.data.text, parsed.data.language, listener.signal);
-    await recordSpeak(learner.userId, parsed.data.text.length, "tutor-voice");
+    const { audio, requestId } = await speakStream(parsed.data.text, parsed.data.language, listener.signal);
+    await recordSpeak(learner.userId, parsed.data.text.length, "tutor-voice", requestId);
     // X-Accel-Buffering: nginx in front of the lab passes the audio on as it comes instead of collecting it.
     response.writeHead(200, { "Content-Type": `audio/pcm;rate=${SPEAK_SAMPLE_RATE}`, "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
     await pipeline(Readable.fromWeb(audio as NodeReadableStream<Uint8Array>), response).catch(() => {

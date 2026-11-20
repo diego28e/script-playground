@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { pacificDay } from "@/lib/ai/quota";
 import { VOICE_MODELS, VOICE_PRICES } from "@/lib/voice/deepgram";
+import { recordCharge } from "@/lib/spend/charges";
 
 // A learner's voice for the day (docs/voice.md, "Costs and limits"), counted in ai_request beside every other AI call:
 // a row per stream started (the microphone turned on, or reconnected), and a row per reply read aloud, with its
@@ -26,6 +27,18 @@ export async function recordListen(userId: string, mode: "conversation" | "dicta
   await prisma.aiRequest.create({
     data: { pool: "TUTOR", feature, model: VOICE_MODELS[mode], userId, status: "OK", day: pacificDay(), listCostMicros: perMinute * LISTEN_MAX_MINUTES, traceId: randomUUID() },
   });
+  // The spend ledger (lib/spend/charges.ts): the stream's real length and cost are in Deepgram's request log, under the
+  // stream's tag; this row is the upper bound, as above.
+  await recordCharge({
+    provider: "deepgram",
+    workload: "tutor.listen",
+    model: mode === "conversation" ? "flux-general-multi" : "nova-3",
+    ok: true,
+    estimatedUsd: (perMinute * LISTEN_MAX_MINUTES) / 1_000_000,
+    runtime: "lab",
+    userId,
+    detail: { mode, upperBound: true },
+  });
 }
 
 export async function canSpeak(userId: string, characters: number): Promise<boolean> {
@@ -33,8 +46,19 @@ export async function canSpeak(userId: string, characters: number): Promise<bool
   return (used._sum.inputTokens ?? 0) + characters <= SPEAK_CHARS_PER_DAY;
 }
 
-/** A reply read aloud: its characters go in inputTokens. */
-export async function recordSpeak(userId: string, characters: number, feature: string) {
+/** A reply read aloud: its characters go in inputTokens, and a charge in the spend ledger with Deepgram's request id. */
+export async function recordSpeak(userId: string, characters: number, feature: string, requestId: string | null = null) {
+  await recordCharge({
+    provider: "deepgram",
+    workload: "tutor.speak",
+    model: "aura-2",
+    ok: true,
+    characters,
+    estimatedUsd: (characters / 1000) * (VOICE_PRICES.speakPer1000Chars / 1_000_000),
+    requestId,
+    runtime: "lab",
+    userId,
+  });
   await prisma.aiRequest.create({
     data: {
       pool: "TUTOR",

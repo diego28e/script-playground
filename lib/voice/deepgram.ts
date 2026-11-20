@@ -4,6 +4,8 @@
 // The API key stays on the servers. A browser gets a ListenGrant: the full streaming address, and WebSocket
 // subprotocols carrying a temporary token (30 seconds; the stream stays open after it expires).
 
+import { WORKLOADS } from "@/lib/spend/charges";
+
 const API = "https://api.deepgram.com";
 const STREAM = "wss://api.deepgram.com";
 
@@ -74,7 +76,9 @@ async function grantToken(): Promise<{ token: string; expiresIn: number }> {
 /** Everything a browser needs to stream the microphone for `mode`. */
 export async function listenGrant(mode: ListenMode, language: VoiceLanguage): Promise<ListenGrant> {
   const { token, expiresIn } = await grantToken();
-  const terms = VOICE_KEYTERMS.map((term) => `&keyterm=${encodeURIComponent(term)}`).join("");
+  // The tag names the workload in Deepgram's own request log (lib/spend/charges.ts), so these browser streams, which
+  // the platform never sees end, are still the platform's in Admin → Spend.
+  const terms = VOICE_KEYTERMS.map((term) => `&keyterm=${encodeURIComponent(term)}`).join("") + `&tag=${WORKLOADS["tutor.listen"].tag}`;
   const url =
     mode === "conversation"
       ? // Patient turn-taking: a pause to think doesn't end the turn; 4 s of silence does. Both languages hinted, the
@@ -95,20 +99,20 @@ export const SPEAK_SAMPLE_RATE = 24_000;
  * Reads `text` aloud: the audio as Deepgram makes it, to pass straight on. At most SPEAK_MAX_CHARS characters (the
  * caller splits longer text). `signal` stops it, when the listener stops or leaves.
  */
-export async function speakStream(text: string, language: VoiceLanguage, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+export async function speakStream(text: string, language: VoiceLanguage, signal?: AbortSignal): Promise<{ audio: ReadableStream<Uint8Array>; requestId: string | null }> {
   // Only the start is timed: once the audio flows, a long reading takes as long as it takes.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   signal?.addEventListener("abort", () => controller.abort(), { once: true });
   try {
-    const response = await fetch(`${API}/v1/speak?model=${VOICES[language]}&encoding=linear16&sample_rate=${SPEAK_SAMPLE_RATE}&container=none`, {
+    const response = await fetch(`${API}/v1/speak?model=${VOICES[language]}&encoding=linear16&sample_rate=${SPEAK_SAMPLE_RATE}&container=none&tag=${WORKLOADS["tutor.speak"].tag}`, {
       method: "POST",
       headers: { Authorization: `Token ${key()}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: text.slice(0, SPEAK_MAX_CHARS) }),
       signal: controller.signal,
     });
     if (!response.ok || !response.body) throw new Error(`Deepgram couldn't speak it (${response.status}: ${(await response.text().catch(() => "")).slice(0, 200)})`);
-    return response.body;
+    return { audio: response.body, requestId: response.headers.get("dg-request-id") };
   } finally {
     clearTimeout(timer);
   }

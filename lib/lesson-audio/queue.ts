@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import type { LessonAudio } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logAi } from "@/lib/ai/gemini";
-import { pacificDay } from "@/lib/ai/quota";
 import { writeNarration } from "@/lib/lesson-audio/script";
 import { directPiece } from "@/lib/lesson-audio/delivery";
-import { per1000, uploadLessonAudio, voiceProvider, voiceScript } from "@/lib/lesson-audio/voice";
+import { uploadLessonAudio, voiceProvider, voiceScript } from "@/lib/lesson-audio/voice";
+import { recordCharge } from "@/lib/spend/charges";
 
 // The lesson-audio queue (docs/lesson-audio.md). Each lesson has at most one LessonAudio row, which moves through
 //   SCRIPT_QUEUED → WRITING → REVIEW → (approved) VOICE_QUEUED → VOICING → DONE
@@ -18,8 +17,6 @@ const SLOTS = 2;
 /** Attempts per step before the lesson counts as failed, and the pause before each retry. */
 const MAX_ATTEMPTS = 3;
 const RETRY_AFTER_MS = [60_000, 300_000];
-/** Narration voicing in the AI ledger, by provider: kept apart from the tutor's speech, which counts against a learner's day. */
-const LEDGER_MODEL = { deepgram: "deepgram-aura-2-narration", elevenlabs: "elevenlabs-v4-narration" } as const;
 
 const log = (event: string, entry: Record<string, unknown>) => logAi("info", { event, ...entry });
 
@@ -185,6 +182,25 @@ export async function retryAudio(audioId: string, userId: string): Promise<{ ok:
   return { ok: true };
 }
 
+/** Every failed lesson of a course, queued again at the step that failed, in course order. */
+export async function retryFailed(courseId: string, userId: string): Promise<QueueResult> {
+  const rows = await prisma.lessonAudio.findMany({
+    where: { status: "FAILED", lesson: { module: { courseId } } },
+    orderBy: [{ lesson: { module: { position: "asc" } } }, { lesson: { position: "asc" } }],
+    select: { id: true, script: true },
+  });
+  if (!rows.length) return { ok: false, error: "No lesson of this course has failed." };
+  const now = Date.now();
+  for (const [index, row] of rows.entries()) {
+    await prisma.lessonAudio.update({
+      where: { id: row.id },
+      data: { status: row.script ? "VOICE_QUEUED" : "SCRIPT_QUEUED", priority: 0, queuedAt: new Date(now + index), attempts: 0, notBefore: null, error: null, progress: null, requestedById: userId },
+    });
+  }
+  log("lesson-audio.queued", { courseId, step: "retry", lessons: rows.length, userId });
+  return { ok: true, queued: rows.length };
+}
+
 /** Takes the audio off the lesson: learners stop hearing it. The script stays, to voice again later. */
 export async function removeAudio(audioId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const removed = await prisma.lessonAudio.updateMany({
@@ -219,8 +235,29 @@ const progress = (row: LessonAudio, step: "WRITING" | "VOICING") => async (note:
 };
 
 /** A step that didn't finish: back in the queue after a pause, or failed after the last attempt. */
+/**
+ * A refusal no retry fixes: the key's credit limit or quota is reached, or the key isn't accepted. Said plainly, and
+ * failed at once instead of tried again (production, 2026-11-20: a whole-course run hit the ElevenLabs key's credit
+ * limit and every lesson was refused three times over).
+ */
+function refusal(reason: string): string | null {
+  if (/quota_exceeded|exceeds your API key|insufficient|payment required|ElevenLabs 402/i.test(reason)) {
+    return "ElevenLabs refused: the platform's API key has reached its credit limit (or the account is out of credits). Raise the key's limit in ElevenLabs → Developers → API keys, or add credits, then retry.";
+  }
+  if (/ElevenLabs 401|invalid_api_key|Deepgram 401|Deepgram 403/i.test(reason)) {
+    return "The voice provider refused the API key. Check the key set on the practice worker, then retry.";
+  }
+  return null;
+}
+
 async function failStep(row: LessonAudio, step: "WRITING" | "VOICING", reason: string) {
   const queued = step === "WRITING" ? "SCRIPT_QUEUED" : "VOICE_QUEUED";
+  const refused = refusal(reason);
+  if (refused) {
+    await prisma.lessonAudio.updateMany({ where: { id: row.id, status: step }, data: { status: "FAILED", progress: null, error: `${refused} (${reason.slice(0, 300)})` } });
+    log("lesson-audio.step", { audioId: row.id, step, attempt: row.attempts, outcome: "refused", reason: reason.slice(0, 300) });
+    return;
+  }
   if (row.attempts < MAX_ATTEMPTS) {
     const wait = RETRY_AFTER_MS[Math.min(row.attempts - 1, RETRY_AFTER_MS.length - 1)];
     await prisma.lessonAudio.updateMany({
@@ -260,7 +297,7 @@ async function writeStep(row: LessonAudio) {
 async function voiceStep(row: LessonAudio) {
   if (!row.script) return failStep(row, "VOICING", "There's no script to voice.");
   const onProgress = progress(row, "VOICING");
-  const lesson = await prisma.lesson.findUnique({ where: { id: row.lessonId }, select: { module: { select: { course: { select: { language: true } } } } } });
+  const lesson = await prisma.lesson.findUnique({ where: { id: row.lessonId }, select: { module: { select: { course: { select: { id: true, language: true } } } } } });
   const language = lesson?.module.course.language ?? "en";
   const provider = voiceProvider(row.voice);
   // The delivery (tone, pauses) is for the expressive voice; Deepgram reads the script as it is.
@@ -272,6 +309,19 @@ async function voiceStep(row: LessonAudio) {
     language,
     direct,
     onProgress: (done, total) => onProgress(`${direct ? "Directing and voicing" : "Voicing"} piece ${done} of ${total}`),
+    // Every call, the moment it returns: a lesson that fails halfway has still paid for its first pieces.
+    onCharge: (charge) =>
+      recordCharge({
+        ...charge,
+        workload: "lesson-audio.voice",
+        runtime: "worker",
+        userId: row.requestedById,
+        courseId: lesson?.module.course.id,
+        lessonId: row.lessonId,
+        audioId: row.id,
+        voice: row.voice,
+        detail: { ...charge.detail, revision: row.revision + 1 },
+      }),
   });
   const { mp3, seconds, characters } = voiced;
   await onProgress("Storing the audio");
@@ -292,19 +342,6 @@ async function voiceStep(row: LessonAudio) {
       attempts: 0,
       progress: null,
       error: null,
-    },
-  });
-  await prisma.aiRequest.create({
-    data: {
-      pool: "AUTHORING",
-      feature: "narrate",
-      model: LEDGER_MODEL[provider],
-      userId: row.requestedById,
-      status: "OK",
-      day: pacificDay(),
-      inputTokens: characters,
-      listCostMicros: Math.round((characters / 1000) * per1000(row.voice) * 1_000_000),
-      traceId: randomUUID(),
     },
   });
   log("lesson-audio.step", {

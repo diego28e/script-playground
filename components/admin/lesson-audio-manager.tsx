@@ -14,6 +14,7 @@ import {
   revoiceCourse,
   requestCourseScripts,
   requestLessonScript,
+  retryFailedAudio,
   retryLessonAudio,
   saveLessonScript,
   stopCourseAudio,
@@ -68,6 +69,7 @@ function VoiceOptions({ voices, prices }: { voices: Options["voices"]; prices: O
 }
 
 const SELECT = "h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground";
+const count = (value: number) => value.toLocaleString("en-US");
 const dollars = (amount: number) => (amount < 0.1 ? "under US$0.10" : `about US$${amount.toFixed(amount < 10 ? 2 : 0)}`);
 const minutes = (seconds: number) => (seconds < 3600 ? `${Math.max(1, Math.round(seconds / 60))} min` : `${(seconds / 3600).toFixed(1)} h`);
 
@@ -239,6 +241,22 @@ export function LessonAudioManager({ options }: { options: Options }) {
     await run("approve-all", () => approveCourseScripts(course.id, voice, delivery), "Queued for voicing.");
   };
 
+  const retryAll = async () => {
+    if (!view?.counts.failed) return;
+    const failed = rows.filter((row) => row.audio?.status === "FAILED");
+    const toVoice = failed.filter((row) => row.audio?.scriptWords);
+    const chars = toVoice.reduce((sum, row) => sum + (row.audio?.scriptChars ?? 0), 0) * (delivery ? 1.05 : 1);
+    const ok = await confirm({
+      title: `Retry the ${failed.length} failed ${failed.length === 1 ? "lesson" : "lessons"}?`,
+      description: `Each goes back to the step that failed${toVoice.length ? `: ${toVoice.length} to voice, about ${dollars(toVoice.reduce((sum, row) => sum + voiceCostFor((row.audio?.scriptChars ?? 0) * (delivery ? 1.05 : 1), row.audio!.voice), 0))}` : ""}. If they failed on the voice's credit limit, raise it first, or they'll fail again.`,
+      detail: chars ? `${count(Math.round(chars))} characters` : undefined,
+      confirmLabel: "Retry them",
+      icon: RefreshCw,
+    });
+    if (!ok) return;
+    await run("retry-all", () => retryFailedAudio(course.id), "Queued again.");
+  };
+
   const recordAgain = async () => {
     if (!view || !voice || !otherVoice.length) return;
     const ok = await confirm({
@@ -355,6 +373,12 @@ export function LessonAudioManager({ options }: { options: Options }) {
               <Button type="button" variant="ghost" size="sm" onClick={() => void stop()} loading={busy === "stop"} loadingLabel="Stopping…">
                 <CircleStop className="mr-1.5 size-4" aria-hidden="true" />
                 Stop the queue
+              </Button>
+            )}
+            {view.counts.failed > 0 && (
+              <Button type="button" variant="outline" size="sm" onClick={() => void retryAll()} loading={busy === "retry-all"} loadingLabel="Queueing…" disabled={Boolean(busy) && busy !== "retry-all"}>
+                <RefreshCw className="mr-1.5 size-4" aria-hidden="true" />
+                Retry the {view.counts.failed} failed
               </Button>
             )}
             {otherVoice.length > 0 && (

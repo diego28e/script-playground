@@ -77,9 +77,10 @@ elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices), tuned f
 
 ### ElevenLabs Eleven v4 (the default)
 
-- `eleven_v4` on the Text to Speech API: the most emotive model, 10,000 characters a request, US$0.08 per 1,000
-  characters (elevenlabs.io/pricing/api, 2026-11-19; tags count as characters). A 30,000-character script costs about
-  US$2.50.
+- `eleven_v4` on the Text to Speech API: the most emotive model, 10,000 characters a request. The API's list price is
+  US$0.08 per 1,000 characters, but this account's plan bills credits at about US$0.19 to 0.22 (ElevenLabs' own usage
+  report, `docs/voice-spend.md`); estimates use US$0.21, and tags count as characters. A 30,000-character script costs
+  about US$6.50.
 - Pieces of about 3,300 characters of whole paragraphs, voiced **one after another with request stitching**: each
   request names the three before it (`previous_request_ids`), so tone and pace carry across the lesson.
 - Settings: stability 0.5, similarity 0.75 (the docs' defaults; v4 has no style or speed setting). MP3 at 44.1 kHz,
@@ -100,8 +101,8 @@ elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices), tuned f
 - **One file.** Each piece's ID3 tag and Xing/Info frame are taken out and the frames joined, so the file is plain
   constant-bit-rate MP3 whose length every player reads right; the length is also counted from the frames and stored.
 - About 14 characters a second of speech (measured on Aura-2).
-- Each voicing is written to the AI ledger (`ai_request`, model `elevenlabs-v4-narration` or
-  `deepgram-aura-2-narration`) with its list cost; the delivery's model calls are logged like any other.
+- Every call to the voice, each piece and each "Hear it", failures included, is a row in the spend ledger with the
+  provider's id for it (`docs/voice-spend.md`); the delivery's model calls are in the AI ledger like any other.
 
 ## Storing the file
 

@@ -1,3 +1,4 @@
+import { LIST_PRICES, recordCharge, WORKLOADS } from "@/lib/spend/charges";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type, type Schema } from "@google/genai";
@@ -71,24 +72,47 @@ async function audioToSend(videoPath: string, signal: AbortSignal): Promise<{ by
  * Deepgram Nova-3 transcribes the video's English narration (pre-recorded, with smart formatting: numbers as
  * digits, punctuation).
  */
-export async function transcribe(videoPath: string, signal: AbortSignal): Promise<DeepgramWord[]> {
+export async function transcribe(
+  videoPath: string,
+  signal: AbortSignal,
+  /** Who asked and for what, for the spend ledger (lib/spend/charges.ts). */
+  context: { userId?: string; courseId?: string; lessonId?: string; videoPartId?: string } = {},
+): Promise<DeepgramWord[]> {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) throw new Error("DEEPGRAM_API_KEY is not set");
   if (!videoPath.startsWith(MEDIA_PREFIX)) throw new Error("The video isn't on the media host");
-  const params = new URLSearchParams({ model: "nova-3", language: "en", smart_format: "true", punctuate: "true" });
+  const params = new URLSearchParams({ model: "nova-3", language: "en", smart_format: "true", punctuate: "true", tag: WORKLOADS["captions.transcribe"].tag });
   for (const term of KEYTERMS) params.append("keyterm", term);
 
   const audio = await audioToSend(videoPath, signal);
-  const response = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
-    method: "POST",
-    headers: { Authorization: `Token ${key}`, "Content-Type": audio ? audio.type : "application/json" },
-    body: audio ? audio.bytes : JSON.stringify({ url: resolveMediaUrls(videoPath) }),
-    signal,
-  });
+  const charge = { provider: "deepgram" as const, workload: "captions.transcribe" as const, model: "nova-3", runtime: "platform" as const, ...context };
+  let response: Response;
+  try {
+    response = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
+      method: "POST",
+      headers: { Authorization: `Token ${key}`, "Content-Type": audio ? audio.type : "application/json" },
+      body: audio ? audio.bytes : JSON.stringify({ url: resolveMediaUrls(videoPath) }),
+      signal,
+    });
+  } catch (error) {
+    // Cut off: Deepgram may still have transcribed it and billed it.
+    await recordCharge({ ...charge, ok: false, detail: { error: String(error).slice(0, 200) } });
+    throw error;
+  }
   const result = (await response.json().catch(() => null)) as {
     results?: { channels?: { alternatives?: { words?: DeepgramWord[] }[] }[] };
+    metadata?: { request_id?: string; duration?: number };
     err_msg?: string;
   } | null;
+  const seconds = result?.metadata?.duration ?? null;
+  await recordCharge({
+    ...charge,
+    ok: response.ok,
+    requestId: result?.metadata?.request_id ?? response.headers.get("dg-request-id"),
+    audioSeconds: seconds,
+    estimatedUsd: seconds ? (seconds / 60) * LIST_PRICES.deepgramNovaMonoKeytermsPerMinute : 0,
+    detail: response.ok ? { sent: audio ? audio.type : "url" } : { status: response.status },
+  });
   if (!response.ok) throw new Error(`Deepgram couldn't transcribe the video (${response.status}${result?.err_msg ? `: ${result.err_msg}` : ""})`);
   const words = result?.results?.channels?.[0]?.alternatives?.[0]?.words ?? [];
   if (!words.length) throw new Error("Deepgram heard no speech in the video");

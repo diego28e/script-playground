@@ -34,7 +34,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : "U
 async function findPart(partId: string) {
   return prisma.lessonVideoPart.findUnique({
     where: { id: partId },
-    select: { id: true, video: true, lesson: { select: { slug: true, module: { select: { course: { select: { slug: true } } } } } } },
+    select: { id: true, video: true, lesson: { select: { id: true, slug: true, module: { select: { course: { select: { id: true, slug: true } } } } } } },
   });
 }
 
@@ -72,7 +72,12 @@ export async function transcribeVideo(partId: string): Promise<Result<{ cues: Cu
   const url = storedMedia(part.video)?.url;
   if (typeof url !== "string" || !url.startsWith(MEDIA_PREFIX)) return { success: false, error: "This video's file isn't on the media host." };
   try {
-    const words = await transcribe(url, AbortSignal.timeout(REQUEST_BUDGET_MS));
+    const words = await transcribe(url, AbortSignal.timeout(REQUEST_BUDGET_MS), {
+      userId: session.user.id,
+      courseId: part.lesson.module.course.id,
+      lessonId: part.lesson.id,
+      videoPartId: part.id,
+    });
     return { success: true, cues: cuesFromWords(words) };
   } catch (error) {
     console.error("Failed to transcribe a video:", error);

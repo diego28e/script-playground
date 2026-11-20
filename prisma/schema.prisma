@@ -362,6 +362,43 @@ model LessonAudio {
   @@map("lesson_audio")
 }
 
+// One billable call to a voice provider (docs/voice-spend.md): ElevenLabs or Deepgram, written the moment the call
+// returns, failed calls included, by whatever made it (the platform, the practice worker, the lab's learning service).
+// With the provider's own id for the call, so Admin → Spend can match it against what the provider says the platform's
+// key did and billed, and flag any call the platform didn't make. No foreign keys: a charge outlives what it was for.
+model ProviderCharge {
+  id              String   @id @default(cuid())
+  // "elevenlabs" | "deepgram"
+  provider        String
+  // What it was for (lib/spend/charges.ts WORKLOADS), e.g. "lesson-audio.voice", "tutor.listen".
+  workload        String
+  model           String?
+  // "ok" | "failed"
+  status          String
+  // Characters sent to a text-to-speech call; audio seconds transcribed, or produced when known.
+  characters      Int      @default(0)
+  audioSeconds    Float?
+  // Our estimate at list price when the call was made, in millionths of a dollar. What was billed comes from the provider.
+  estimatedMicros Int      @default(0)
+  // ElevenLabs' x-trace-id, or Deepgram's request id.
+  requestId       String?
+  // Where it was made: "platform" (Amplify), "worker" (the practice worker), "lab" (the learning service).
+  runtime         String
+  userId          String?
+  courseId        String?
+  lessonId        String?
+  audioId         String?
+  videoPartId     String?
+  voice           String?
+  detail          Json?
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([provider, createdAt])
+  @@index([requestId])
+  @@map("provider_charge")
+}
+
 model Enrollment {
   id         String   @id @default(cuid())
   userId     String

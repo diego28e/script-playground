@@ -7,8 +7,9 @@ import { currentViewer } from "@/lib/viewer";
 import { resolveMediaUrls } from "@/lib/media";
 import { DEFAULT_NARRATION_MODEL, isNarrationModel, NARRATION_MODELS } from "@/lib/lesson-audio/script";
 import { DEFAULT_VOICES, ELEVEN_MODEL, ELEVEN_PER_1000, estimatedSeconds, isNarrationVoice, mp3Frames, NARRATION_VOICES, voiceCost, voiceProvider, type NarrationVoice } from "@/lib/lesson-audio/voice";
-import { queueRevoice, queueScripts, queueVoicing, removeAudio, retryAudio, saveScript, stopQueue } from "@/lib/lesson-audio/queue";
+import { queueRevoice, queueScripts, queueVoicing, removeAudio, retryAudio, retryFailed, saveScript, stopQueue } from "@/lib/lesson-audio/queue";
 import { VOICE_PRICES } from "@/lib/voice/deepgram";
+import { LIST_PRICES, recordCharge, WORKLOADS } from "@/lib/spend/charges";
 
 // Admin → Audio (docs/lesson-audio.md): queue scripts and voicing, review scripts, listen. The work itself is done by
 // the practice worker (lib/lesson-audio/queue.ts); these only read and change the queue.
@@ -316,6 +317,14 @@ export async function retryLessonAudio(audioId: string): Promise<Result> {
   return result.ok ? { success: true } : { success: false, error: result.error };
 }
 
+/** Every failed lesson of the course, queued again at the step that failed. */
+export async function retryFailedAudio(courseId: string): Promise<Result<{ queued: number }>> {
+  const admin = await requireAdmin();
+  if (!admin) return notAdmin;
+  const result = await retryFailed(courseId, admin.id);
+  return result.ok ? { success: true, queued: result.queued } : { success: false, error: result.error };
+}
+
 export async function removeLessonAudio(courseId: string, audioId: string): Promise<Result> {
   if (!(await requireAdmin())) return notAdmin;
   const result = await removeAudio(audioId);
@@ -336,40 +345,57 @@ const DIRECTED_SAMPLES: Record<string, string> = {
 
 /** A few seconds of a voice, to choose it by ear (about US$0.006 on Deepgram, US$0.02 on ElevenLabs). An MP3 as a data URL. */
 export async function previewVoice(voice: string, language = "en"): Promise<Result<{ src: string }>> {
-  if (!(await requireAdmin())) return notAdmin;
+  const admin = await requireAdmin();
+  if (!admin) return notAdmin;
   const entry = NARRATION_VOICES.find((item) => item.id === voice);
   if (!entry) return { success: false, error: "Choose one of the listed voices." };
   const lang = entry.language === "any" ? (language === "es" ? "es" : "en") : entry.language;
   if (voiceProvider(voice) === "elevenlabs") {
     const elevenKey = process.env.ELEVENLABS_API_KEY;
     if (!elevenKey) return { success: false, error: "ELEVENLABS_API_KEY is not set on the platform." };
+    const text = DIRECTED_SAMPLES[lang];
+    const charge = { provider: "elevenlabs" as const, workload: "lesson-audio.preview" as const, model: ELEVEN_MODEL, characters: text.length, runtime: "platform" as const, userId: admin.id, voice };
     try {
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_96`, {
         method: "POST",
         headers: { "xi-api-key": elevenKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
-        body: JSON.stringify({ text: DIRECTED_SAMPLES[lang], model_id: ELEVEN_MODEL, language_code: lang }),
+        body: JSON.stringify({ text, model_id: ELEVEN_MODEL, language_code: lang }),
         signal: AbortSignal.timeout(24_000),
       });
-      if (!response.ok) return { success: false, error: `ElevenLabs answered ${response.status}: ${(await response.text().catch(() => "")).slice(0, 160)}` };
-      const { frames } = mp3Frames(new Uint8Array(await response.arrayBuffer()));
+      const requestId = response.headers.get("x-trace-id");
+      if (!response.ok) {
+        await recordCharge({ ...charge, ok: false, requestId, detail: { status: response.status } });
+        return { success: false, error: `ElevenLabs answered ${response.status}: ${(await response.text().catch(() => "")).slice(0, 160)}` };
+      }
+      const { frames, seconds } = mp3Frames(new Uint8Array(await response.arrayBuffer()));
+      await recordCharge({ ...charge, ok: true, requestId, audioSeconds: seconds, estimatedUsd: (text.length / 1000) * LIST_PRICES.elevenlabsPer1000 });
       return { success: true, src: `data:audio/mpeg;base64,${Buffer.from(frames).toString("base64")}` };
-    } catch {
+    } catch (error) {
+      await recordCharge({ ...charge, ok: false, detail: { error: String(error).slice(0, 200) } });
       return { success: false, error: "ElevenLabs didn't answer in time. Try again." };
     }
   }
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) return { success: false, error: "DEEPGRAM_API_KEY is not set." };
+  const text = SAMPLES[lang];
+  const charge = { provider: "deepgram" as const, workload: "lesson-audio.preview" as const, model: "aura-2", characters: text.length, runtime: "platform" as const, userId: admin.id, voice };
   try {
-    const response = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(voice)}&encoding=mp3&bit_rate=48000`, {
+    const response = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(voice)}&encoding=mp3&bit_rate=48000&tag=${WORKLOADS["lesson-audio.preview"].tag}`, {
       method: "POST",
       headers: { Authorization: `Token ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ text: SAMPLES[lang] }),
+      body: JSON.stringify({ text }),
       signal: AbortSignal.timeout(20_000),
     });
-    if (!response.ok) return { success: false, error: `Deepgram answered ${response.status}.` };
-    const { frames } = mp3Frames(new Uint8Array(await response.arrayBuffer()));
+    const requestId = response.headers.get("dg-request-id");
+    if (!response.ok) {
+      await recordCharge({ ...charge, ok: false, requestId, detail: { status: response.status } });
+      return { success: false, error: `Deepgram answered ${response.status}.` };
+    }
+    const { frames, seconds } = mp3Frames(new Uint8Array(await response.arrayBuffer()));
+    await recordCharge({ ...charge, ok: true, requestId, audioSeconds: seconds, estimatedUsd: (text.length / 1000) * LIST_PRICES.deepgramSpeakPer1000 });
     return { success: true, src: `data:audio/mpeg;base64,${Buffer.from(frames).toString("base64")}` };
-  } catch {
+  } catch (error) {
+    await recordCharge({ ...charge, ok: false, detail: { error: String(error).slice(0, 200) } });
     return { success: false, error: "Deepgram didn't answer in time. Try again." };
   }
 }

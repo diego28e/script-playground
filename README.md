@@ -213,6 +213,7 @@ Every feature degrades gracefully when its keys are missing. The lab and the med
 | [`docs/lesson-videos.md`](docs/lesson-videos.md) | Videos per skill, uploads, captions and the player |
 | [`docs/lesson-diagrams.md`](docs/lesson-diagrams.md) | Diagrams written as text in a lesson and drawn on the page, in both themes |
 | [`docs/compass.md`](docs/compass.md) | The Python guide |
+| [`docs/voice-spend.md`](docs/voice-spend.md) | What ElevenLabs and Deepgram bill, by workload, checked against each provider's own log to catch a leaked key |
 | [`docs/lesson-audio.md`](docs/lesson-audio.md) | Each lesson told by a teacher: scripts written part by part, review, voicing, the player |
 | [`docs/private-courses.md`](docs/private-courses.md) | Courses only some people can see: the access list and the one rule every query uses |
 

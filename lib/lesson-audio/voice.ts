@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { VOICE_PRICES } from "@/lib/voice/deepgram";
 import type { DirectedPiece } from "@/lib/lesson-audio/delivery";
+import { LIST_PRICES, WORKLOADS } from "@/lib/spend/charges";
 
 // Voicing a lesson's script (docs/lesson-audio.md), with one of two providers:
 //   - ElevenLabs Eleven v4 (the default): the most human voice, directed with audio tags for tone and pauses
@@ -27,8 +28,12 @@ const ELEVEN_CHUNK_CHARS = 3_300;
 /** Speech for teaching: the docs' defaults. Lower stability is more expressive and less steady. Style and speed don't apply to v4. */
 const ELEVEN_SETTINGS = { stability: 0.5, similarity_boost: 0.75 };
 const ELEVEN_FORMAT = "mp3_44100_96";
-/** US$ per 1,000 characters on the API (elevenlabs.io/pricing/api, 2026-11-19). Tags count as characters. */
-export const ELEVEN_PER_1000 = 0.08;
+/**
+ * US$ per 1,000 characters, for estimates. The API's list price is US$0.08 (elevenlabs.io/pricing/api, 2026-11-19), but
+ * this account's plan bills credits at about US$0.19 to 0.22 (ElevenLabs' own usage report, lib/spend/charges.ts
+ * LIST_PRICES). Tags count as characters. Admin → Spend shows what was really billed.
+ */
+export const ELEVEN_PER_1000 = LIST_PRICES.elevenlabsPer1000;
 /**
  * Pieces sent at once for one lesson. Deepgram makes speech about four times faster than it plays, and doesn't always
  * work on pieces side by side (2026-11-19: three test pieces came back at 29 s, 61 s and 72 s; lesson 00.04's nine
@@ -180,32 +185,47 @@ export function mp3Frames(bytes: Uint8Array): { frames: Uint8Array; seconds: num
   return { frames, seconds };
 }
 
-/** One piece read by `voice`, as MP3. Retried once if Deepgram fails or is slow. */
-async function speakPiece(text: string, voice: string): Promise<Uint8Array> {
+/** A call made, for the spend ledger (lib/spend/charges.ts): the caller adds what it was for. */
+export type PieceCharge = { provider: "elevenlabs" | "deepgram"; model: string; ok: boolean; characters: number; estimatedUsd: number; requestId: string | null; audioSeconds?: number; detail?: Record<string, unknown> };
+type OnCharge = ((charge: PieceCharge) => Promise<void> | void) | undefined;
+
+/** One piece read by `voice`, as MP3. Retried once if Deepgram fails or is slow. Every attempt is a charge. */
+async function speakPiece(text: string, voice: string, onCharge: OnCharge): Promise<Uint8Array> {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) throw new Error("DEEPGRAM_API_KEY is not set on the worker.");
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await fetch(`${API}/v1/speak?model=${encodeURIComponent(voice)}&encoding=mp3&bit_rate=48000`, {
+      const response = await fetch(`${API}/v1/speak?model=${encodeURIComponent(voice)}&encoding=mp3&bit_rate=48000&tag=${WORKLOADS["lesson-audio.voice"].tag}`, {
         method: "POST",
         headers: { Authorization: `Token ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
         signal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
       });
-      if (response.ok) return new Uint8Array(await response.arrayBuffer());
+      const requestId = response.headers.get("dg-request-id");
+      if (response.ok) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        await onCharge?.({ provider: "deepgram", model: "aura-2", ok: true, characters: text.length, estimatedUsd: (text.length / 1000) * LIST_PRICES.deepgramSpeakPer1000, requestId });
+        return bytes;
+      }
+      await onCharge?.({ provider: "deepgram", model: "aura-2", ok: false, characters: text.length, estimatedUsd: 0, requestId, detail: { status: response.status } });
       lastError = `Deepgram ${response.status}: ${(await response.text().catch(() => "")).slice(0, 200)}`;
       // A bad request or a key problem won't change on a second try.
       if (response.status === 400 || response.status === 401 || response.status === 402 || response.status === 403) break;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      // Cut off (a timeout, the network): the provider may still have done the work and billed it.
+      await onCharge?.({ provider: "deepgram", model: "aura-2", ok: false, characters: text.length, estimatedUsd: 0, requestId: null, detail: { error: lastError.slice(0, 200) } });
     }
   }
   throw new Error(`Deepgram couldn't voice a piece: ${lastError}`);
 }
 
-/** One piece read by an Eleven v4 voice, as MP3, with the request id the next piece is stitched to. */
-async function elevenPiece(text: string, voice: string, language: string, previous: string[]): Promise<{ bytes: Uint8Array; requestId: string | null }> {
+/**
+ * One piece read by an Eleven v4 voice, as MP3, with the request id the next piece is stitched to. Every attempt is a
+ * charge, with ElevenLabs' x-trace-id: its request log has the same id, which is how Admin → Spend matches them.
+ */
+async function elevenPiece(text: string, voice: string, language: string, previous: string[], onCharge: OnCharge): Promise<{ bytes: Uint8Array; requestId: string | null }> {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error("ELEVENLABS_API_KEY is not set on the worker.");
   let lastError = "";
@@ -224,13 +244,29 @@ async function elevenPiece(text: string, voice: string, language: string, previo
         }),
         signal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
       });
-      if (response.ok) return { bytes: new Uint8Array(await response.arrayBuffer()), requestId: response.headers.get("request-id") };
+      const traceId = response.headers.get("x-trace-id");
+      if (response.ok) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        await onCharge?.({
+          provider: "elevenlabs",
+          model: ELEVEN_MODEL,
+          ok: true,
+          characters: text.length,
+          estimatedUsd: (text.length / 1000) * ELEVEN_PER_1000,
+          requestId: traceId,
+          detail: { stitchedTo: previous.slice(-3).length, characterCost: response.headers.get("character-cost") },
+        });
+        return { bytes, requestId: response.headers.get("request-id") };
+      }
+      await onCharge?.({ provider: "elevenlabs", model: ELEVEN_MODEL, ok: false, characters: text.length, estimatedUsd: 0, requestId: traceId, detail: { status: response.status } });
       lastError = `ElevenLabs ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`;
       // Busy (429) or a passing fault: wait and try again. A refused request (key, quota, a bad voice) won't change.
       if (response.status !== 429 && response.status < 500) break;
       await new Promise((resolve) => setTimeout(resolve, 15_000 * (attempt + 1)));
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      // Cut off (a timeout, the network): the provider may still have done the work and billed it.
+      await onCharge?.({ provider: "elevenlabs", model: ELEVEN_MODEL, ok: false, characters: text.length, estimatedUsd: 0, requestId: null, detail: { error: lastError.slice(0, 200) } });
     }
   }
   throw new Error(`ElevenLabs couldn't voice a piece: ${lastError}`);
@@ -250,15 +286,18 @@ export async function voiceScript(
     language: string;
     onProgress?: (done: number, total: number) => Promise<void> | void;
     direct?: (piece: string, previous: string | null) => Promise<DirectedPiece>;
+    /** Every call made, for the spend ledger. */
+    onCharge?: (charge: PieceCharge) => Promise<void> | void;
   },
 ): Promise<VoicedScript> {
-  const { onProgress } = options;
+  const { onProgress, onCharge } = options;
   if (voiceProvider(voice) === "elevenlabs") {
     // One after another: each piece is stitched to the ones before it.
     const chunks = chunkScript(script, ELEVEN_CHUNK_CHARS);
     const read: string[] = [];
     const frames: Uint8Array[] = [];
     const ids: string[] = [];
+    const pending: PieceCharge[] = [];
     let seconds = 0;
     let directedPieces = 0;
     let tags = 0;
@@ -267,9 +306,15 @@ export async function voiceScript(
       if (directed.directed) directedPieces += 1;
       tags += directed.tags;
       read.push(directed.text);
-      const { bytes, requestId } = await elevenPiece(directed.text, voice, options.language, ids);
+      let pieceSeconds = 0;
+      const { bytes, requestId } = await elevenPiece(directed.text, voice, options.language, ids, (charge) => {
+        // The audio's length is known once the bytes are read: the charge waits for it below.
+        pending.push({ ...charge, detail: { ...charge.detail, piece: index + 1, of: chunks.length, directed: directed.directed } });
+      });
       if (requestId) ids.push(requestId);
       const piece = mp3Frames(bytes);
+      pieceSeconds = piece.seconds;
+      for (const charge of pending.splice(0)) await onCharge?.({ ...charge, audioSeconds: charge.ok ? pieceSeconds : undefined });
       frames.push(piece.frames);
       seconds += piece.seconds;
       await onProgress?.(index + 1, chunks.length);
@@ -292,7 +337,9 @@ export async function voiceScript(
   const work = async () => {
     while (next < chunks.length) {
       const index = next++;
-      results[index] = mp3Frames(await speakPiece(chunks[index], voice));
+      const charges: PieceCharge[] = [];
+      results[index] = mp3Frames(await speakPiece(chunks[index], voice, (charge) => void charges.push(charge)));
+      for (const charge of charges) await onCharge?.({ ...charge, audioSeconds: charge.ok ? results[index].seconds : undefined, detail: { ...charge.detail, piece: index + 1, of: chunks.length } });
       done += 1;
       await onProgress?.(done, chunks.length);
     }
