@@ -17,12 +17,19 @@ import { narrationChain } from "@/lib/lesson-audio/script";
 //   - ellipses add pauses and weight, capitals add emphasis, punctuation sets the rhythm;
 //   - too many directions make the delivery unstable, so they are used sparingly.
 //
-// Whispers (2026-11-20): lessons sometimes dropped into a whisper for a few seconds. The prompt already said never to
-// whisper, but it offered soft tags, and v4 follows a tag's sense closely. One test sentence per tag, measured: a real
-// [whispers] runs 5 to 8 dB under normal speech, with about half the voicing, for its whole length; [gently],
-// [thoughtful] and [exhales] each made their first second that soft. So a tag is now kept only if it's on DELIVERY_TAGS,
-// a list of tags that keep a full, normal speaking voice; anything else the model writes is taken out before voicing
-// (the words stay as approved either way).
+// Whispers (2026-11-20): every lesson dropped into a hushed voice for a few seconds, several times. The prompt already
+// said never to whisper, but it offered soft tags, and v4 follows a tag's sense closely. Measured on the audio (level
+// and voicing of the seconds after each tag, against untagged sentence starts; docs/lesson-audio.md has the numbers):
+//   - in a voiced lesson (00.04), 3 of 6 [gently] were hushed, against 2 of 141 sentences with no tag; the lesson's
+//     two softest passages both followed [gently];
+//   - the same three passages voiced again with only the tag changed: [gently] was 2.5 to 5.6 dB under the sentence
+//     before it every time, once a true whisper (3 s at 8.5 dB under, voicing 0.14 where speech has 0.65); with no tone
+//     tag, [reassuring], [matter-of-fact] or [confident] the voice stayed full; [serious] lowered it (2 to 4 dB,
+//     voicing about 0.43), a grave voice rather than a whisper;
+//   - one test sentence each: [thoughtful] and [exhales] softened their first second.
+// So a tag is kept only if it's on DELIVERY_TAGS, tags measured to keep a full, normal speaking voice. Anything else the
+// model writes is taken out before voicing (the words stay as approved either way). Warnings and "here's the catch"
+// lines, where a model reaches for a gentle or serious tag, are directed [matter-of-fact] or [confident].
 
 export const DELIVERY_PROMPT = `You direct the delivery of an educational audio lesson that a text-to-speech voice (ElevenLabs Eleven v4) will read. A teacher recorded the script; you mark how it should be SPOKEN so it sounds like a good teacher talking to one learner: warm, clear, patient, engaged, never theatrical.
 
@@ -33,7 +40,7 @@ YOU MAY ONLY ADD:
 NEVER change, add, remove or reorder a word of the text. Never put the text's own words inside brackets. Keep every paragraph break.
 
 THE ONLY TAGS YOU MAY USE (exactly as written; any other tag is removed before the voice reads the text). They all keep the teacher's full, normal speaking voice:
-- Tone: [warmly], [warm, encouraging tone], [reassuring], [curious], [enthusiastic], [lightly amused], [serious], [matter-of-fact], [confident], [conversational tone].
+- Tone: [warmly], [warm, encouraging tone], [reassuring], [curious], [enthusiastic], [lightly amused], [matter-of-fact], [confident], [conversational tone].
 - Pace: [slower, deliberate], [measured pace], [brisk], [picking up energy].
 - Pauses: [short pause], [pause], [long pause].
 
@@ -42,14 +49,14 @@ WHERE THEY HELP A LEARNER:
 - A key idea or a definition: [slower, deliberate] or [measured pace], and CAPITALS on its one key word.
 - A turn ("Now", "Here's the catch", "So far"): a [short pause] before it, often with a tone tag.
 - A question to the learner, or "Pause here and try": the question, then [long pause] before the answer starts.
-- A common mistake or a warning: [serious] or [reassuring], depending on the line.
+- A common mistake, a warning, or a "here's the catch" line: [matter-of-fact] or [confident]. These lines must sound firm and clear, at full voice: never confidential, lowered or grave.
 - An analogy or a light aside: [lightly amused] or [warmly].
 - Encouragement and recaps: [warm, encouraging tone].
 - The closing: [warmly].
 
 HOW MUCH: about one tag every two or three sentences, never more than two tags in a row, never the same tag twice in a row. Leave plain passages plain: a voice directed in every sentence sounds unstable and fake.
 
-NEVER make the voice softer or quieter than normal speech: no whispering, hushed, soft, gentle, quiet, breathy or intimate delivery, no sighs, breaths, exhales or hums. Never shouting, crying, singing, accents, sound effects ([applause], [music], any sound that isn't the voice), or anything sarcastic, mocking or dramatic. No SSML or XML of any kind.
+NEVER make the voice softer, lower or quieter than normal speech: no whispering, hushed, soft, gentle, quiet, breathy, intimate, serious, grave or thoughtful delivery, no sighs, breaths, exhales or hums. Never shouting, crying, singing, accents, sound effects ([applause], [music], any sound that isn't the voice), or anything sarcastic, mocking or dramatic. No SSML or XML of any kind.
 
 Answer with the directed text only: no preamble, no notes, no code fences.`;
 
@@ -61,7 +68,6 @@ export const DELIVERY_TAGS = new Set([
   "curious",
   "enthusiastic",
   "lightly amused",
-  "serious",
   "matter-of-fact",
   "confident",
   "conversational tone",

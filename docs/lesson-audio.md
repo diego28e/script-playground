@@ -69,18 +69,37 @@ elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices), tuned f
 
 - **Audio tags** in square brackets for tone and pace (`[warmly]`, `[curious]`, `[serious]`, `[lightly amused]`,
   `[slower, deliberate]`) and pauses (`[short pause]`, `[long pause]` after a question to the learner), only from a
-  fixed list of 17 that keep a full, normal speaking voice (`DELIVERY_TAGS`). About one every two or three sentences: v4
+  fixed list of 16 measured to keep a full, normal speaking voice (`DELIVERY_TAGS`). About one every two or three sentences: v4
   gets unstable when every sentence is directed.
 - **Emphasis** without changing words: capitals on one key word of a paragraph at most, ellipses for a thoughtful pause.
 - **Never**: anything softer or quieter than normal speech (whispering, gentle, soft, breathy, sighs, exhales, hums),
   shouting, accents, sound effects, SSML. v4 takes no `<break>` tags; pauses come from tags and ellipses.
 - **The tags are checked too**: any tag not on the list is taken out before voicing (`keepDeliveryTags`, logged as
   `lesson_audio.delivery_tags_removed`), so the voice never reads one, whatever the model wrote.
-- **Why** (2026-11-20): lessons sometimes dropped into a whisper for a few seconds. The prompt already said never to
-  whisper, but it offered soft tags (`[gently]`, `[thoughtful]`, `[exhales]`, `[hmm]`, `[soft chuckle]`), and v4
-  follows a tag's sense closely. Measured on one test sentence per tag: a real `[whispers]` runs 5 to 8 dB under normal
-  speech with about half the voicing, for seconds on end; `[gently]`, `[thoughtful]` and `[exhales]` made their first
-  second that soft. A lesson already voiced keeps what it has until it's voiced again.
+- **Why** (2026-11-20): every lesson dropped into a hushed voice for a few seconds, several times. The prompt already
+  said never to whisper, but it offered soft tags (`[gently]`, `[thoughtful]`, `[exhales]`, `[hmm]`, `[soft chuckle]`),
+  and v4 follows a tag's sense closely. Measured on the audio (level, and voicing: the share of the sound that has a
+  pitch, about 0.6 in normal speech and under 0.25 in a whisper):
+  - **In a voiced lesson** (00.04, 15 minutes, 72 tags), the 3 seconds after each tag against sentence starts with no
+    tag: 3 of 6 `[gently]` were hushed, 1 of 5 `[serious]`, 1 of 3 `[curious]`, none of the other 55, and 2 of 141
+    untagged sentences (one of them the tail of a `[gently]` passage). The lesson's two softest passages both followed
+    `[gently]`. Nothing drifted along a piece: pieces start and end at the same level.
+  - **The same three passages voiced again, only the tag changed.** After `[gently]`: 5.6, 2.5 and 2.5 dB under the
+    sentence before it, once a true whisper (3 s at 8.5 dB under, voicing 0.14). With no tone tag: 0.5 under, 2.6 over,
+    0.5 over. `[reassuring]`: 1.6 under, 1.1 over, level. `[serious]`: 1.9 under, 0.3 over, 1.1 over.
+  - **On the line that whispered most** ("Here's the catch worth memorising"), after a `[short pause]`:
+    `[matter-of-fact]` 0.5 dB under with voicing 0.56, the same as no tag; `[confident]` 2.0 under, 0.55; `[serious]` 2.2
+    to 3.7 under, 0.41 to 0.45, a lowered, grave voice; `[slower, deliberate]` 2.2 under, 0.44.
+  - So `[gently]`, `[thoughtful]`, `[serious]` and the reactions are off the list, and warnings and "here's the catch"
+    lines are directed `[matter-of-fact]` or `[confident]`. The lesson directed again with the new prompt got 73 tags,
+    all on the list; the three passages voiced as newly directed came out at 0.6 and 2.3 dB over, and (before
+    `[serious]` was dropped) 3.7 under with voicing 0.41. Directed once more without `[serious]`, the lesson got 76
+    tags, all on the list, and the line that whispered most, now `[short pause] [confident]`, came out 1.1 dB under with
+    voicing 0.60: a full voice.
+  - All 23 lessons voiced before this have the hushed passages; none has a sustained whisper of 2 seconds or more at
+    6 dB under. A lesson already voiced keeps what it has until it's voiced again (about 0.49 credits a character).
+  - About 4,600 credits went into these test clips, made from a PC with the platform's key, so Admin → Spend lists
+    them as calls the platform didn't log (30 requests, 2026-11-20).
 - **Not a word changes, and that is checked**: the directed piece's words (tags, punctuation and capitals taken out)
   must equal the approved piece's, or the approved piece is voiced as it is.
 - You review the plain script. What the voice read, with its tags, is kept (`audioDirected`) and shown in the lesson's
