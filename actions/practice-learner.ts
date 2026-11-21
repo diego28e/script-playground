@@ -14,7 +14,7 @@ import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progres
 import type { TaskContent } from "@/lib/practice/tasks";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 import { listenGrant, voiceConfigured, type ListenGrant } from "@/lib/voice/deepgram";
-import { canListen, recordListen } from "@/lib/voice/allowance";
+import { recordListen } from "@/lib/voice/allowance";
 
 // The learner's side of practice (/practice/<course>, docs/practice.md "A session"). Learners only ever get a task's
 // question side: never its key, tests or solutions.
@@ -280,7 +280,6 @@ export async function listenForExplanation(
   const task = await prisma.practiceTask.findUnique({ where: { id: taskId }, select: { content: true } });
   const content = task?.content as unknown as TaskContent | undefined;
   if (content?.form !== "explain") return { success: false, error: es ? "Esta tarea no se responde en voz alta." : "This task isn't answered aloud." };
-  if (!(await canListen(who.userId))) return { success: false, error: es ? "Por hoy no quedan más grabaciones: escribe tu explicación." : "No more recordings today: type your explanation." };
   try {
     const grant = await listenGrant("dictation", language === "es" ? "es" : "en", "practice.listen", taskTerms(content));
     await recordListen(who.userId, "dictation", "practice-explain", "practice.listen", "platform");

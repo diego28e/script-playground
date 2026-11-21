@@ -6,13 +6,13 @@ import { z } from "zod";
 import { logAi } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/lib/tutor/harness";
-import { canListen, canSpeak, LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
+import { LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
 import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, voiceConfigured } from "@/lib/voice/deepgram";
 import { speakExplainer } from "@/lib/voice/explainer";
 import { readPass } from "@/lib/lesson-tutor/pass";
 import { runLessonTurn } from "@/lib/lesson-tutor/turn";
 import { canSpeakLesson, lessonVoice, speakLesson, SPEAK_MAX_CHARS as LESSON_SPEAK_MAX_CHARS } from "@/lib/lesson-tutor/speak";
-import { canSpeakCoach, runCoachTurn, speakCoach } from "@/lib/practice/coach";
+import { runCoachTurn, speakCoach } from "@/lib/practice/coach";
 
 // The learning service: the AI tutor's backend, beside the lab hub on the server (docs/ai-tutor.md). It is not
 // published to the internet: it listens on the lab's Docker network, and only the learners' Jupyter servers call
@@ -138,7 +138,6 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = LessonListenSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "language is invalid." });
-    if (!(await canListen(pass.userId))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's microphone time." });
     const workload = pass.kind === "practice" ? "practice-coach.listen" : "lesson-tutor.listen";
     const grant = await listenGrant("conversation", parsed.data.language, workload);
     await recordListen(pass.userId, "conversation", pass.kind === "practice" ? "practice-coach-voice" : "lesson-tutor-voice", workload);
@@ -150,7 +149,14 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     const line = (event: unknown) => {
       if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
     };
-    const turn = pass.kind === "practice" ? runCoachTurn(pass.userId, pass.courseId, body as never, line) : runLessonTurn(pass.userId, pass.lessonId, body as never, line);
+    // The learner's browser closing the request before the reply ends (they left, or cut it off): the reply is then
+    // stored as interrupted (lib/voice/turn.ts).
+    let gone = false;
+    response.on("close", () => {
+      if (!response.writableEnded) gone = true;
+    });
+    const clientGone = () => gone;
+    const turn = pass.kind === "practice" ? runCoachTurn(pass.userId, pass.courseId, body as never, line, clientGone) : runLessonTurn(pass.userId, pass.lessonId, body as never, line, clientGone);
     const result = await turn.catch((error: Error) => {
       logAi("error", { event: "learning.error", path: request.url, error: String(error.stack ?? error).slice(0, 1000) });
       return { ok: false as const, reason: "unavailable" as const, message: "The teacher had a problem. Try again." };
@@ -162,14 +168,18 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     if (!voiceConfigured() && !process.env.ELEVENLABS_API_KEY) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = LessonSpeakSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
-    const allowed = pass.kind === "practice" ? canSpeakCoach(pass.userId, parsed.data.text.length) : canSpeakLesson(pass.userId, parsed.data.text.length);
-    if (!(await allowed)) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
+    // No daily cap of ours on Deepgram's voice. The one thing rationed is a lesson's own ElevenLabs voice, when an
+    // admin turned it on for the tutor (lib/lesson-tutor/speak.ts).
+    const voice = pass.kind === "lesson" ? await lessonVoice(pass.lessonId) : null;
+    if (pass.kind === "lesson" && !(await canSpeakLesson(pass.userId, parsed.data.text.length, voice))) {
+      return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud in the lesson's voice." });
+    }
     const listener = new AbortController();
     response.on("close", () => listener.abort());
     const audio =
       pass.kind === "practice"
       ? await speakCoach(parsed.data.text, parsed.data.language, listener.signal, { userId: pass.userId, courseId: pass.courseId, speed: parsed.data.speed })
-      : await speakLesson(parsed.data.text, await lessonVoice(pass.lessonId), parsed.data.language, listener.signal, { userId: pass.userId, lessonId: pass.lessonId, speed: parsed.data.speed });
+      : await speakLesson(parsed.data.text, voice, parsed.data.language, listener.signal, { userId: pass.userId, lessonId: pass.lessonId, speed: parsed.data.speed });
     response.writeHead(200, { "Content-Type": `audio/pcm;rate=${SPEAK_SAMPLE_RATE}`, "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
     await pipeline(Readable.fromWeb(audio as NodeReadableStream<Uint8Array>), response).catch(() => {
       // Stopped by the listener, or the stream broke off: what was sent was played.
@@ -227,7 +237,6 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = ListenSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "mode and language are invalid." });
-    if (!(await canListen(learner.userId))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's microphone time." });
     const grant = await listenGrant(parsed.data.mode, parsed.data.language);
     await recordListen(learner.userId, parsed.data.mode, "tutor-voice");
     return send(response, 200, { ok: true, grant, maxMinutes: LISTEN_MAX_MINUTES });
@@ -236,7 +245,6 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = SpeakSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
-    if (!(await canSpeak(learner.userId, parsed.data.text.length))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
     // The listener stopping (or leaving) closes this response, which stops Deepgram too.
     const listener = new AbortController();
     response.on("close", () => listener.abort());

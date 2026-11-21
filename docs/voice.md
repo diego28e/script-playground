@@ -147,13 +147,14 @@ pauses like a speaker, so the length varies from one run to the next); 1,900 cha
 `speakExplainer`, the coach and the lesson tutor both spoke as Hannah and a Spanish reply as Valentina, each with its
 charge. On the admin page a sample came back in under 6 s and played.
 
-## Costs and limits
+## Costs
 
-Counted in `ai_request` beside every other AI call (`lib/voice/allowance.ts`), per learner per day: **60 microphone
-streams** (a conversation is one stream, however many messages it carries; a stream's length isn't known when it starts,
-so streams are capped by count, and the browser closes each after **10 minutes**), and **30,000 characters read aloud**
-(about 30 long replies). Each stream is recorded at its worst case (10 minutes of Flux with key terms, US$0.091), each
-reading at its price (US$0.030 per 1,000 characters). A typical learner costs a few cents a day.
+Recorded in `ai_request` beside every other AI call and in the spend ledger (`lib/voice/allowance.ts`), and **not
+limited**: there is no daily cap of ours on Deepgram, for microphone streams or for reading aloud, in the lab's tutor,
+the lesson tutor or the practice coach (the caps of 60 streams and 25,000 to 40,000 characters a day were removed on
+2026-11-21). Deepgram's own account is the only limit. The browser still closes one stream after **10 minutes**, so a
+tab left open doesn't listen all night; the learner taps the microphone to go on. Each stream is recorded at its worst
+case (10 minutes of Flux with key terms, US$0.091), each reading at its price.
 
 The key in use has admin permission, so `voiceBalance()` can read what's left of the credit (US$199.99 on 2026-11-06),
 for a line on an admin page; the provider can change later by rewriting `lib/voice/deepgram.ts` alone.

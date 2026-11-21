@@ -103,15 +103,16 @@ export function chainStartingAt(chain: ReadonlyArray<ModelEntry>, model: string 
   return index <= 0 ? chain : [...chain.slice(index), ...chain.slice(0, index)];
 }
 
-export type AiFeature = "explain" | "ask" | "translate" | "tutor" | "graph" | "diagnose" | "hint" | "compass" | "narrate" | "lesson-tutor" | "grade" | "practice-coach";
+export type AiFeature = "explain" | "ask" | "translate" | "tutor" | "graph" | "diagnose" | "hint" | "compass" | "narrate" | "lesson-tutor" | "grade" | "practice-coach" | "voice-summary";
 
 export type AiResult =
-  | { ok: true; text: string; functionCalls: FunctionCall[]; model: string; traceId: string }
+  | { ok: true; text: string; functionCalls: FunctionCall[]; model: string; traceId: string; tokens?: Tokens }
   | { ok: false; reason: "unavailable" | "blocked" | "misconfigured"; traceId: string }
   // Every model is over its share of the free tier: try again at `retryAt`.
   | { ok: false; reason: "quota"; retryAt: Date; traceId: string };
 
-type Tokens = { input: number; output: number; thoughts: number; total: number };
+/** `cached`: the part of `input` the provider read from its prompt cache, when it says (billed at a fraction). */
+export type Tokens = { input: number; output: number; thoughts: number; total: number; cached?: number };
 
 type Attempt = {
   model: string;
@@ -281,7 +282,7 @@ export async function generateWithFallback({
           tokens: answer.tokens,
           outputChars: answer.text.length,
         });
-        if (outcome === "ok") return finish({ ok: true, text: answer.text, functionCalls: [], model, traceId });
+        if (outcome === "ok") return finish({ ok: true, text: answer.text, functionCalls: [], model, traceId, tokens: answer.tokens });
         continue;
       }
       // Gemini 3 thinks before answering, and thinking counts against maxOutputTokens: with the default level an
@@ -304,6 +305,7 @@ export async function generateWithFallback({
         output: usage?.candidatesTokenCount ?? 0,
         thoughts: usage?.thoughtsTokenCount ?? 0,
         total: usage?.totalTokenCount ?? 0,
+        ...(usage?.cachedContentTokenCount !== undefined ? { cached: usage.cachedContentTokenCount } : {}),
       };
       attempts.push({ model, outcome, latencyMs: Date.now() - attemptStarted, tokens });
       await record(outcome === "ok", tokens);
@@ -320,7 +322,7 @@ export async function generateWithFallback({
         tokens,
         outputChars: text.length,
       });
-      if (outcome === "ok") return finish({ ok: true, text, functionCalls, model, traceId });
+      if (outcome === "ok") return finish({ ok: true, text, functionCalls, model, traceId, tokens });
       // A safety block would repeat on the next model; an empty answer might not.
       if (outcome === "blocked") return finish({ ok: false, reason: "blocked", traceId });
     } catch (error) {

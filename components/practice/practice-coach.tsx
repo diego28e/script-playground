@@ -63,6 +63,7 @@ export function PracticeCoach({
 
   const getPass = useCallback(() => getPracticeCoachPass(courseSlug), [courseSlug]);
   const turnContext = useCallback(() => ({ sessionId, taskId }), [sessionId, taskId]);
+  const scope = useMemo(() => ({ kind: "practice" as const, courseSlug }), [courseSlug]);
   const copy = useMemo<VoiceTutorCopy>(
     () => ({ title: t.title, about: taskId ? t.aboutTask : t.aboutFree, listening: t.listening, placeholder: t.placeholder, teacher: t.teacher, empty: t.empty, failed: t.failed }),
     [t, taskId],
@@ -84,7 +85,7 @@ export function PracticeCoach({
     return () => window.removeEventListener(DICTATION_STARTED, close);
   }, []);
 
-  if (open) return <VoiceTutor language={language} getPass={getPass} turnContext={turnContext} copy={copy} onClose={() => setOpen(false)} />;
+  if (open) return <VoiceTutor language={language} getPass={getPass} turnContext={turnContext} copy={copy} scope={scope} onClose={() => setOpen(false)} />;
   return (
     <button
       type="button"

@@ -600,8 +600,8 @@ has the widget on and that the learner may see it and is enrolled.
 **Voice and limits.** The coach speaks in the explainers' voice (`docs/voice.md`, "The explainer's voice"): a Deepgram
 Flux voice an admin chooses, not the lesson's ElevenLabs voice, since a practice conversation is many replies and Flux
 costs US$0.045 per 1,000 characters against ElevenLabs credits. Per learner per day: 200 turns (`ai_request`, feature
-`practice-coach`), 40,000 characters read aloud (at most about US$1.80), and the microphone streams of the shared voice
-allowance (`docs/voice.md`). In the spend ledger:
+`practice-coach`); reading aloud and the microphone have no daily limit of ours (`docs/voice.md`, "Costs"). The
+conversation is kept and can be continued or read again (`docs/voice-context.md`). In the spend ledger:
 `practice-coach.listen` and `practice-coach.speak` (`docs/voice-spend.md`).
 
 ## Roadmap

@@ -13,14 +13,20 @@ import { lessonTutorOwnVoice, speakExplainer } from "@/lib/voice/explainer";
 export const ELEVEN_FLASH = "eleven_flash_v2_5";
 /** A piece read aloud at most: the browser sends a few sentences at a time. */
 export const SPEAK_MAX_CHARS = 1900;
-/** Characters read aloud a learner may ask for in a day (about 35 long answers; at most about US$2.60). */
-export const SPEAK_CHARS_PER_DAY = 25_000;
+/**
+ * Characters a learner may have read aloud in 24 hours in a lesson's own ElevenLabs voice (at most about US$2.60 of
+ * that account's credits). Only that voice is limited: the explainers' voice is Deepgram's, and has no cap of ours.
+ */
+export const ELEVEN_SPEAK_CHARS_PER_DAY = 25_000;
 
-const startOfDay = () => new Date(Date.now() - 24 * 3600_000);
-
-export async function canSpeakLesson(userId: string, characters: number): Promise<boolean> {
-  const used = await prisma.providerCharge.aggregate({ where: { userId, workload: "lesson-tutor.speak", createdAt: { gt: startOfDay() } }, _sum: { characters: true } });
-  return (used._sum.characters ?? 0) + characters <= SPEAK_CHARS_PER_DAY;
+/**
+ * Whether this piece may be read aloud. Always, unless an admin set the lesson tutor to answer in the lesson's own
+ * recorded voice and that voice is ElevenLabs': those credits are the one thing rationed here.
+ */
+export async function canSpeakLesson(userId: string, characters: number, voice: string | null): Promise<boolean> {
+  if (!voice || voiceProvider(voice) !== "elevenlabs" || !process.env.ELEVENLABS_API_KEY || !(await lessonTutorOwnVoice())) return true;
+  const used = await prisma.providerCharge.aggregate({ where: { userId, provider: "elevenlabs", workload: "lesson-tutor.speak", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } }, _sum: { characters: true } });
+  return (used._sum.characters ?? 0) + characters <= ELEVEN_SPEAK_CHARS_PER_DAY;
 }
 
 /** The voice of the lesson's audio, or none (the tutor then speaks in Aura's voice for the language). */

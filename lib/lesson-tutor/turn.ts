@@ -7,11 +7,17 @@ import { lessonText } from "@/lib/lesson-text";
 import { estimatedStarts, readTimings, transcriptWords, wordAt } from "@/lib/lesson-audio/words";
 import { prisma } from "@/lib/prisma";
 import { TEACHING } from "@/lib/voice/teaching";
+import { runVoiceTurn, type TurnEvent } from "@/lib/voice/turn";
 
 // The lesson tutor (docs/lesson-tutor.md): a learner listening to a lesson's audio pauses it and asks the teacher
 // something, out loud or typed. The teacher answers about the lesson, knowing what it had just said when the learner
 // stopped it, and the answer is read aloud in the lesson's voice. One model call a turn, streamed; nothing is kept
 // between turns but what the browser sends back (the conversation so far).
+//
+// Since 2026-11-21 a conversation is stored and its context is built on the server (lib/voice/turn.ts,
+// docs/voice-context.md): a turn names its conversation, and this file only says who the teacher is, what the lesson
+// is, and what the learner had just heard. The first way (the browser sends the last messages) still answers a page
+// that was loaded before the change.
 // How it teaches (one concept at a time: what, how, why, in practice, what goes wrong) is lib/voice/teaching.ts.
 
 /** Questions a learner may ask in a day. */
@@ -32,6 +38,13 @@ export const LessonTurnSchema = z.object({
   question: z.string().trim().min(1).max(2000),
   /** Where the audio was when the learner stopped it, in seconds. */
   at: z.number().min(0).max(24 * 3600).nullable().default(null),
+  /**
+   * The stored conversation this turn continues; null starts one. Absent: a page from before conversations were
+   * stored, which sends `history` instead.
+   */
+  conversationId: z.string().max(40).nullable().optional(),
+  /** The learner cut the previous reply off while it was read aloud. */
+  interrupted: z.boolean().default(false),
   history: z
     .array(z.object({ role: z.enum(["learner", "teacher"]), text: z.string().max(4000) }))
     .max(12)
@@ -43,10 +56,10 @@ export const LessonTurnSchema = z.object({
 export type LessonTurnInput = z.input<typeof LessonTurnSchema>;
 
 export type LessonTurnResult =
-  | { ok: true; reply: string; model: string; traceId: string }
-  | { ok: false; reason: "invalid" | "not-found" | "limit" | "quota" | "unavailable"; message: string };
+  | { ok: true; reply: string; model: string; traceId: string; conversationId?: string }
+  | { ok: false; reason: "invalid" | "not-found" | "limit" | "quota" | "unavailable"; message: string; conversationId?: string };
 
-export type LessonTurnEvent = { type: "delta"; text: string } | { type: "reset" };
+export type LessonTurnEvent = TurnEvent;
 
 const SYSTEM = {
   en: `You are the teacher of this lesson, talking with one learner. They are listening to your recorded explanation of the lesson, often on their phone, away from a screen, and they just paused it to ask you something. Your answer is shown to them and read aloud in your voice, so write the way a good teacher talks: short sentences, technical terms in English as the lesson uses them.
@@ -76,6 +89,7 @@ const lessons = new Map<string, { at: number; value: Promise<LessonContext | nul
 const LESSON_CACHE_MS = 10 * 60_000;
 
 type LessonContext = {
+  courseId: string;
   course: string;
   title: string;
   objectives: string[];
@@ -93,7 +107,7 @@ async function loadLesson(lessonId: string): Promise<LessonContext | null> {
       objectives: true,
       body: true,
       sourcePath: true,
-      module: { select: { course: { select: { title: true, sourceRepoUrl: true, sourceRef: true } } } },
+      module: { select: { course: { select: { id: true, title: true, sourceRepoUrl: true, sourceRef: true } } } },
       audio: { select: { audioScript: true, audioSeconds: true, timings: true } },
     },
   });
@@ -104,6 +118,7 @@ async function loadLesson(lessonId: string): Promise<LessonContext | null> {
   const seconds = lesson.audio?.audioSeconds ?? null;
   const starts = script ? (readTimings(lesson.audio?.timings, words.length) ?? (seconds ? estimatedStarts(words, seconds) : null)) : null;
   return {
+    courseId: course.id,
     course: course.title,
     title: lesson.title.replaceAll("`", ""),
     objectives: lesson.objectives,
@@ -147,40 +162,75 @@ async function withinLimit(userId: string): Promise<boolean> {
 
 /**
  * One question to the teacher about `lessonId`. With `onEvent`, the answer is passed on as it's written: a delta per
- * new piece, a reset when the chain moves to another model after the first had started.
+ * new piece, a reset when the chain moves to another model after the first had started, and the conversation's id.
  */
-export async function runLessonTurn(userId: string, lessonId: string, input: LessonTurnInput, onEvent?: (event: LessonTurnEvent) => void): Promise<LessonTurnResult> {
+export async function runLessonTurn(
+  userId: string,
+  lessonId: string,
+  input: LessonTurnInput,
+  onEvent?: (event: LessonTurnEvent) => void,
+  clientGone?: () => boolean,
+): Promise<LessonTurnResult> {
   const parsed = LessonTurnSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid", message: parsed.error.issues[0]?.message ?? "Invalid question." };
   const request = parsed.data;
+  const language = request.language;
+  const es = language === "es";
   // The lesson must still be one this learner may see (a private course's list can change after the pass was given).
   const [visible, allowed] = await Promise.all([
     prisma.lesson.count({ where: { id: lessonId, module: { course: { status: "PUBLISHED", ...courseVisibleTo(await viewerById(userId)) } } } }),
     withinLimit(userId),
   ]);
   if (!visible) return { ok: false, reason: "not-found", message: "This lesson isn't available." };
-  if (!allowed) return { ok: false, reason: "limit", message: request.language === "es" ? "Ya hiciste las preguntas de hoy. Vuelve mañana." : "You've asked today's questions. Come back tomorrow." };
+  if (!allowed) return { ok: false, reason: "limit", message: es ? "Ya hiciste las preguntas de hoy. Vuelve mañana." : "You've asked today's questions. Come back tomorrow." };
   const context = await lessonContext(lessonId);
   if (!context) return { ok: false, reason: "not-found", message: "This lesson isn't available." };
 
-  const language = request.language;
-  const lessonBlock = [
-    language === "es" ? `Curso: ${context.course}` : `Course: ${context.course}`,
-    language === "es" ? `Lección: ${context.title}` : `Lesson: ${context.title}`,
-    context.objectives.length ? `${language === "es" ? "Objetivos" : "Objectives"}: ${context.objectives.join("; ")}` : "",
-    context.text ? `${language === "es" ? "La lección" : "The lesson"}:\n"""\n${context.text}\n"""` : "",
-    aroundMoment(context, request.at, language),
-    request.spoken
-      ? language === "es"
-        ? "Te lo pregunta en voz alta y oirá tu respuesta."
-        : "They're asking out loud and will hear your answer."
-      : language === "es"
-        ? "Te lo pregunta por escrito; tu respuesta se mostrará y también se le podrá leer en voz alta."
-        : "They typed the question; your answer is shown and may also be read aloud to them.",
+  // The context's layers (lib/voice/context.ts). Grounding: the same for every learner on this lesson.
+  const grounding = [
+    es ? `Curso: ${context.course}` : `Course: ${context.course}`,
+    es ? `Lección: ${context.title}` : `Lesson: ${context.title}`,
+    context.objectives.length ? `${es ? "Objetivos" : "Objectives"}: ${context.objectives.join("; ")}` : "",
+    context.text ? `${es ? "La lección" : "The lesson"}:\n"""\n${context.text}\n"""` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
+  // Situation: what changes from one turn to the next.
+  const situation = [
+    aroundMoment(context, request.at, language),
+    request.spoken
+      ? es
+        ? "Te lo pregunta en voz alta (lo que ves es lo que entendió el micrófono: ignora los fallos de transcripción) y oirá tu respuesta."
+        : "They're asking out loud (what you see is what the microphone heard: ignore transcription slips) and will hear your answer."
+      : es
+        ? "Te lo pregunta por escrito; tu respuesta se mostrará y también se le podrá leer en voz alta."
+        : "They typed the question; your answer is shown and may also be read aloud to them.",
+  ].join("\n\n");
+  const busy = es ? "El profesor está ocupado ahora. Inténtalo en un rato." : "The teacher is busy right now. Try again in a while.";
+  const failed = es ? "El profesor no pudo responder. Inténtalo de nuevo." : "The teacher couldn't answer. Try again.";
 
+  if (request.conversationId !== undefined) {
+    const result = await runVoiceTurn({
+      scope: { userId, kind: "lesson", courseId: context.courseId, lessonId },
+      conversationId: request.conversationId,
+      question: request.question,
+      language,
+      role: SYSTEM[language],
+      grounding,
+      situation,
+      learnerMeta: { spoken: request.spoken, ...(request.at !== null ? { at: request.at } : {}) },
+      interruptedPrevious: request.interrupted,
+      feature: "lesson-tutor",
+      models: LESSON_TUTOR_CHAIN,
+      maxOutputTokens: 2200,
+      onEvent,
+      clientGone,
+    });
+    if (!result.ok) return { ok: false, reason: result.reason, message: result.reason === "quota" ? busy : failed, conversationId: result.conversationId };
+    return result;
+  }
+
+  // A page loaded before conversations were stored: it sends the last messages itself, and nothing is kept.
   const contents: Content[] = [
     ...request.history.filter((message) => message.text.trim()).map((message) => ({ role: message.role === "learner" ? "user" : "model", parts: [{ text: message.text }] })),
     { role: "user", parts: [{ text: request.question }] },
@@ -210,15 +260,8 @@ export async function runLessonTurn(userId: string, lessonId: string, input: Les
           },
         }
       : {}),
-    config: {
-      systemInstruction: `${SYSTEM[language]}\n\n${lessonBlock}`,
-      thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
-      maxOutputTokens: 2200,
-    },
+    config: { systemInstruction: `${SYSTEM[language]}\n\n${grounding}\n\n${situation}`, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 2200 },
   });
-  if (!result.ok) {
-    if (result.reason === "quota") return { ok: false, reason: "quota", message: language === "es" ? "El profesor está ocupado ahora. Inténtalo en un rato." : "The teacher is busy right now. Try again in a while." };
-    return { ok: false, reason: "unavailable", message: language === "es" ? "El profesor no pudo responder. Inténtalo de nuevo." : "The teacher couldn't answer. Try again." };
-  }
+  if (!result.ok) return { ok: false, reason: result.reason === "quota" ? "quota" : "unavailable", message: result.reason === "quota" ? busy : failed };
   return { ok: true, reply: result.text.trim(), model: result.model, traceId: result.traceId };
 }

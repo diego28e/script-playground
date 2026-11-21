@@ -19,7 +19,10 @@ and the moment the audio was paused at.
 - **The answer** appears as it's written and is read aloud as it comes: its first sentence at once, then a few
   sentences at a time. The orb says "Thinking" until the teacher is heard. Tapping the orb while it speaks cuts it off
   and listens.
-- **Then it listens again**, for a follow-up. The conversation so far goes with each question.
+- **Then it listens again**, for a follow-up.
+- **The conversation is kept** (`docs/voice-context.md`): reopening the sheet within 6 hours continues it; the header
+  has **New conversation** and **Earlier conversations**, a list where each one can be opened, deleted, or used to jump
+  the lesson to the moment it was asked at.
 - **Typing** works too (a noisy street, a quiet office), and so does the microphone switch. A speaker switch stops
   answers being read aloud, remembered per browser.
 - **"Back to the lesson"** closes the sheet and plays the lesson from 3 seconds before where it stopped. The close
@@ -87,7 +90,7 @@ which already streams the lab tutor's replies and voice:
    service's address (`LESSON_TUTOR_URL`).
 2. The browser calls the service directly, `Authorization: Pass <pass>`, through nginx on the lab's domain
    (`/learning/v1/lesson/…`, the only part of the service published):
-   - `POST /v1/lesson/listen`: a grant for the microphone stream (counted like the lab's: 60 streams a day).
+   - `POST /v1/lesson/listen`: a grant for the microphone stream (recorded, not limited).
    - `POST /v1/lesson/turn`: the question; lines of JSON as the answer is written, then the result.
    - `POST /v1/lesson/speak`: a piece of the answer read aloud, raw PCM streamed as it's made.
 3. The service trusts only the pass for who and which lesson, checks again that the learner may see it, and answers
@@ -102,8 +105,10 @@ make sound from the tap that asked for it, so "Ask" starts the page's audio cont
 
 ## Costs and limits
 
-Per learner per day: **80 questions** (`TURNS_PER_DAY`, counted in `ai_request` as feature `lesson-tutor`) and
-**25,000 characters read aloud** (about 35 long answers; at most about US$2.60 at this account's ElevenLabs rate). Every
+Per learner per day: **80 questions** (`TURNS_PER_DAY`, counted in `ai_request` as feature `lesson-tutor`). Reading
+aloud and the microphone have **no daily limit of ours** on Deepgram (removed 2026-11-21; Deepgram's account is the only
+limit). One exception: when an admin sets the tutor to answer in a lesson's own ElevenLabs voice, that voice is rationed
+to **25,000 characters in 24 hours** (`ELEVEN_SPEAK_CHARS_PER_DAY`, at most about US$2.60 of that account's credits). Every
 call is in the spend ledger with its provider's id (`docs/voice-spend.md`): `lesson-tutor.speak` (ElevenLabs trace id
 or Deepgram request id) and `lesson-tutor.listen` (Deepgram tag `adc-lesson-tutor-listen`).
 

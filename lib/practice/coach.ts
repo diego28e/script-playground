@@ -9,6 +9,7 @@ import { latestGraph, type Answer, type Feedback, type SessionItem } from "@/lib
 import type { TaskContent } from "@/lib/practice/tasks";
 import { lessonText } from "@/lib/lesson-text";
 import { TEACHING } from "@/lib/voice/teaching";
+import { runVoiceTurn } from "@/lib/voice/turn";
 import type { VoiceLanguage } from "@/lib/voice/deepgram";
 import { speakExplainer } from "@/lib/voice/explainer";
 
@@ -17,18 +18,20 @@ import { speakExplainer } from "@/lib/voice/explainer";
 // says what was strong and what was missing, asks the follow-up an interviewer would) and teaches like a teacher when
 // they don't know something (lib/voice/teaching.ts: one concept at a time, what, how, why, in practice, what goes
 // wrong), from the lesson the skill comes from. It never gives a task's answer away before it's answered. It runs on the lab's learning service, like the lesson tutor (docs/lesson-tutor.md), with
-// a pass for the course; one model call a turn, streamed, and nothing kept between turns but what the browser sends.
+// a pass for the course; one model call a turn, streamed. The conversation is stored and its context built on the
+// server (lib/voice/turn.ts, docs/voice-context.md).
 
 /** Turns a learner may take in a day: a conversation is many short ones. */
 export const COACH_TURNS_PER_DAY = 200;
-/** Characters read aloud a learner may get in a day (Flux TTS: at most about US$1.80). */
-export const COACH_SPEAK_CHARS_PER_DAY = 40_000;
-
 export const CoachTurnSchema = z.object({
   question: z.string().trim().min(1).max(4000),
   /** The practice session on screen, and the task in front of the learner (none on the "done for today" screen). */
   sessionId: z.string().max(60).nullable().default(null),
   taskId: z.string().max(60).nullable().default(null),
+  /** The stored conversation this turn continues; null starts one. Absent: a page from before conversations were stored. */
+  conversationId: z.string().max(40).nullable().optional(),
+  /** The learner cut the previous reply off while it was read aloud. */
+  interrupted: z.boolean().default(false),
   history: z
     .array(z.object({ role: z.enum(["learner", "teacher"]), text: z.string().max(4000) }))
     .max(16)
@@ -39,8 +42,8 @@ export const CoachTurnSchema = z.object({
 export type CoachTurnInput = z.input<typeof CoachTurnSchema>;
 
 export type CoachTurnResult =
-  | { ok: true; reply: string; model: string; traceId: string }
-  | { ok: false; reason: "invalid" | "not-found" | "limit" | "quota" | "unavailable"; message: string };
+  | { ok: true; reply: string; model: string; traceId: string; conversationId?: string }
+  | { ok: false; reason: "invalid" | "not-found" | "limit" | "quota" | "unavailable"; message: string; conversationId?: string };
 
 const SYSTEM = {
   en: `You are a teacher, speaking coach and mock interviewer for the course below, talking with one learner who is practising. They want two things: to understand these topics properly, and to explain them well out loud, as they will have to in a technical interview or to a colleague. Your replies are shown to them and read aloud, so write the way you'd talk: short sentences, technical terms as the course uses them.
@@ -142,15 +145,20 @@ function lessonBlock(lessonId: string): Promise<string | null> {
   return value;
 }
 
-/** What the coach is told about where the learner is: the course, the task in front of them, and today's skills. */
-async function situation(userId: string, courseId: string, sessionId: string | null, taskId: string | null, language: Language): Promise<string | null> {
+/**
+ * What the coach is told about where the learner is, as two layers of its context (lib/voice/context.ts): `grounding`,
+ * the course and the lesson the task comes from, which stays the same while the learner is on that task; and `now`,
+ * today's set, the task on screen and whether it's answered, which changes from one turn to the next.
+ */
+async function situation(userId: string, courseId: string, sessionId: string | null, taskId: string | null, language: Language): Promise<{ grounding: string; now: string } | null> {
   const viewer = await viewerById(userId);
   const course = await prisma.course.findFirst({ where: { id: courseId, status: "PUBLISHED", practiceVoice: true, ...courseVisibleTo(viewer) }, select: { title: true, summary: true } });
   if (!course) return null;
   const enrolled = viewer?.role === "ADMIN" || Boolean(await prisma.enrollment.findUnique({ where: { userId_courseId: { userId, courseId } }, select: { userId: true } }));
   if (!enrolled) return null;
 
-  const blocks = [`# The course\n${course.title}${course.summary ? `\n${course.summary}` : ""}`];
+  const stable = [`# The course\n${course.title}${course.summary ? `\n${course.summary}` : ""}`];
+  const blocks: string[] = [];
   const session = sessionId
     ? await prisma.practiceSession.findUnique({
         where: { id: sessionId },
@@ -184,7 +192,7 @@ async function situation(userId: string, courseId: string, sessionId: string | n
     const options = content.form === "choice" ? `\nOptions:\n${((language === "es" ? content.optionsEs : content.optionsEn) ?? []).map((option) => `- ${option}`).join("\n")}` : "";
     const lessonId = graph?.published.skills[item.skillKey]?.lessonId;
     const lesson = lessonId ? await lessonBlock(lessonId) : null;
-    if (lesson) blocks.push(lesson);
+    if (lesson) stable.push(lesson);
     blocks.push(`# The task in front of them (${content.form}; skill: ${label(item.skillKey)})\n${pick(language, content.promptEs, content.promptEn)}${options}`);
     if (answered) {
       blocks.push(
@@ -204,11 +212,17 @@ Only the answer to THIS task's question is protected, because it is graded. So:
   } else {
     blocks.push("# No task in front of them\nThey finished the set, or are between tasks. Offer to ask them questions on today's skills, one at a time, like a mock interview.");
   }
-  return blocks.join("\n\n");
+  return { grounding: stable.join("\n\n"), now: blocks.join("\n\n") };
 }
 
 /** One turn of the conversation with the practice coach of `courseId`. With `onEvent`, the reply is passed on as it's written. */
-export async function runCoachTurn(userId: string, courseId: string, input: CoachTurnInput, onEvent?: (event: LessonTurnEvent) => void): Promise<CoachTurnResult> {
+export async function runCoachTurn(
+  userId: string,
+  courseId: string,
+  input: CoachTurnInput,
+  onEvent?: (event: LessonTurnEvent) => void,
+  clientGone?: () => boolean,
+): Promise<CoachTurnResult> {
   const parsed = CoachTurnSchema.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "invalid", message: parsed.error.issues[0]?.message ?? "Invalid message." };
   const request = parsed.data;
@@ -221,13 +235,6 @@ export async function runCoachTurn(userId: string, courseId: string, input: Coac
   if (!context) return { ok: false, reason: "not-found", message: es ? "El entrenador no está disponible en este curso." : "The coach isn't available for this course." };
   if (today >= COACH_TURNS_PER_DAY) return { ok: false, reason: "limit", message: es ? "Por hoy ya hablaste bastante con el entrenador. Vuelve mañana." : "That's today's time with the coach. Come back tomorrow." };
 
-  const contents: Content[] = [
-    ...request.history.filter((message) => message.text.trim()).map((message) => ({ role: message.role === "learner" ? "user" : "model", parts: [{ text: message.text }] })),
-    { role: "user", parts: [{ text: request.question }] },
-  ];
-  // The conversation must start with the learner: an earlier reply without what it answered is dropped.
-  while (contents.length > 1 && contents[0].role !== "user") contents.shift();
-
   const how = request.spoken
     ? es
       ? "Te habla en voz alta (lo que ves es lo que entendió el micrófono: ignora los fallos de transcripción) y oirá tu respuesta."
@@ -235,6 +242,37 @@ export async function runCoachTurn(userId: string, courseId: string, input: Coac
     : es
       ? "Lo escribió; tu respuesta se muestra y puede leerse en voz alta."
       : "They typed this; your reply is shown and may be read aloud.";
+  const busy = es ? "El entrenador está ocupado ahora. Inténtalo en un rato." : "The coach is busy right now. Try again in a while.";
+  const failed = es ? "El entrenador no pudo responder. Inténtalo de nuevo." : "The coach couldn't answer. Try again.";
+
+  if (request.conversationId !== undefined) {
+    const result = await runVoiceTurn({
+      scope: { userId, kind: "practice", courseId, lessonId: null },
+      conversationId: request.conversationId,
+      question: request.question,
+      language,
+      role: SYSTEM[language],
+      grounding: context.grounding,
+      situation: `${context.now}\n\n${how}`,
+      learnerMeta: { spoken: request.spoken, ...(request.taskId ? { taskId: request.taskId } : {}) },
+      interruptedPrevious: request.interrupted,
+      feature: "practice-coach",
+      models: LESSON_TUTOR_CHAIN,
+      maxOutputTokens: 2000,
+      onEvent,
+      clientGone,
+    });
+    if (!result.ok) return { ok: false, reason: result.reason, message: result.reason === "quota" ? busy : failed, conversationId: result.conversationId };
+    return result;
+  }
+
+  // A page loaded before conversations were stored: it sends the last messages itself, and nothing is kept.
+  const contents: Content[] = [
+    ...request.history.filter((message) => message.text.trim()).map((message) => ({ role: message.role === "learner" ? "user" : "model", parts: [{ text: message.text }] })),
+    { role: "user", parts: [{ text: request.question }] },
+  ];
+  // The conversation must start with the learner: an earlier reply without what it answered is dropped.
+  while (contents.length > 1 && contents[0].role !== "user") contents.shift();
 
   let attemptShown = -1;
   let shown = "";
@@ -258,18 +296,10 @@ export async function runCoachTurn(userId: string, courseId: string, input: Coac
           },
         }
       : {}),
-    config: { systemInstruction: `${SYSTEM[language]}\n\n${context}\n\n${how}`, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 2000 },
+    config: { systemInstruction: `${SYSTEM[language]}\n\n${context.grounding}\n\n${context.now}\n\n${how}`, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 2000 },
   });
-  if (!result.ok) {
-    if (result.reason === "quota") return { ok: false, reason: "quota", message: es ? "El entrenador está ocupado ahora. Inténtalo en un rato." : "The coach is busy right now. Try again in a while." };
-    return { ok: false, reason: "unavailable", message: es ? "El entrenador no pudo responder. Inténtalo de nuevo." : "The coach couldn't answer. Try again." };
-  }
+  if (!result.ok) return { ok: false, reason: result.reason === "quota" ? "quota" : "unavailable", message: result.reason === "quota" ? busy : failed };
   return { ok: true, reply: result.text.trim(), model: result.model, traceId: result.traceId };
-}
-
-export async function canSpeakCoach(userId: string, characters: number): Promise<boolean> {
-  const used = await prisma.providerCharge.aggregate({ where: { userId, workload: "practice-coach.speak", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } }, _sum: { characters: true } });
-  return (used._sum.characters ?? 0) + characters <= COACH_SPEAK_CHARS_PER_DAY;
 }
 
 /** Reads a piece of the coach's reply aloud, in the explainers' voice (lib/voice/explainer.ts). */

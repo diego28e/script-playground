@@ -30,7 +30,7 @@ export class DeepSeekError extends Error {
 export type DeepSeekResult = {
   text: string;
   finishReason: string | null;
-  tokens: { input: number; output: number; thoughts: number; total: number };
+  tokens: { input: number; output: number; thoughts: number; total: number; cached?: number };
   /** The first answer came back blank in JSON mode and this is the retry without it (acceptProse). */
   retried?: boolean;
 };
@@ -119,7 +119,7 @@ async function complete(
   if (onText) return readStream(response, onText);
   const data = (await response.json()) as {
     choices?: { message?: { content?: string | null }; finish_reason?: string | null }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } };
   };
   const choice = data.choices?.[0];
   return {
@@ -132,11 +132,13 @@ async function complete(
       // completion_tokens already includes any reasoning tokens (none with thinking off): not counted twice.
       thoughts: 0,
       total: data.usage?.total_tokens ?? 0,
+      // DeepSeek caches a prompt's repeated beginning by itself and bills it at a fraction: how much of this one it was.
+      ...(data.usage?.prompt_cache_hit_tokens !== undefined ? { cached: data.usage.prompt_cache_hit_tokens } : {}),
     },
   };
 }
 
-type Usage = { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+type Usage = { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number };
 
 /** A streamed completion (server-sent events), passing on the text as it grows. */
 async function readStream(response: Response, onText: (text: string) => void): Promise<DeepSeekResult> {
@@ -170,6 +172,12 @@ async function readStream(response: Response, onText: (text: string) => void): P
   return {
     text: text.trim(),
     finishReason,
-    tokens: { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0, thoughts: 0, total: usage.total_tokens ?? 0 },
+    tokens: {
+      input: usage.prompt_tokens ?? 0,
+      output: usage.completion_tokens ?? 0,
+      thoughts: 0,
+      total: usage.total_tokens ?? 0,
+      ...(usage.prompt_cache_hit_tokens !== undefined ? { cached: usage.prompt_cache_hit_tokens } : {}),
+    },
   };
 }

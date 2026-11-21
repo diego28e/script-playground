@@ -58,6 +58,7 @@ export function LessonTutor({ lessonId, language, audioRef, at: startAt, onClose
 
   const getPass = useCallback(() => getLessonTutorPass(lessonId), [lessonId]);
   const turnContext = useCallback(() => ({ at }), [at]);
+  const scope = useMemo(() => ({ kind: "lesson" as const, lessonId }), [lessonId]);
   const copy = useMemo<VoiceTutorCopy>(() => ({ ...t, about: at !== null ? t.about(clock(at)) : t.aboutLesson }), [t, at]);
 
   return (
@@ -66,6 +67,9 @@ export function LessonTutor({ lessonId, language, audioRef, at: startAt, onClose
       getPass={getPass}
       turnContext={turnContext}
       copy={copy}
+      scope={scope}
+      // An earlier conversation's moment: back to the lesson, a little before it.
+      onSeek={(seconds) => onClose(Math.max(0, seconds - 3))}
       // Back to the lesson: a moment before where it stopped, to pick the thread up again.
       onClose={(resume) => onClose(resume ? Math.max(0, (at ?? 0) - 3) : null)}
     />

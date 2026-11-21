@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Mic, MicOff, Play, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, History, Mic, MicOff, Play, Plus, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { deleteVoiceConversation, getVoiceConversation, getVoiceHistory, type VoiceScope } from "@/actions/voice-conversations";
+import { clock } from "@/components/courses/video-player/player-state";
 import { cn } from "@/lib/utils";
+import type { ConversationMessage, ConversationSummary } from "@/lib/voice/conversations";
 import { DEFAULT_SPEAK_SPEED, SPEAK_SPEEDS } from "@/lib/voice/speed";
 import { Tip } from "@/components/ui/tip";
 import { Orb, type OrbState } from "@/lib/voice/orb";
@@ -15,6 +18,10 @@ import { pieces, SoundBlocked, Speaker, speakable, speechCut, VoiceStream, type 
 // quiet office. Two things open it: the lesson tutor (components/courses/lesson-tutor.tsx, docs/lesson-tutor.md) and
 // the practice coach (components/practice/practice-coach.tsx, docs/practice.md "Widgets"). Each brings its own pass
 // (which decides who answers), what a turn carries besides the words, and its own words on the sheet.
+//
+// A conversation is kept on the server (docs/voice-context.md): a turn names it and sends only the new words, never
+// the history. Opening the sheet picks up the conversation left a few hours ago at most; "New conversation" starts
+// another; the clock lists the earlier ones, to read again, go on with, or delete.
 
 const COPY = {
   es: {
@@ -26,6 +33,18 @@ const COPY = {
     micOn: "Hablar",
     micOff: "Apagar el micrófono",
     speed: (value: string) => `Velocidad de la voz: ${value}. Toca para cambiarla.`,
+    newConversation: "Conversación nueva",
+    history: "Conversaciones anteriores",
+    backToTalk: "Volver a la conversación",
+    noHistory: "Aún no hay conversaciones guardadas aquí.",
+    resumed: "Sigues donde lo dejaste.",
+    turns: (count: number) => (count === 1 ? "1 mensaje" : `${count} mensajes`),
+    jump: (at: string) => `Ir a ${at} de la lección`,
+    remove: "Borrar esta conversación",
+    removeConfirm: "¿Borrar?",
+    removeYes: "Sí, borrar",
+    removeNo: "No",
+    cutOff: "La interrumpiste aquí.",
     soundOn: "Leer las respuestas en voz alta",
     soundOff: "No leer las respuestas en voz alta",
     send: "Enviar",
@@ -46,6 +65,18 @@ const COPY = {
     micOn: "Talk",
     micOff: "Turn the microphone off",
     speed: (value: string) => `Voice speed: ${value}. Tap to change it.`,
+    newConversation: "New conversation",
+    history: "Earlier conversations",
+    backToTalk: "Back to the conversation",
+    noHistory: "No saved conversations here yet.",
+    resumed: "Picking up where you left off.",
+    turns: (count: number) => (count === 1 ? "1 message" : `${count} messages`),
+    jump: (at: string) => `Go to ${at} in the lesson`,
+    remove: "Delete this conversation",
+    removeConfirm: "Delete?",
+    removeYes: "Yes, delete",
+    removeNo: "No",
+    cutOff: "You cut this one off here.",
     soundOn: "Read answers aloud",
     soundOff: "Don't read answers aloud",
     send: "Send",
@@ -59,7 +90,11 @@ const COPY = {
   },
 };
 
-type Message = { role: "learner" | "teacher"; text: string; pending?: boolean; failed?: boolean };
+type Message = { role: "learner" | "teacher"; text: string; pending?: boolean; failed?: boolean; interrupted?: boolean };
+
+/** A stored conversation's messages, as the sheet shows them. */
+const fromStored = (messages: ConversationMessage[]): Message[] =>
+  messages.filter((message) => message.text.trim()).map((message) => ({ role: message.role, text: message.text, ...(message.status === "interrupted" ? { interrupted: true } : {}) }));
 type Phase = OrbState | "idle";
 
 // Whether answers are read aloud, per browser.
@@ -130,11 +165,15 @@ type Props = {
   /** What a turn carries besides the words (the lesson's moment, the practice task), read when the turn is sent. */
   turnContext: () => Record<string, unknown>;
   copy: VoiceTutorCopy;
+  /** What the conversations kept here are about: a lesson, or a course's practice. */
+  scope: VoiceScope;
+  /** Goes to a moment of the lesson a conversation was about; given by the lesson tutor only. */
+  onSeek?: (seconds: number) => void;
   /** Closed; `resume` when the learner chose to go back to what was paused. */
   onClose: (resume: boolean) => void;
 };
 
-export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, onClose }: Props) {
+export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, scope, onSeek, onClose }: Props) {
   const t = useMemo(() => ({ ...COPY[language], ...copy }), [language, copy]);
   const [phase, setPhase] = useState<Phase>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -146,6 +185,13 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
   const speedRef = useRef<number>(DEFAULT_SPEAK_SPEED);
   const [busy, setBusy] = useState(false);
   const [mic, setMic] = useState(true);
+  // The stored conversation the turns go to (none until the first turn of a new one), and the earlier ones.
+  const conversationId = useRef<string | null>(null);
+  const [view, setView] = useState<"talk" | "history">("talk");
+  const [earlier, setEarlier] = useState<ConversationSummary[]>([]);
+  const [removing, setRemoving] = useState<string | null>(null);
+  // The learner cut the last reply off while it was read aloud: the next turn says so, and the teacher is told.
+  const cutOff = useRef(false);
 
   const turnContextRef = useRef(turnContext);
   useEffect(() => {
@@ -229,6 +275,8 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
       const text = question.trim();
       if (!text || closed.current) return;
       stream.current?.pause();
+      const interrupted = cutOff.current || Boolean(speaker?.playing);
+      cutOff.current = false;
       speaker?.stop();
       turn.current?.abort();
       const controller = new AbortController();
@@ -237,7 +285,7 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
       setNotice(null);
       setBusy(true);
       setPhase("thinking");
-      const history = messagesRef.current.filter((message) => !message.failed && !message.pending && message.text.trim()).slice(-10);
+      setView("talk");
       setMessagesBoth((list) => [...list, { role: "learner", text }, { role: "teacher", text: "", pending: true }]);
       const setReply = (reply: string, extra: Partial<Message> = {}) =>
         setMessagesBoth((list) => list.map((message, index) => (index === list.length - 1 ? { ...message, text: reply, ...extra } : message)));
@@ -258,11 +306,11 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
       };
 
       try {
-        const response = await call("turn", { question: text, ...turnContextRef.current(), history, spoken, language }, controller.signal);
+        const response = await call("turn", { question: text, ...turnContextRef.current(), conversationId: conversationId.current, interrupted, spoken, language }, controller.signal);
         if (!response.ok || !response.body) throw new Error(`turn ${response.status}`);
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
-        let result = null as { ok: boolean; reply?: string; message?: string } | null;
+        let result = null as { ok: boolean; reply?: string; message?: string; conversationId?: string } | null;
         for (;;) {
           const { done, value } = await reader.read();
           if (value) buffer += value;
@@ -272,8 +320,11 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
             buffer = buffer.slice(newline + 1);
             newline = buffer.indexOf("\n");
             if (!line) continue;
-            const event = JSON.parse(line) as { type: string; text?: string; result?: typeof result };
-            if (event.type === "delta" && event.text) {
+            const event = JSON.parse(line) as { type: string; text?: string; id?: string; result?: typeof result };
+            if (event.type === "conversation" && event.id) {
+              // The server says which conversation this turn was stored in: the next turns go to the same one.
+              conversationId.current = event.id;
+            } else if (event.type === "delta" && event.text) {
               reply += event.text;
               setReply(reply);
               readOn(false);
@@ -369,9 +420,25 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
     if (!turn.current && !speaker?.playing) setPhase("idle");
   }, [speaker, wantMic]);
 
+  const scopeRef = useRef(scope);
+  /** The earlier conversations, read again (after a turn, a delete, or on opening the list). */
+  const refreshEarlier = useCallback(async () => {
+    const history = await getVoiceHistory(scopeRef.current).catch(() => null);
+    if (history && !closed.current) setEarlier(history.conversations);
+    return history;
+  }, []);
+
   // Opening: the sound is unlocked (this runs from the learner's tap), and the microphone opens.
   useEffect(() => {
     closed.current = false;
+    // The conversation left a few hours ago at most is picked up again, unless the learner has already said something.
+    void refreshEarlier().then((history) => {
+      if (!history?.resume || closed.current || conversationId.current || messagesRef.current.length) return;
+      conversationId.current = history.resume.id;
+      const kept = fromStored(history.resume.messages);
+      setMessagesBoth(() => kept);
+      if (kept.length) setNotice((current) => current ?? t.resumed);
+    });
     const read = setTimeout(() => {
       const on = readSound();
       soundRef.current = on;
@@ -440,10 +507,55 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
     return () => window.removeEventListener("keydown", onKey);
   }, [close]);
 
+  /** A clean start: what's on the sheet goes (it stays in the history) and the next turn opens a new conversation. */
+  const newConversation = () => {
+    turn.current?.abort();
+    speaker?.stop();
+    cutOff.current = false;
+    conversationId.current = null;
+    setMessagesBoth(() => []);
+    setNotice(null);
+    setBusy(false);
+    setView("talk");
+    listen();
+    void refreshEarlier();
+  };
+
+  const openEarlier = async (id: string) => {
+    const found = await getVoiceConversation(id).catch(() => null);
+    if (!found || closed.current) return;
+    turn.current?.abort();
+    speaker?.stop();
+    cutOff.current = false;
+    conversationId.current = found.id;
+    setMessagesBoth(() => fromStored(found.messages));
+    setNotice(null);
+    setBusy(false);
+    setView("talk");
+    listen();
+  };
+
+  const removeEarlier = async (id: string) => {
+    setRemoving(null);
+    const result = await deleteVoiceConversation(id).catch(() => ({ success: false }));
+    if (!result.success) return;
+    setEarlier((list) => list.filter((entry) => entry.id !== id));
+    // The one on the sheet was deleted: the sheet starts clean.
+    if (conversationId.current === id) newConversation();
+  };
+
+  const toggleHistory = () => {
+    if (view === "history") return setView("talk");
+    setView("history");
+    void refreshEarlier();
+  };
+
   const tapOrb = () => {
     speaker?.unlock();
     if (phase === "speaking" || speaker?.playing) {
-      // Cut the teacher off and listen.
+      // Cut the teacher off and listen. The next turn tells the teacher its reply wasn't heard to the end.
+      cutOff.current = true;
+      setMessagesBoth((list) => list.map((message, index) => (index === list.length - 1 && message.role === "teacher" ? { ...message, interrupted: true } : message)));
       speaker?.stop();
       listen();
       return;
@@ -491,6 +603,31 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
           <p className="text-sm font-semibold">{t.title}</p>
           <p className="mt-0.5 truncate text-xs text-white/55">{t.about}</p>
         </div>
+        <Tip content={t.newConversation}>
+          <button
+            type="button"
+            onClick={newConversation}
+            disabled={messages.length === 0 && view === "talk"}
+            aria-label={t.newConversation}
+            className="flex size-9 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70 disabled:opacity-35 disabled:hover:bg-transparent"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+          </button>
+        </Tip>
+        <Tip content={view === "history" ? t.backToTalk : t.history}>
+          <button
+            type="button"
+            onClick={toggleHistory}
+            aria-pressed={view === "history"}
+            aria-label={view === "history" ? t.backToTalk : t.history}
+            className={cn(
+              "flex size-9 items-center justify-center rounded-full hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70",
+              view === "history" ? "bg-white/10 text-white" : "text-white/70",
+            )}
+          >
+            {view === "history" ? <ArrowLeft className="size-4" aria-hidden="true" /> : <History className="size-4" aria-hidden="true" />}
+          </button>
+        </Tip>
         <Tip content={t.speed(speedLabel)}>
           <button
             type="button"
@@ -525,7 +662,60 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-3 [scrollbar-color:rgba(255,255,255,0.25)_transparent]" aria-live="polite">
-        {messages.length === 0 ? (
+        {view === "history" ? (
+          earlier.length === 0 ? (
+            <p className="text-sm leading-relaxed text-white/60">{t.noHistory}</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {earlier.map((entry) => (
+                <li key={entry.id} className={cn("rounded-2xl bg-white/5 px-3.5 py-2.5", entry.id === conversationId.current && "ring-1 ring-signal/50")}>
+                  <button type="button" onClick={() => void openEarlier(entry.id)} className="block w-full rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+                    <span className="line-clamp-2 text-sm text-white/90">{entry.title}</span>
+                    <span className="mt-0.5 block text-xs text-white/50">
+                      {new Date(entry.updatedAt).toLocaleDateString(language === "es" ? "es" : "en", { day: "numeric", month: "short" })} · {t.turns(entry.messages)}
+                    </span>
+                  </button>
+                  <div className="mt-2 flex items-center gap-2">
+                    {entry.at !== null && onSeek && (
+                      <button
+                        type="button"
+                        onClick={() => onSeek(entry.at as number)}
+                        className="inline-flex h-7 items-center gap-1.5 rounded-full bg-white/10 px-2.5 font-mono text-xs tabular-nums text-white/85 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+                        aria-label={t.jump(clock(entry.at))}
+                      >
+                        <Play className="size-2.5" fill="currentColor" aria-hidden="true" />
+                        {clock(entry.at)}
+                      </button>
+                    )}
+                    <span className="flex-1" />
+                    {removing === entry.id ? (
+                      <span className="flex items-center gap-1.5 text-xs">
+                        <span className="text-white/60">{t.removeConfirm}</span>
+                        <button type="button" onClick={() => void removeEarlier(entry.id)} className="rounded-full bg-red-400/20 px-2.5 py-1 font-medium text-red-200 hover:bg-red-400/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70">
+                          {t.removeYes}
+                        </button>
+                        <button type="button" onClick={() => setRemoving(null)} className="rounded-full px-2.5 py-1 text-white/70 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+                          {t.removeNo}
+                        </button>
+                      </span>
+                    ) : (
+                      <Tip content={t.remove}>
+                        <button
+                          type="button"
+                          onClick={() => setRemoving(entry.id)}
+                          aria-label={t.remove}
+                          className="flex size-7 items-center justify-center rounded-full text-white/45 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+                        >
+                          <Trash2 className="size-3.5" aria-hidden="true" />
+                        </button>
+                      </Tip>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : messages.length === 0 ? (
           <p className="text-sm leading-relaxed text-white/60">{t.empty}</p>
         ) : (
           messages.map((message, index) => (
@@ -548,6 +738,7 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, on
                   </div>
                 )}
                 {message.pending && <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-signal/80 motion-reduce:animate-none" aria-hidden="true" />}
+                {message.interrupted && !message.pending && <span className="mt-1 block text-xs text-white/40">{t.cutOff}</span>}
               </div>
             </div>
           ))
