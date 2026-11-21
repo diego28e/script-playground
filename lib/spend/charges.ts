@@ -24,6 +24,8 @@ export const WORKLOADS = {
   "tutor.speak": { label: "Tutor: replies read aloud", tag: "adc-tutor-speak" },
   "tutor.listen": { label: "Tutor: microphone", tag: "adc-tutor-listen" },
   "practice.listen": { label: "Practice: explanations dictated", tag: "adc-practice-listen" },
+  "practice-coach.listen": { label: "Practice coach: microphone", tag: "adc-practice-coach-listen" },
+  "practice-coach.speak": { label: "Practice coach: replies read aloud", tag: "adc-practice-coach-speak" },
 } as const;
 export type Workload = keyof typeof WORKLOADS;
 
@@ -60,6 +62,8 @@ export const LIST_PRICES = {
   // Flash v2.5 (the lesson tutor's spoken answers) costs half a credit a character.
   elevenlabsFlashPer1000: 0.105,
   deepgramSpeakPer1000: 0.03,
+  // Flux TTS, the explainers' voice (deepgram.com/pricing, 2026-11-20, pay as you go).
+  deepgramFluxSpeakPer1000: 0.045,
   deepgramNovaPerMinute: 0.0092,
   // Pre-recorded, one language: Nova-3 monolingual US$0.0048 a minute; captions add keyterms, US$0.0013 a minute.
   deepgramNovaMonoPerMinute: 0.0048,

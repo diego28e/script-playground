@@ -4,8 +4,8 @@ import { useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowUpRight, Globe, Lock, X } from "lucide-react";
-import { addCourseAccess, removeCourseAccess, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
+import { ArrowUpRight, AudioLines, Globe, Lock, SquareTerminal, X } from "lucide-react";
+import { addCourseAccess, removeCourseAccess, setCoursePracticeWidget, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Tip } from "@/components/ui/tip";
 import { cn } from "@/lib/utils";
 
-// Admin → Courses (docs/private-courses.md): each course with who can see it. Switching a course between public and
+// Admin → Courses (docs/private-courses.md): each course with who can see it and the widgets beside its practice. Switching a course between public and
 // private asks first, because it changes what other people can open; the email list is edited in place.
 
 const people = (count: number) => `${count} ${count === 1 ? "person" : "people"}`;
@@ -27,6 +27,24 @@ const ACCOUNT: Record<CourseAccessEntry["account"], string> = {
 const VISIBILITY = [
   { value: "PUBLIC", label: "Everyone", icon: Globe },
   { value: "PRIVATE", label: "Only people I add", icon: Lock },
+] as const;
+
+// The widgets beside a course's practice (docs/practice.md, "Widgets"): each one a switch, on or off per course.
+const WIDGETS = [
+  {
+    widget: "scratchbook",
+    field: "practiceScratchbook",
+    label: "Python scratchbook",
+    about: "A place to run Python beside a task, with an AI that explains the learner's code. For courses whose tasks are code.",
+    icon: SquareTerminal,
+  },
+  {
+    widget: "voice",
+    field: "practiceVoice",
+    label: "Talk it through",
+    about: "A voice coach: the learner says an answer out loud, hears what was missing and gets an interviewer's follow-ups. For courses about explaining.",
+    icon: AudioLines,
+  },
 ] as const;
 
 export function CourseAccessManager({ courses }: { courses: AdminCourse[] }) {
@@ -101,6 +119,11 @@ function CourseCard({ course }: { course: AdminCourse }) {
     if (await run("visibility", () => setCourseVisibility(course.id, next))) {
       toast.success(next === "PRIVATE" ? "The course is private now." : "The course is open to everyone now.");
     }
+  };
+
+  const toggleWidget = async (widget: "scratchbook" | "voice", label: string, on: boolean) => {
+    if (busy) return;
+    if (await run(widget, () => setCoursePracticeWidget(course.id, widget, on))) toast.success(`${label}: ${on ? "on" : "off"} for ${course.title}.`);
   };
 
   const add = async () => {
@@ -209,6 +232,41 @@ function CourseCard({ course }: { course: AdminCourse }) {
             ? "Only the people below, and admins, can see it. For everyone else it doesn't exist."
             : "In the catalog for everyone; anyone signed in can enrol."}
       </p>
+
+      <div className="mt-5 border-t border-border pt-5">
+        <h4 className="text-sm font-medium">Practice widgets</h4>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">What learners get beside this course&apos;s practice. A change shows the next time the practice page loads.</p>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+          {WIDGETS.map(({ widget, field, label, about, icon: Icon }) => {
+            const on = course[field];
+            return (
+              <li key={widget} className="flex items-start gap-3 rounded-lg border border-border px-4 py-3">
+                <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <p id={`${group}-${widget}`} className="text-sm font-medium">
+                    {label}
+                  </p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">{about}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  aria-labelledby={`${group}-${widget}`}
+                  disabled={Boolean(busy)}
+                  onClick={() => void toggleWidget(widget, label, !on)}
+                  className={cn(
+                    "relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60",
+                    on ? "bg-primary" : "bg-muted-foreground/30",
+                  )}
+                >
+                  <span className={cn("inline-block size-5 rounded-full bg-background shadow transition-transform", on ? "translate-x-[1.375rem]" : "translate-x-0.5")} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
       {(isPrivate || course.access.length > 0) && (
         <div className="mt-5 border-t border-border pt-5">

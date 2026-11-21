@@ -121,6 +121,32 @@ The browser streams with the same `VoiceStream` as the tutor; Stop calls its new
 once, sends `CloseStream` so Deepgram sends its last results, waits for it to close (3 s at most) and returns every
 word, the last ones even if they never became final. A stream lasts 5 minutes at most; Dictate again adds to the box.
 
+## The explainer's voice
+
+Every AI reply read aloud is in one voice, chosen for the whole platform in **Admin → Audio**, "The AI explainers'
+voice": the lesson tutor ("Ask the teacher"), the practice coach ("Talk it through") and the lab's tutor
+(`lib/voice/explainer.ts`). The engine is **Deepgram Flux TTS** (`/v2/speak`), Deepgram's current speech model; Aura-2,
+which this page was built on, reads evenly and fast, and is now only the fallback when Flux refuses a request.
+
+- **The voices** (`lib/voice/explainer-voices.ts`): Hannah (the default), Elise, Marcus and Bruce, each with a "Hear
+  it" sample on the admin page. Replies in Spanish are read by a Spanish Flux voice (Valentina), since those four only
+  speak English.
+- **The setting** is a row in `platform_setting` (`lib/settings.ts`, key `explainer.voice`). The platform and the
+  lab's learning service read it and keep it a minute, so a change reaches running conversations within that time,
+  with no restart. If the table can't be read, the voice is Hannah.
+- **On lessons**, a second switch (`explainer.lessonOwnVoice`, off) lets "Ask the teacher" answer in the voice that
+  recorded the lesson instead, as it first did; for an ElevenLabs lesson that spends ElevenLabs credits on every answer.
+- **Speed**: 0.9 of the voice's pace by default, and each learner's own choice on the voice sheet (0.8×, 0.85×, 0.9×,
+  1×; `docs/lesson-tutor.md`, "The voice's speed"). Flux takes 0.5 to 1.5 in steps of 0.05.
+- **Cost**: US$0.045 per 1,000 characters (deepgram.com/pricing, 2026-11-20), against Aura-2's US$0.030. Each call is in
+  the spend ledger as model `flux-tts` with the voice and Deepgram's request id, under the same workloads as before.
+
+Measured with this project's key on 2026-11-20, raw PCM at 24 kHz: the first audio in about 0.3 s (Aura-2: 0.5 s), then
+about 1.35 times faster than it plays; one 656-character passage ran 40 to 42 s at speed 1 and 46 to 49 s at 0.9 (Flux
+pauses like a speaker, so the length varies from one run to the next); 1,900 characters in one request worked. Through
+`speakExplainer`, the coach and the lesson tutor both spoke as Hannah and a Spanish reply as Valentina, each with its
+charge. On the admin page a sample came back in under 6 s and played.
+
 ## Costs and limits
 
 Counted in `ai_request` beside every other AI call (`lib/voice/allowance.ts`), per learner per day: **60 microphone

@@ -1,11 +1,13 @@
+import { getExplainerVoiceSettings } from "@/actions/explainer-voice";
 import { getAudioOptions } from "@/actions/lesson-audio";
+import { ExplainerVoiceSettingsCard } from "@/components/admin/explainer-voice-settings";
 import { LessonAudioManager } from "@/components/admin/lesson-audio-manager";
 
 export const runtime = "nodejs";
 
-/** Admin → Audio: each lesson told by a teacher (docs/lesson-audio.md). */
+/** Admin → Audio: each lesson told by a teacher (docs/lesson-audio.md), and the voice the AI explainers speak in (docs/voice.md). */
 export default async function AdminAudioPage() {
-  const options = await getAudioOptions();
+  const [options, explainer] = await Promise.all([getAudioOptions(), getExplainerVoiceSettings()]);
   return (
     <div className="flex h-full flex-1 flex-col gap-6 px-2 pb-10 md:px-4">
       <div>
@@ -15,6 +17,7 @@ export default async function AdminAudioPage() {
           with a teacher&apos;s delivery. Learners hear it on the lesson page. The work runs on the practice worker in the lab, so you can close this page.
         </p>
       </div>
+      {explainer && <ExplainerVoiceSettingsCard settings={explainer} />}
       {options && options.courses.length > 0 ? (
         <LessonAudioManager options={options} />
       ) : (

@@ -5,6 +5,7 @@
 // subprotocols carrying a temporary token (30 seconds; the stream stays open after it expires).
 
 import { WORKLOADS } from "@/lib/spend/charges";
+import { DEFAULT_SPEAK_SPEED, SPEAK_SPEEDS } from "@/lib/voice/speed";
 
 const API = "https://api.deepgram.com";
 const STREAM = "wss://api.deepgram.com";
@@ -51,6 +52,18 @@ const VOICES: Record<VoiceLanguage, string> = { es: "aura-2-selena-es", en: "aur
 /** Aura-2 takes at most 2,000 characters a request. */
 export const SPEAK_MAX_CHARS = 1900;
 
+export { DEFAULT_SPEAK_SPEED, SPEAK_SPEEDS };
+
+/**
+ * A speed Aura-2 takes: 0.7 to 1.5 in steps of 0.05 (a value off the step is an error), and no slower than 0.9 for
+ * its Spanish voices, which stumble below that (the same page).
+ */
+export function auraSpeed(speed: number | undefined, language: VoiceLanguage): number {
+  const wanted = Number.isFinite(speed) ? (speed as number) : DEFAULT_SPEAK_SPEED;
+  const clamped = Math.min(1.5, Math.max(language === "es" ? 0.9 : 0.7, wanted));
+  return Math.round(clamped * 20) / 20;
+}
+
 /** List prices in millionths of a dollar (deepgram.com/pricing, 2026-11-06), for ai_request's cost column. */
 export const VOICE_PRICES = { fluxPerMinute: 7_800, novaMultiPerMinute: 9_200, keytermsPerMinute: 1_300, speakPer1000Chars: 30_000 };
 export const VOICE_MODELS = { conversation: "deepgram-flux-multi", dictation: "deepgram-nova-3-multi", speak: "deepgram-aura-2" } as const;
@@ -77,7 +90,7 @@ async function grantToken(): Promise<{ token: string; expiresIn: number }> {
 export async function listenGrant(
   mode: ListenMode,
   language: VoiceLanguage,
-  workload: "tutor.listen" | "lesson-tutor.listen" | "practice.listen" = "tutor.listen",
+  workload: "tutor.listen" | "lesson-tutor.listen" | "practice.listen" | "practice-coach.listen" = "tutor.listen",
   /** More words to listen for: a practice task's own terms ("SLO", "Kubernetes"). */
   extraTerms: string[] = [],
 ): Promise<ListenGrant> {
@@ -110,14 +123,14 @@ export async function speakStream(
   text: string,
   language: VoiceLanguage,
   signal?: AbortSignal,
-  options: { voice?: string; workload?: "tutor.speak" | "lesson-tutor.speak" } = {},
+  options: { voice?: string; workload?: "tutor.speak" | "lesson-tutor.speak" | "practice-coach.speak"; speed?: number } = {},
 ): Promise<{ audio: ReadableStream<Uint8Array>; requestId: string | null }> {
   // Only the start is timed: once the audio flows, a long reading takes as long as it takes.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   signal?.addEventListener("abort", () => controller.abort(), { once: true });
   try {
-    const response = await fetch(`${API}/v1/speak?model=${options.voice ?? VOICES[language]}&encoding=linear16&sample_rate=${SPEAK_SAMPLE_RATE}&container=none&tag=${WORKLOADS[options.workload ?? "tutor.speak"].tag}`, {
+    const response = await fetch(`${API}/v1/speak?model=${options.voice ?? VOICES[language]}&encoding=linear16&sample_rate=${SPEAK_SAMPLE_RATE}&container=none&speed=${auraSpeed(options.speed, language)}&tag=${WORKLOADS[options.workload ?? "tutor.speak"].tag}`, {
       method: "POST",
       headers: { Authorization: `Token ${key()}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: text.slice(0, SPEAK_MAX_CHARS) }),

@@ -35,6 +35,9 @@ export type AdminCourse = {
   title: string;
   status: CourseStatus;
   visibility: CourseVisibility;
+  /** The widgets beside the course's practice (docs/practice.md, "Widgets"). */
+  practiceScratchbook: boolean;
+  practiceVoice: boolean;
   moduleCount: number;
   lessonCount: number;
   enrolledCount: number;
@@ -54,6 +57,8 @@ export async function listCoursesForAdmin(): Promise<AdminCourse[]> {
       title: true,
       status: true,
       visibility: true,
+      practiceScratchbook: true,
+      practiceVoice: true,
       access: { orderBy: { createdAt: "asc" }, select: { id: true, email: true } },
       modules: { select: { _count: { select: { lessons: true } } } },
       _count: { select: { enrollments: true } },
@@ -110,6 +115,24 @@ export async function setCourseVisibility(courseId: string, visibility: CourseVi
   try {
     const course = await prisma.course.update({ where: { id: courseId }, data: { visibility }, select: { slug: true } });
     refresh(course.slug);
+    return { success: true };
+  } catch {
+    return { success: false, error: "The course couldn't be updated. Try again." };
+  }
+}
+
+/** Turns one of the widgets beside a course's practice on or off (docs/practice.md, "Widgets"). */
+export async function setCoursePracticeWidget(courseId: string, widget: "scratchbook" | "voice", on: boolean): Promise<Result> {
+  if (!(await requireAdmin())) return { success: false, error: "Only admins can change a course's practice." };
+  if (widget !== "scratchbook" && widget !== "voice") return { success: false, error: "That isn't a widget." };
+  try {
+    const course = await prisma.course.update({
+      where: { id: courseId },
+      data: widget === "scratchbook" ? { practiceScratchbook: Boolean(on) } : { practiceVoice: Boolean(on) },
+      select: { slug: true },
+    });
+    revalidatePath(`/practice/${course.slug}`);
+    revalidatePath("/admin/courses");
     return { success: true };
   } catch {
     return { success: false, error: "The course couldn't be updated. Try again." };

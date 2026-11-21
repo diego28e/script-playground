@@ -259,7 +259,7 @@ export class VoiceStream {
 export function speakable(markdown: string, codeOmitted: string): string {
   return markdown
     .replace(/```[\s\S]*?```/g, ` (${codeOmitted}). `)
-    .replace(/`([^`\n]{1,24})`/g, "$1")
+    .replace(/`([^`\n]{1,60})`/g, "$1")
     .replace(/`[^`\n]+`/g, codeOmitted)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")

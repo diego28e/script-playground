@@ -25,7 +25,7 @@ export async function recordListen(
   userId: string,
   mode: "conversation" | "dictation",
   feature: string,
-  workload: "tutor.listen" | "lesson-tutor.listen" | "practice.listen" = "tutor.listen",
+  workload: "tutor.listen" | "lesson-tutor.listen" | "practice.listen" | "practice-coach.listen" = "tutor.listen",
   runtime: "lab" | "platform" = "lab",
 ) {
   // The price of one full-length stream: an upper bound, since most are much shorter.
@@ -53,8 +53,9 @@ export async function canSpeak(userId: string, characters: number): Promise<bool
 }
 
 /** A reply read aloud: its characters go in inputTokens, and a charge in the spend ledger with Deepgram's request id. */
-export async function recordSpeak(userId: string, characters: number, feature: string, requestId: string | null = null) {
-  await recordCharge({
+export async function recordSpeak(userId: string, characters: number, feature: string, requestId: string | null = null, ledger = true) {
+  // `ledger` false: whatever spoke it (lib/voice/explainer.ts) has already written its charge.
+  if (ledger) await recordCharge({
     provider: "deepgram",
     workload: "tutor.speak",
     model: "aura-2",

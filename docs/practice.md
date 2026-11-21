@@ -546,6 +546,64 @@ graded in about 4 s (5 of 5; and 0 of 5 with one in part, the "48 hours, nothing
 recorded as `ai` evidence, and Dictate minted a grant (recorded in the spend ledger) and showed the "allow the
 microphone" message where the browser refused it. Dictation itself wasn't tried with a real microphone.
 
+## Widgets
+
+What sits beside a course's practice is set per course, in **Admin → Courses**, under "Practice widgets": two switches,
+each reversible at any time (`course.practiceScratchbook`, `course.practiceVoice`; `setCoursePracticeWidget`). A change
+shows the next time the practice page loads.
+
+| Widget | Default | For |
+|---|---|---|
+| **Python scratchbook** (below, "Scratchbook") | On | Courses whose tasks are code. Hidden on explain tasks whatever the switch says. |
+| **Talk it through**, the practice coach | Off | Courses about explaining: the learner says an answer out loud and is pushed like in an interview. |
+
+**The practice coach.** A "Talk it through" button in the corner of the practice page (above the Python button when
+both are on) opens the voice sheet the lesson tutor uses (`components/voice/voice-tutor.tsx`, `docs/lesson-tutor.md`):
+the orb listens hands-free, the reply is shown as it's written and read aloud, then it listens again. It also works
+typed. On a computer the practice moves left to make room. Pressing Dictate on an explain task closes it, so two
+microphones never run at once.
+
+What the coach knows each turn (`lib/practice/coach.ts`): the course, today's set with what was answered, and the task
+on screen.
+
+- **Task not answered yet:** it has the key (the right option, the rubric's points) so it can judge, and is told never
+  to give it away, not even reworded: it lets the learner rehearse, says how the answer is organised and that an area
+  deserves more, and pushes with questions. A conversation isn't counted as a hint.
+- **Task answered:** it has the answer, the grade point by point and the good answer, discusses what was missing, has
+  the learner say a better version, and asks an interviewer's follow-ups.
+- **No task** (the "done for today" screen): it asks questions on today's skills, one at a time, like a mock interview.
+
+It works in two ways, chosen by what the learner just said. **Coaching**, when they explained or answered something:
+40 to 110 words, what was strong, the most important thing missing or wrong, then a follow-up, with a word on delivery
+(leading with the conclusion, filler). **Teaching**, when they ask what something is, how to do it or why, or say they
+don't know: the method the lesson tutor uses (`lib/voice/teaching.ts`, `docs/lesson-tutor.md` "How it teaches"): one
+concept at a time through what, how, why, in practice and what goes wrong, a step or two a reply, with the exact
+commands and files. It teaches from the lesson the task's skill comes from (its text, up to 12,000 characters).
+
+Only the answer to the task on screen is protected. Asked to explain what that task asks, the coach asks for a best
+attempt in the task first (a miss only brings the skill back sooner) and promises the explanation right after. Asked
+about anything else, another topic of the course included, it teaches at once. DeepSeek V4.1 Flash first, then the
+free Gemini models, streamed. The sheet's speed button and what it does are in `docs/lesson-tutor.md`.
+
+Tried locally on 2026-11-20: the two switches saved from Admin → Courses; with Python off and the coach on, the SRE
+practice page showed "Talk it through" and no Python button; the sheet opened, got its microphone grant, answered a
+typed question through the local learning service with a practice pass, and read it aloud at the chosen speed; the
+lesson tutor still worked through the shared sheet. With a real microphone it wasn't tried (the test browser has
+none).
+
+**How it's served.** Like the lesson tutor, from the lab's learning service, because Amplify can't stream: the platform
+gives the browser a pass (`getPracticeCoachPass`, signed with `LESSON_TUTOR_SECRET`) that names the learner and the
+course, and the browser calls the same three routes the lesson tutor uses (`/learning/v1/lesson/listen`, `turn`,
+`speak`). The pass's kind decides who answers, so nginx publishes nothing new. The service checks again that the course
+has the widget on and that the learner may see it and is enrolled.
+
+**Voice and limits.** The coach speaks in the explainers' voice (`docs/voice.md`, "The explainer's voice"): a Deepgram
+Flux voice an admin chooses, not the lesson's ElevenLabs voice, since a practice conversation is many replies and Flux
+costs US$0.045 per 1,000 characters against ElevenLabs credits. Per learner per day: 200 turns (`ai_request`, feature
+`practice-coach`), 40,000 characters read aloud (at most about US$1.80), and the microphone streams of the shared voice
+allowance (`docs/voice.md`). In the spend ledger:
+`practice-coach.listen` and `practice-coach.speak` (`docs/voice-spend.md`).
+
 ## Roadmap
 
 - A mock screening: an interviewer that asks a course's screening questions aloud, listens to a long answer, asks one

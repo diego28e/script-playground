@@ -136,6 +136,10 @@ model Course {
   // its access list (and admins).
   visibility       CourseVisibility         @default(PUBLIC)
   access           CourseAccess[]
+  // The widgets beside this course's practice (docs/practice.md, "Widgets"), switched in Admin → Courses: the Python
+  // scratchbook, for courses whose tasks are code, and the voice coach, to talk a task through out loud.
+  practiceScratchbook Boolean               @default(true)
+  practiceVoice    Boolean                  @default(false)
   sourceRepoUrl    String?
   // The commit the course was last imported from.
   sourceRef        String?
@@ -155,6 +159,17 @@ model Course {
   practiceJobs     PracticeJob[]
 
   @@map("course")
+}
+
+// A platform-wide setting an admin changes from the dashboard (lib/settings.ts): one row per key, its value as JSON.
+// The first ones are the AI explainers' voice (lib/voice/explainer.ts).
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("platform_setting")
 }
 
 // One person who may open a private course, by the email they sign in with. The email is stored lower-cased, and may

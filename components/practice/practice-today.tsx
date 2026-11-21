@@ -21,6 +21,7 @@ import {
 import { PRACTICE_ANSWERED } from "@/components/practice/practice-nav-link";
 import { PracticeTaskEditButton } from "@/components/admin/practice-task-edit-button";
 import { Scratchbook } from "@/components/practice/scratchbook";
+import { DICTATION_STARTED, PracticeCoach } from "@/components/practice/practice-coach";
 import { useLanguage } from "@/components/providers/language-provider";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tip";
@@ -226,9 +227,12 @@ export function PracticeToday({
   courseSlug,
   courseTitle,
   editModels,
+  widgets,
 }: {
   courseSlug: string;
   courseTitle: string;
+  /** The widgets beside this course's practice, as its admin set them (Admin → Courses). */
+  widgets: { scratchbook: boolean; coach: boolean };
   /** For an admin only: the task editor's models, and an Edit button on each task. */
   editModels?: { id: string; label: string }[];
 }) {
@@ -364,7 +368,7 @@ export function PracticeToday({
   return (
     // The scratchbook docks on the right on a computer and the practice moves left to keep the task in view; on a
     // phone it's a sheet below, and the page gets room to scroll above it.
-    <div className="transition-[padding] duration-300 max-lg:pb-[var(--scratchbook-sheet,0px)] lg:pr-[var(--scratchbook-width,0px)]">
+    <div className="transition-[padding] duration-300 max-lg:pb-[var(--scratchbook-sheet,0px)] lg:pr-[max(var(--scratchbook-width,0px),var(--coach-width,0px))]">
       <div className="container mx-auto max-w-3xl px-4 py-10 md:py-14">
         <Link href={`/courses/${courseSlug}`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" aria-hidden="true" /> {t.back}
@@ -486,8 +490,18 @@ export function PracticeToday({
           )}
         </div>
       </div>
-      {/* Python beside a task, except while explaining an idea, where running code doesn't help. */}
-      {state === "ready" && items[index]?.form !== "explain" && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} />}
+      {/* The course's widgets (Admin → Courses). Python beside a task, except while explaining an idea, where running
+          code doesn't help; the coach to talk a task through, also once the set is done. */}
+      {state === "ready" && widgets.scratchbook && items[index]?.form !== "explain" && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} />}
+      {state === "ready" && widgets.coach && (
+        <PracticeCoach
+          courseSlug={courseSlug}
+          sessionId={today?.sessionId ?? null}
+          taskId={items[index]?.id ?? null}
+          language={language}
+          raised={widgets.scratchbook && items[index]?.form !== "explain"}
+        />
+      )}
     </div>
   );
 }
@@ -923,6 +937,8 @@ function ExplainBox({
     }
     before.current = value;
     setTypedBefore(value);
+    // One microphone at a time: an open conversation with the coach closes (components/practice/practice-coach.tsx).
+    window.dispatchEvent(new Event(DICTATION_STARTED));
     try {
       stream.current = await VoiceStream.open(result.grant, result.maxMinutes, {
         onWords: setHeard,

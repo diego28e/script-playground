@@ -7,10 +7,12 @@ import { logAi } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
 import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/lib/tutor/harness";
 import { canListen, canSpeak, LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
-import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, speakStream, voiceConfigured } from "@/lib/voice/deepgram";
+import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, voiceConfigured } from "@/lib/voice/deepgram";
+import { speakExplainer } from "@/lib/voice/explainer";
 import { readPass } from "@/lib/lesson-tutor/pass";
 import { runLessonTurn } from "@/lib/lesson-tutor/turn";
 import { canSpeakLesson, lessonVoice, speakLesson, SPEAK_MAX_CHARS as LESSON_SPEAK_MAX_CHARS } from "@/lib/lesson-tutor/speak";
+import { canSpeakCoach, runCoachTurn, speakCoach } from "@/lib/practice/coach";
 
 // The learning service: the AI tutor's backend, beside the lab hub on the server (docs/ai-tutor.md). It is not
 // published to the internet: it listens on the lab's Docker network, and only the learners' Jupyter servers call
@@ -91,7 +93,12 @@ const ModeSchema = z.object({ mode: z.enum(["GUIDE", "SHOW"]) });
 const ListenSchema = z.object({ mode: z.enum(["conversation", "dictation"]).default("conversation"), language: z.enum(["es", "en"]).default("es") });
 const SpeakSchema = z.object({ text: z.string().trim().min(1).max(SPEAK_MAX_CHARS), language: z.enum(["es", "en"]).default("es") });
 const LessonListenSchema = z.object({ language: z.enum(["es", "en"]).default("es") });
-const LessonSpeakSchema = z.object({ text: z.string().trim().min(1).max(LESSON_SPEAK_MAX_CHARS), language: z.enum(["es", "en"]).default("es") });
+const LessonSpeakSchema = z.object({
+  text: z.string().trim().min(1).max(LESSON_SPEAK_MAX_CHARS),
+  language: z.enum(["es", "en"]).default("es"),
+  /** How fast to read it, as the learner chose (lib/voice/deepgram.ts SPEAK_SPEEDS); the voice's own limits apply. */
+  speed: z.number().min(0.5).max(1.5).optional(),
+});
 
 const LESSON_PREFIX = "/v1/lesson/";
 const ORIGINS = (process.env.LESSON_TUTOR_ORIGINS ?? "https://academiadelcodigo.com,https://www.academiadelcodigo.com")
@@ -110,7 +117,11 @@ function allowOrigin(request: IncomingMessage, response: ServerResponse) {
   response.setHeader("Access-Control-Max-Age", "600");
 }
 
-/** The lesson tutor's routes: the learner and the lesson come from the pass, never from the body. */
+/**
+ * The lesson tutor's routes: the learner and the lesson come from the pass, never from the body. The practice coach
+ * (lib/practice/coach.ts) uses the same three routes with a pass for a course's practice: the pass says which of the
+ * two is answering, so nginx publishes nothing new.
+ */
 async function handleLesson(request: IncomingMessage, response: ServerResponse, path: string) {
   allowOrigin(request, response);
   if (request.method === "OPTIONS") {
@@ -128,8 +139,9 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     const parsed = LessonListenSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "language is invalid." });
     if (!(await canListen(pass.userId))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's microphone time." });
-    const grant = await listenGrant("conversation", parsed.data.language, "lesson-tutor.listen");
-    await recordListen(pass.userId, "conversation", "lesson-tutor-voice", "lesson-tutor.listen");
+    const workload = pass.kind === "practice" ? "practice-coach.listen" : "lesson-tutor.listen";
+    const grant = await listenGrant("conversation", parsed.data.language, workload);
+    await recordListen(pass.userId, "conversation", pass.kind === "practice" ? "practice-coach-voice" : "lesson-tutor-voice", workload);
     return send(response, 200, { ok: true, grant, maxMinutes: LISTEN_MAX_MINUTES });
   }
   if (path === "turn") {
@@ -138,7 +150,8 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     const line = (event: unknown) => {
       if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
     };
-    const result = await runLessonTurn(pass.userId, pass.lessonId, body as never, line).catch((error: Error) => {
+    const turn = pass.kind === "practice" ? runCoachTurn(pass.userId, pass.courseId, body as never, line) : runLessonTurn(pass.userId, pass.lessonId, body as never, line);
+    const result = await turn.catch((error: Error) => {
       logAi("error", { event: "learning.error", path: request.url, error: String(error.stack ?? error).slice(0, 1000) });
       return { ok: false as const, reason: "unavailable" as const, message: "The teacher had a problem. Try again." };
     });
@@ -149,10 +162,14 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     if (!voiceConfigured() && !process.env.ELEVENLABS_API_KEY) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = LessonSpeakSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
-    if (!(await canSpeakLesson(pass.userId, parsed.data.text.length))) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
+    const allowed = pass.kind === "practice" ? canSpeakCoach(pass.userId, parsed.data.text.length) : canSpeakLesson(pass.userId, parsed.data.text.length);
+    if (!(await allowed)) return send(response, 429, { ok: false, reason: "voice-limit", message: "You've used today's reading aloud." });
     const listener = new AbortController();
     response.on("close", () => listener.abort());
-    const audio = await speakLesson(parsed.data.text, await lessonVoice(pass.lessonId), parsed.data.language, listener.signal, { userId: pass.userId, lessonId: pass.lessonId });
+    const audio =
+      pass.kind === "practice"
+      ? await speakCoach(parsed.data.text, parsed.data.language, listener.signal, { userId: pass.userId, courseId: pass.courseId, speed: parsed.data.speed })
+      : await speakLesson(parsed.data.text, await lessonVoice(pass.lessonId), parsed.data.language, listener.signal, { userId: pass.userId, lessonId: pass.lessonId, speed: parsed.data.speed });
     response.writeHead(200, { "Content-Type": `audio/pcm;rate=${SPEAK_SAMPLE_RATE}`, "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
     await pipeline(Readable.fromWeb(audio as NodeReadableStream<Uint8Array>), response).catch(() => {
       // Stopped by the listener, or the stream broke off: what was sent was played.
@@ -223,8 +240,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     // The listener stopping (or leaving) closes this response, which stops Deepgram too.
     const listener = new AbortController();
     response.on("close", () => listener.abort());
-    const { audio, requestId } = await speakStream(parsed.data.text, parsed.data.language, listener.signal);
-    await recordSpeak(learner.userId, parsed.data.text.length, "tutor-voice", requestId);
+    const audio = await speakExplainer(parsed.data.text, parsed.data.language, listener.signal, { workload: "tutor.speak", userId: learner.userId });
+    await recordSpeak(learner.userId, parsed.data.text.length, "tutor-voice", null, false);
     // X-Accel-Buffering: nginx in front of the lab passes the audio on as it comes instead of collecting it.
     response.writeHead(200, { "Content-Type": `audio/pcm;rate=${SPEAK_SAMPLE_RATE}`, "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
     await pipeline(Readable.fromWeb(audio as NodeReadableStream<Uint8Array>), response).catch(() => {
