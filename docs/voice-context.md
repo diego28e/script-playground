@@ -203,6 +203,16 @@ with real cache numbers.
 Also found on the way: the note's output limit (700 tokens) cut some notes mid-line; it is now 1,100, and because the
 most replaceable section is last, a cut there costs the least.
 
+## Daily limits
+
+Two limits of ours remain on the voice teachers, both on the model, none on Deepgram (`docs/voice.md`, "Costs"):
+
+- **Per learner:** 300 questions a day to the lesson teacher and 400 turns a day with the coach (`TURNS_PER_DAY`,
+  `COACH_TURNS_PER_DAY`). Compaction's summaries don't count against them.
+- **For everyone together:** 1,700 requests a day on `deepseek-flash` for learners (`lib/ai/quota.ts`; 2,000 less
+  authoring's 300). The teachers' turns and their summaries (about one for every three turns) both count. Past it, the
+  chain goes on with the free Gemini models, so the teacher keeps answering, on a weaker model.
+
 ## What it doesn't do yet
 
 - **No search over old turns.** Once a detail leaves the note (the oldest lines of `EXACT THINGS GIVEN` go first), the

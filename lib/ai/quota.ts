@@ -20,9 +20,12 @@ export const MODEL_LIMITS: Record<string, { rpm: number; rpd: number }> = {
   "gemini-3.1-flash-lite": { rpm: 15, rpd: 500 },
   "gemini-3.5-flash-lite": { rpm: 15, rpd: 500 },
   // Our own caps: 300 for authoring (about US$2 for drafting a whole course's skill graph twice over) and the rest,
-  // 700, for learners: the tutor's fallback (about US$0.0025 for its usual turn, about 7,000 tokens in and 400 out) and
-  // practice hints (about US$0.0006 each; each learner can ask for 40 a day, lib/practice/hints.ts).
-  "deepseek-flash": { rpm: 60, rpd: 1000 },
+  // 1,700, for learners: the voice teachers' turns and their summaries (lib/voice/turn.ts; about US$0.0025 for a usual
+  // turn, about 7,000 tokens in and 400 out, before the cache discount), the tutor's fallback, and practice hints
+  // (about US$0.0006 each; each learner can ask for 40 a day, lib/practice/hints.ts). Raised from 1,000 on 2026-11-21
+  // with the voice teachers' daily turns (300 and 400 a learner): a long spoken session is a few hundred turns, and
+  // one in three also writes a summary. At most about US$4.25 a day if every learner request were a full turn.
+  "deepseek-flash": { rpm: 60, rpd: 2000 },
   // Claude, for authoring only, on the platform's Anthropic credit. Our own caps: drafting the whole course takes
   // about 130 requests (about US$0.04 each on Opus 5.5 at low effort; check the drafting runs for real figures).
   "claude-opus-5-5": { rpm: 30, rpd: 400 },

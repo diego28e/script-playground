@@ -105,7 +105,8 @@ make sound from the tap that asked for it, so "Ask" starts the page's audio cont
 
 ## Costs and limits
 
-Per learner per day: **80 questions** (`TURNS_PER_DAY`, counted in `ai_request` as feature `lesson-tutor`). Reading
+Per learner per day: **300 questions** (`TURNS_PER_DAY`, counted in `ai_request` as feature `lesson-tutor`; raised from
+80 on 2026-11-21, since "next" is a question and a long session is a few hundred). Reading
 aloud and the microphone have **no daily limit of ours** on Deepgram (removed 2026-11-21; Deepgram's account is the only
 limit). One exception: when an admin sets the tutor to answer in a lesson's own ElevenLabs voice, that voice is rationed
 to **25,000 characters in 24 hours** (`ELEVEN_SPEAK_CHARS_PER_DAY`, at most about US$2.60 of that account's credits). Every

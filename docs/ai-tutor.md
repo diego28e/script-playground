@@ -23,7 +23,7 @@ Status: **draft for review** (decisions from the interview of 2026-11-05; open p
 | Proactive | Never speaks first. Only the panel and the two error buttons. |
 | Tone | Adapts to the learner: starts as a patient senior engineer, then follows the preferences it remembers. |
 | Language | The learner's language (Spanish or English); code, APIs and technical terms stay in English, as in the course. |
-| Model and cost | The free Gemini models first (`gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite`), then DeepSeek V4.1 Flash (`deepseek-flash`, paid, capped at 200 requests a day); every request in a ledger. Admins can choose the model the chain starts at, from the panel. |
+| Model and cost | The free Gemini models first (`gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite`), then DeepSeek V4.1 Flash (`deepseek-flash`, paid, capped at 2,000 requests a day for everything, `lib/ai/quota.ts`); every request in a ledger. Admins can choose the model the chain starts at, from the panel. |
 
 ### A help request, step by step
 

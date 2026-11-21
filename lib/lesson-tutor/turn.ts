@@ -20,8 +20,11 @@ import { runVoiceTurn, type TurnEvent } from "@/lib/voice/turn";
 // that was loaded before the change.
 // How it teaches (one concept at a time: what, how, why, in practice, what goes wrong) is lib/voice/teaching.ts.
 
-/** Questions a learner may ask in a day. */
-export const TURNS_PER_DAY = 80;
+/**
+ * Questions a learner may ask in a day. Teaching goes one step at a time, and "next" is a question, so a long session
+ * is a few hundred of them: raised from 80 on 2026-11-21.
+ */
+export const TURNS_PER_DAY = 300;
 /** The lesson as the teacher knows it, at most this many characters. */
 const LESSON_CHARS = 16_000;
 /** What the teacher had just said, and what it was about to say, around the moment the learner stopped. */

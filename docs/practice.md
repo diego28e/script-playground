@@ -330,7 +330,8 @@ it away anyway is refused and asked for once more: for choice, fill and predict 
 (the check the OCW quizzes' AI hints use; a predict task's output counts as the answer), for code by any code block or
 line of the solution. Hints are kept (`practice_hint`), shown again when the learner goes back, and counted on the
 server into the answer's evidence (`hintsUsed`), so a hinted right answer counts for less; the page says so after
-answering. DeepSeek's daily cap went from 500 to 1,000 for this (300 still authoring's), at about US$0.0006 a hint.
+answering. DeepSeek's daily cap went from 500 to 1,000 for this (300 still authoring's), at about US$0.0006 a hint;
+it is 2,000 since 2026-11-21, for the voice teachers' longer days (`docs/voice-context.md`, "Daily limits").
 
 **Editing a task.** On `/admin/practice`, each task (proven or rejected) has "Edit": every field of its form (prompts,
 options and the right one, accepted answers, code, expected output, tests, solutions, explanations, difficulty and
@@ -599,7 +600,7 @@ has the widget on and that the learner may see it and is enrolled.
 
 **Voice and limits.** The coach speaks in the explainers' voice (`docs/voice.md`, "The explainer's voice"): a Deepgram
 Flux voice an admin chooses, not the lesson's ElevenLabs voice, since a practice conversation is many replies and Flux
-costs US$0.045 per 1,000 characters against ElevenLabs credits. Per learner per day: 200 turns (`ai_request`, feature
+costs US$0.045 per 1,000 characters against ElevenLabs credits. Per learner per day: 400 turns (`ai_request`, feature
 `practice-coach`); reading aloud and the microphone have no daily limit of ours (`docs/voice.md`, "Costs"). The
 conversation is kept and can be continued or read again (`docs/voice-context.md`). In the spend ledger:
 `practice-coach.listen` and `practice-coach.speak` (`docs/voice-spend.md`).

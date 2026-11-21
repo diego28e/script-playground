@@ -21,8 +21,8 @@ import { speakExplainer } from "@/lib/voice/explainer";
 // a pass for the course; one model call a turn, streamed. The conversation is stored and its context built on the
 // server (lib/voice/turn.ts, docs/voice-context.md).
 
-/** Turns a learner may take in a day: a conversation is many short ones. */
-export const COACH_TURNS_PER_DAY = 200;
+/** Turns a learner may take in a day: a conversation is many short ones (raised from 200 on 2026-11-21). */
+export const COACH_TURNS_PER_DAY = 400;
 export const CoachTurnSchema = z.object({
   question: z.string().trim().min(1).max(4000),
   /** The practice session on screen, and the task in front of the learner (none on the "done for today" screen). */
