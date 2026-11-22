@@ -1,15 +1,16 @@
+import type { CompassLanguage } from "@/lib/compass/languages";
 import ReactMarkdown from "react-markdown";
 import { AlertTriangle, ArrowUpRight, BookOpen, Lightbulb } from "lucide-react";
 import type { CardDraft } from "@/lib/compass/cards";
 import type { DocLink } from "@/lib/compass/docs";
 import { cn } from "@/lib/utils";
 
-// A Python Compass card as a learner reads it (docs/compass.md): the admin's editor previews it live, and the guide's
+// A Compass card (Python's or JavaScript's) as a learner reads it (docs/compass.md): the admin's editor previews it live, and the guide's
 // pages will show it. Code on the platform's dark code surface in both themes; the official docs as plain links.
 
 const COPY = {
-  es: { when: "Úsalo cuando", examples: "Ejemplos", mistake: "Error común", why: "Por qué", fix: "Cómo se escribe", prints: "Imprime", raises: "Lanza", docs: "Documentación oficial de Python", related: "Relacionado", inCourse: (n: number, first: string | null) => `Aparece en ${n} lecciones del curso${first ? `, desde la ${first}` : ""}.` },
-  en: { when: "Reach for it when", examples: "Examples", mistake: "Common mistake", why: "Why", fix: "How to write it", prints: "Prints", raises: "Raises", docs: "Official Python documentation", related: "Related", inCourse: (n: number, first: string | null) => `Used in ${n} lessons of the course${first ? `, from ${first}` : ""}.` },
+  es: { when: "Úsalo cuando", examples: "Ejemplos", mistake: "Error común", why: "Por qué", fix: "Cómo se escribe", prints: "Imprime", raises: "Lanza", docs: "Documentación oficial de Python", docsJavaScript: "Documentación oficial (MDN y Node.js)", throws: "Lanza", refused: "tsc lo rechaza con", related: "Relacionado", inCourse: (n: number, first: string | null) => `Aparece en ${n} lecciones del curso${first ? `, desde la ${first}` : ""}.` },
+  en: { when: "Reach for it when", examples: "Examples", mistake: "Common mistake", why: "Why", fix: "How to write it", prints: "Prints", raises: "Raises", docs: "Official Python documentation", docsJavaScript: "Official documentation (MDN and Node.js)", throws: "Throws", refused: "tsc refuses it with", related: "Related", inCourse: (n: number, first: string | null) => `Used in ${n} lessons of the course${first ? `, from ${first}` : ""}.` },
 };
 
 const MARKDOWN = "text-[15px] leading-relaxed [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-[0.88em] [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2.5 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-code [&_pre]:p-3.5 [&_pre]:text-[13px] [&_pre]:text-code-foreground [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-5";
@@ -25,7 +26,10 @@ export function ConceptCard({
   related,
   usage,
   renderExample,
+  compass = "python",
 }: {
+  /** The card's code language: Python, or JavaScript (with TypeScript's types). */
+  compass?: CompassLanguage;
   /** Draws an example another way (the guide's pages make it runnable); the static code and output otherwise. */
   renderExample?: (example: CardDraft["examples"][number], index: number) => React.ReactNode;
   card: CardDraft;
@@ -89,7 +93,7 @@ export function ConceptCard({
           <div className="overflow-hidden rounded-xl ring-1 ring-code-border">
             <Code code={mistake.code} className="rounded-none" />
             <div className="border-t border-code-border bg-code-panel px-3.5 py-2.5 font-mono text-[13px]">
-              <span className="mr-2 text-[10px] uppercase tracking-[0.14em] text-code-muted">{mistake.raises ? t.raises : t.prints}</span>
+              <span className="mr-2 text-[10px] uppercase tracking-[0.14em] text-code-muted">{!mistake.raises ? t.prints : compass === "python" ? t.raises : /^TS\d+$/.test(mistake.raises) ? t.refused : t.throws}</span>
               <span className={cn("whitespace-pre-wrap", mistake.raises ? "text-red-300" : "text-code-foreground")}>{mistake.raises || mistake.output}</span>
             </div>
           </div>
@@ -108,7 +112,7 @@ export function ConceptCard({
       {docs.length > 0 && (
         <section className="space-y-2">
           <h3 className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-            <BookOpen className="size-3.5" aria-hidden="true" /> {t.docs}
+            <BookOpen className="size-3.5" aria-hidden="true" /> {compass === "python" ? t.docs : t.docsJavaScript}
           </h3>
           <ul className="space-y-1">
             {docs.map((link) => (

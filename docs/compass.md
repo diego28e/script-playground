@@ -138,6 +138,51 @@ hides 3 or more. A lesson without a notebook, or with nothing to name, shows no 
 The concept `dataclass` is now labelled "Dataclasses (@dataclass)": next to the module `dataclasses` the two read the
 same. In production, press **Inventory** in Admin → Python once after deploying, so the stored label follows.
 
+## JavaScript (milestone 1, 2026-11-22)
+
+The same Compass for the TypeScript and NestJS course: so its learners are never held back by JavaScript, or by
+TypeScript's type syntax. Decided with the admin on 2026-11-22: the cards cover JavaScript **and** TypeScript's types; a
+card links only to **MDN and the Node.js 26 docs** (TypeScript's own docs aren't indexed, so a card about type syntax
+may have no link); the cards will be **public**, but the lessons that use a construct (codes, titles, counts) only show
+to people who can see the TypeScript course, which is private (for the guide, milestone 2).
+
+Everything is kept apart by `language` ("javascript") in the same tables: concepts, cards and signals. Every function
+of Admin → Python takes the language (Python unless said), so the Python Compass works as before.
+
+| Piece | Where | What |
+|---|---|---|
+| The languages | `lib/compass/languages.ts` (names, safe for the browser), `lib/compass/kit.ts` (server) | Each language's course inventory, docs index and runtime. |
+| The detector | `lib/compass/javascript/detector.ts` | TypeScript 5's compiler API (the platform's own; TypeScript 7, the course's compiler, has no stable JavaScript API) reads code and names the constructs in it and the lines they're on (160 fixed ones, plus built-ins by name): control flow, operators, destructuring, classes, async, modules, regular expressions; built-ins by name (`Math.round`, `.map()`, `new Map`, `structuredClone()`, `node:fs/promises`: keys made from the name, so a new one needs no change); and TypeScript's types (annotations, unions, generics and constraints, `keyof`, mapped and conditional types, `satisfies`, `as const`, type predicates, utility types by name, `// @ts-expect-error`…), with English and Spanish labels and a group. It only reads the code. Built from the course audit's inventory script; two of its false positives are handled: a union of string literals shown alone (`"paid" \| "failed"`) isn't a bitwise or, and a lone `void` isn't the operator. |
+| The course inventory | `scripts/compass-js-inventory.ts` → `lib/compass/javascript/course-inventory.json` and `.md` | Every lesson's ```` ```ts ```` / ```` ```js ```` blocks in course order, the blocks after "## Solutions" counted apart; the same shape as Python's. First run, course at `314c08d` (after the audit's fixes): 278 constructs in 113 lessons, 935 code blocks; 15 known but unused. |
+| The docs index | `scripts/compass-js-docs-index.ts` → `lib/compass/javascript/docs-index.json` | MDN's own search index (its JavaScript pages and the Web API pages of Node's globals: `fetch`, `URL`, `AbortController`, `setTimeout`…) and every heading of the Node.js 26 API pages with the page's own anchor (`fs.html#fspromisesreadfilepath-options`; `all.json` names the API but has no URLs). 6,544 entries: 1,567 from MDN, 4,977 from 64 Node pages. A card's links come only from here; `lib/compass/javascript/docs.ts` finds a concept's candidates (its own pages by name first, then the best title matches). |
+| Cards | `lib/compass/javascript/cards.ts`, through `lib/compass/cards.ts` | The same card, written for Node.js 26 and TypeScript 7: TypeScript examples that compile with no error and print exactly what they say. A mistake may also be code **tsc refuses**, named by its error code (`TS2322`): for type syntax, the most useful kind. The proof runs everything on the grader's TypeScript sandbox (docs/practice.md, "Languages"): an example must compile cleanly and print its output; a mistake must be refused with that code, throw the error it names, or compile and print its output. A card stores its runtime (`CompassCard.runtimeVersion`, the column first named `pythonVersion`: renamed in Prisma only, no migration). |
+| Admin → JavaScript | `/admin/javascript`, `/admin/javascript/<key>` (`app/admin/javascript/`), the shared `components/admin/compass/` | The list in course order, **Inventory**, **Draft the next 5**, and each concept's editor, preview, prove and publish, as for Python. |
+
+Regenerate, from the platform's root (PowerShell or Git Bash), with a checkout of the course repository:
+
+```bash
+pnpm exec tsx scripts/compass-js-inventory.ts <course repository checkout>
+pnpm exec tsx scripts/compass-js-docs-index.ts
+```
+
+Then Admin → JavaScript → **Inventory** loads the concepts (on a deployed platform, from the inventory bundled with it).
+
+Tried on 2026-11-22 locally: the detector on a sample covering both languages named every construct on its line and
+none of the two false positives; the inventory and the docs index as above (every non-type concept the course uses has
+docs candidates, but two); Admin → JavaScript's **Inventory** loaded 293 concepts, **Draft the next 5** drafted the five
+most used (`console.log`, `const`, type annotations, function declarations, template literals), all five were proven on
+the TypeScript sandbox and one was published; Admin → Python and its cards were unchanged. Two fixes came out of it:
+- **Drafting without Claude.** The platform's Anthropic credit was used up, so drafting fell back to DeepSeek, whose
+  plain JSON mode ignores the response schema: it named the card's fields its own way, so every draft failed (for Python
+  too). Each request now spells out the card's exact keys, and a draft missing a field is asked for once more, told which
+  one; the error names the field when it still fails. With that, all five came back valid.
+- **A mistake that both throws and doesn't compile.** `x = 20` on a `const` throws a TypeError when Node runs it, and tsc
+  refuses it too (TS2588). The proof first wanted the code to compile as well, and failed a true claim; it now checks what
+  the card says (the error it throws), and a card that wants tsc's view names its code instead.
+
+Milestone 2: the public guide at `/javascript` with lesson references only for the course's people, the code lens in
+the TypeScript scratchbook, and "JavaScript in this lesson" on the course's lesson pages.
+
 ## Next
 
 1. **Publish the first 20 to 30 cards**, the most used first, then follow "Most needed".

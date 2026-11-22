@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowUpRight, Check, FlaskConical, Pencil, Plus, Rocket, Save, Sparkles, Wand2, X } from "lucide-react";
 import { draftCompassCard, proveCompassCard, publishCompassCard, saveCompassCard, adoptRealOutputs, type CompassConceptView } from "@/actions/compass";
+import { COMPASS } from "@/lib/compass/languages";
 import { ConceptCard } from "@/components/compass/concept-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { CardDraft } from "@/lib/compass/cards";
 import { cn } from "@/lib/utils";
 
-// One concept's card in Admin → Python (docs/compass.md, "Cards"): draft it with a model or by hand, edit it with the
+// One concept's card in Admin → Python or Admin → JavaScript (docs/compass.md, "Cards"): draft it with a model or by hand, edit it with the
 // learner's view beside it, prove it on the grader, publish it. Editing a proven or published version saves a new
 // draft version; the published one stays live until the new one is published.
 
@@ -82,7 +83,7 @@ export function CompassCardEditor({ data }: { data: CompassConceptView }) {
 
   const draft = async () => {
     setDrafting(true);
-    const result = await draftCompassCard(data.concept.key, { model, instruction: selected && instruction.trim() ? instruction.trim() : undefined, fromCardId: selected && instruction.trim() ? selected.id : undefined }).catch(() => null);
+    const result = await draftCompassCard(data.concept.key, { model, instruction: selected && instruction.trim() ? instruction.trim() : undefined, fromCardId: selected && instruction.trim() ? selected.id : undefined }, data.language).catch(() => null);
     setDrafting(false);
     if (!result?.success) return toast.error(result?.error ?? "The draft didn't come back. Try again.", { duration: 10000 });
     toast.success(`Drafted by ${result.model}.${result.dropped.length ? ` Dropped invented links or concepts: ${result.dropped.join(", ")}.` : ""} Prove it next.`);
@@ -99,7 +100,7 @@ export function CompassCardEditor({ data }: { data: CompassConceptView }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
-          <Link href="/admin/python" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <Link href={COMPASS[data.language].admin} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-4" aria-hidden="true" /> All concepts
           </Link>
           <h2 className="text-2xl font-bold tracking-tight">
@@ -207,7 +208,7 @@ function VersionEditor({
 
   const save = async (): Promise<string | null> => {
     setBusy("save");
-    const result = await saveCompassCard(conceptKey, card?.id ?? null, draft).catch(() => null);
+    const result = await saveCompassCard(conceptKey, card?.id ?? null, draft, data.language).catch(() => null);
     setBusy(null);
     if (!result?.success) {
       toast.error(result?.error ?? "The card couldn't be saved.", { duration: 10000 });
@@ -382,8 +383,11 @@ function VersionEditor({
                   <textarea className={cn(CODE, "w-full")} value={mistake.code} spellCheck={false} onChange={(event) => update({ code: event.target.value })} />
                 </Field>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <Field label="Raises (exception name)" hint="Or leave empty and say what it prints instead.">
-                    <Input value={mistake.raises} onChange={(event) => update({ raises: event.target.value })} placeholder="KeyError" />
+                  <Field
+                    label={data.language === "python" ? "Raises (exception name)" : "Throws (error name) or tsc's code"}
+                    hint={data.language === "python" ? "Or leave empty and say what it prints instead." : "TypeError when it throws, TS2322 when tsc refuses it; or leave empty and say what it prints instead."}
+                  >
+                    <Input value={mistake.raises} onChange={(event) => update({ raises: event.target.value })} placeholder={data.language === "python" ? "KeyError" : "TS2322"} />
                   </Field>
                   <Field label="Prints exactly (when it doesn't raise)">
                     <textarea className={cn(CODE, "min-h-[2.5rem] w-full")} value={mistake.output} spellCheck={false} onChange={(event) => update({ output: event.target.value })} />
@@ -398,7 +402,7 @@ function VersionEditor({
 
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">Official docs</h3>
-          <p className="text-xs text-muted-foreground">From the Python 3.12 docs index only: at most 4, the most helpful to a beginner first.</p>
+          <p className="text-xs text-muted-foreground">From the index of {COMPASS[data.language].docs} only: at most 4, the most helpful to a beginner first.</p>
           <ul className="max-h-72 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
             {data.links.map((link) => {
               const chosen = draft.docs.includes(link.key);
@@ -469,7 +473,7 @@ function VersionEditor({
         </div>
         <div className="max-h-[calc(100vh-8rem)] overflow-y-auto rounded-2xl border border-border bg-card p-6">
           {draft.titleEn || draft.titleEs ? (
-            <ConceptCard card={draft} links={links} language={language} related={conceptLabels} usage={{ lessonCount: data.concept.lessonCount, firstLesson: data.concept.firstLesson }} />
+            <ConceptCard card={draft} links={links} language={language} compass={data.language} related={conceptLabels} usage={{ lessonCount: data.concept.lessonCount, firstLesson: data.concept.firstLesson }} />
           ) : (
             <p className="text-sm text-muted-foreground">The card appears here as you write it.</p>
           )}

@@ -6,12 +6,13 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { RefreshCw, Search, Sparkles } from "lucide-react";
 import { draftCompassCard, syncCompassConcepts, type CompassList } from "@/actions/compass";
+import { COMPASS } from "@/lib/compass/languages";
 import { VideoProgress } from "@/components/admin/video-progress";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tip";
 import { cn } from "@/lib/utils";
 
-// Admin → Python (docs/compass.md): every concept in the course's order of use, with where its card stands, to draft,
+// Admin → Python and Admin → JavaScript (docs/compass.md): every concept in the course's order of use, with where its card stands, to draft,
 // prove and publish them most-used first.
 
 type Concept = CompassList["concepts"][number];
@@ -69,7 +70,7 @@ export function CompassConceptList({ data }: { data: CompassList }) {
 
   const sync = async () => {
     setSyncing(true);
-    const result = await syncCompassConcepts().catch(() => null);
+    const result = await syncCompassConcepts(data.language).catch(() => null);
     setSyncing(false);
     if (!result?.success) return toast.error(result?.error ?? "The concepts couldn't be loaded.");
     toast.success(`${result.concepts} concepts loaded from the course inventory (${result.commit.slice(0, 7)}).`);
@@ -85,7 +86,7 @@ export function CompassConceptList({ data }: { data: CompassList }) {
     let failed = 0;
     for (const concept of next) {
       setBatch({ done, total: next.length, current: concept.labelEn });
-      const result = await draftCompassCard(concept.key).catch(() => null);
+      const result = await draftCompassCard(concept.key, {}, data.language).catch(() => null);
       if (!result?.success) failed++;
       done++;
     }
@@ -149,7 +150,7 @@ export function CompassConceptList({ data }: { data: CompassList }) {
       {data.missing.length > 0 && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
           <p className="text-sm font-medium">Learners looked for these and found no card</p>
-          <p className="mb-2 text-xs text-muted-foreground">Searches in the Python guide over the last 90 days: the cards to write or publish next.</p>
+          <p className="mb-2 text-xs text-muted-foreground">Searches in the {COMPASS[data.language].name} guide over the last 90 days: the cards to write or publish next.</p>
           <ul className="flex flex-wrap gap-1.5">
             {data.missing.map((entry) => (
               <li key={entry.text}>
@@ -174,7 +175,7 @@ export function CompassConceptList({ data }: { data: CompassList }) {
         <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
           {shown.map((concept) => (
             <li key={concept.key}>
-              <Link href={`/admin/python/${encodeURIComponent(concept.key)}`} className="grid grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 transition-colors hover:bg-accent/50 md:grid-cols-[3rem_minmax(0,1fr)_9rem_12rem_11rem]">
+              <Link href={`${COMPASS[data.language].admin}/${encodeURIComponent(concept.key)}`} className="grid grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 transition-colors hover:bg-accent/50 md:grid-cols-[3rem_minmax(0,1fr)_9rem_12rem_11rem]">
                 <span className="font-mono text-xs tabular-nums text-muted-foreground">{concept.usageRank ?? "–"}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">{concept.labelEn}</span>

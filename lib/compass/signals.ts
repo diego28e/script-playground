@@ -1,6 +1,7 @@
 import type { CompassSignalKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { EVERYWHERE } from "@/lib/compass/everywhere";
+import type { CompassLanguage } from "@/lib/compass/languages";
 
 // Python Compass's signals (docs/compass.md, "Ranking"): what learners search, read and trip over, so the cards can be
 // ranked by need and the searches that find nothing say which card to write next. Recorded quietly: a signal that
@@ -51,9 +52,9 @@ export async function conceptOfError(concepts: Record<string, number[]>, line: n
 const WEIGHT: Partial<Record<CompassSignalKind, number>> = { RUN_ERROR: 3, PRACTICE_MISS: 3, SEARCH: 2, ASK: 2, EXPLAIN_LINE: 2, CARD_VIEW: 1 };
 
 /** Per concept, over the last `days`: how often learners read it, searched for it and tripped over it, and a demand score. */
-export async function demandByConcept(days = 90): Promise<Map<string, { views: number; searches: number; errors: number; score: number }>> {
+export async function demandByConcept(days = 90, language: CompassLanguage = "python"): Promise<Map<string, { views: number; searches: number; errors: number; score: number }>> {
   const since = new Date(Date.now() - days * 86_400_000);
-  const rows = await prisma.compassSignal.groupBy({ by: ["conceptKey", "kind"], where: { createdAt: { gte: since }, conceptKey: { not: null }, language: "python" }, _count: { _all: true } });
+  const rows = await prisma.compassSignal.groupBy({ by: ["conceptKey", "kind"], where: { createdAt: { gte: since }, conceptKey: { not: null }, language }, _count: { _all: true } });
   const demand = new Map<string, { views: number; searches: number; errors: number; score: number }>();
   for (const row of rows) {
     const entry = demand.get(row.conceptKey!) ?? { views: 0, searches: 0, errors: 0, score: 0 };
@@ -68,8 +69,8 @@ export async function demandByConcept(days = 90): Promise<Map<string, { views: n
 }
 
 /** What learners searched for and didn't find, most asked first: the cards to write next. */
-export async function missingSearches(days = 90, limit = 12): Promise<{ text: string; count: number }[]> {
+export async function missingSearches(days = 90, limit = 12, language: CompassLanguage = "python"): Promise<{ text: string; count: number }[]> {
   const since = new Date(Date.now() - days * 86_400_000);
-  const rows = await prisma.compassSignal.groupBy({ by: ["text"], where: { kind: "SEARCH", empty: true, createdAt: { gte: since }, text: { not: null } }, _count: { _all: true }, orderBy: { _count: { text: "desc" } }, take: limit });
+  const rows = await prisma.compassSignal.groupBy({ by: ["text"], where: { kind: "SEARCH", empty: true, createdAt: { gte: since }, text: { not: null }, language }, _count: { _all: true }, orderBy: { _count: { text: "desc" } }, take: limit });
   return rows.map((row) => ({ text: row.text!, count: row._count._all }));
 }

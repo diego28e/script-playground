@@ -1288,8 +1288,9 @@ model CompassCard {
   conceptId     String
   version       Int
   status        CompassCardStatus @default(DRAFT)
-  // The Python version its examples ran on and its links point to (the lab's).
-  pythonVersion String            @default("3.12")
+  // What its examples ran on: "3.12" (Python), or "Node.js 26.13.1, TypeScript 7.0.2" (JavaScript). The column keeps
+  // its first name, pythonVersion, so no migration is needed.
+  runtimeVersion String           @default("3.12") @map("pythonVersion")
   // What the learner reads, in Spanish and English: title, one-line summary, the explanation (Markdown), when to reach
   // for it, and the LangChain lessons where it shows up.
   content       Json

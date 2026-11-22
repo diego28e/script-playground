@@ -2,13 +2,16 @@ import { Type, type Schema } from "@google/genai";
 import { z } from "zod";
 import { authoringChain, generateWithFallback, isAuthoringModel } from "@/lib/ai/gemini";
 import { gradeCode, type GradeOutcome } from "@/lib/practice/grader";
-import { COURSE_INVENTORY } from "@/lib/compass/concepts";
-import { DOCS_VERSION, docCandidates, docLink, type DocLink } from "@/lib/compass/docs";
+import { DOCS_VERSION, type DocLink } from "@/lib/compass/docs";
+import { compassKit } from "@/lib/compass/kit";
+import { COMPASS, type CompassLanguage } from "@/lib/compass/languages";
+import { SYSTEM_PROMPT as JAVASCRIPT_PROMPT, proveJavaScriptCard } from "@/lib/compass/javascript/cards";
 
 // Python Compass cards (docs/compass.md, "Cards"): what a learner reads about one Python concept. A model drafts it in
 // the platform's voice from the concept, where the course uses it, and the official docs it may link to; the grader
 // proves it (each example prints exactly what the card says; each mistake fails exactly as the card says); the admin
-// reviews and publishes it.
+// reviews and publishes it. The JavaScript Compass's cards have the same shape; what they're written for, link to and
+// run on is theirs (lib/compass/javascript/cards.ts), chosen by `language` (Python unless said).
 
 const Bilingual = { es: z.string().trim().min(1), en: z.string().trim().min(1) };
 
@@ -22,6 +25,7 @@ export const ExampleSchema = z.object({
 export const MistakeSchema = z.object({
   code: z.string().trim().min(1).max(2000),
   // The exception it raises ("KeyError"), or empty when it runs but prints something other than intended (`output`).
+  // JavaScript: the error it throws ("TypeError"), or the TypeScript error code tsc refuses it with ("TS2322").
   raises: z.string().trim().max(60).default(""),
   output: z.string().max(2000).default(""),
   whyEs: z.string().trim().min(1).max(600),
@@ -48,8 +52,9 @@ export const CardSchema = z.object({
 export type CardDraft = z.infer<typeof CardSchema>;
 
 /** The parts stored in CompassCard's JSON columns. */
-export function toColumns(card: CardDraft) {
-  const docs = card.docs.map(docLink).filter((link): link is DocLink => link !== null);
+export function toColumns(card: CardDraft, language: CompassLanguage = "python") {
+  const kit = compassKit(language);
+  const docs = card.docs.map(kit.docLink).filter((link): link is DocLink => link !== null);
   return {
     content: {
       titleEs: card.titleEs,
@@ -64,6 +69,7 @@ export function toColumns(card: CardDraft) {
     examples: { examples: card.examples, mistakes: card.mistakes },
     docs,
     related: card.related,
+    runtimeVersion: kit.runtime,
   };
 }
 
@@ -88,9 +94,10 @@ export function fromColumns(row: { content: unknown; examples: unknown; docs: un
 }
 
 /** What a draft gets wrong before anything runs: links that aren't in the index, concepts that don't exist. */
-export function checkDraft(card: CardDraft, conceptKeys: Set<string>): string[] {
+export function checkDraft(card: CardDraft, conceptKeys: Set<string>, language: CompassLanguage = "python"): string[] {
   const problems: string[] = [];
-  for (const key of card.docs) if (!docLink(key)) problems.push(`The docs link "${key}" isn't in the Python ${DOCS_VERSION} docs index.`);
+  const index = language === "python" ? `the Python ${DOCS_VERSION} docs index` : `the index of ${COMPASS[language].docs}`;
+  for (const key of card.docs) if (!compassKit(language).docLink(key)) problems.push(`The docs link "${key}" isn't in ${index}.`);
   for (const key of card.related) if (!conceptKeys.has(key)) problems.push(`The related concept "${key}" doesn't exist.`);
   for (const mistake of card.mistakes) if (!mistake.raises && !mistake.output) problems.push("A mistake must either raise an error or print an output.");
   return problems;
@@ -144,11 +151,15 @@ THE CARD:
 Return the JSON object only.`;
 
 /** Everything the model needs about one concept. */
-function draftContext(concept: { key: string; group: string; labelEn: string; labelEs: string; lessonCount: number; firstLesson: string | null }, allConcepts: { key: string; labelEn: string }[]) {
-  const usage = COURSE_INVENTORY.concepts.find((entry) => entry.key === concept.key) as
-    | { lessonCount: number; firstLesson: string | null; example: { lesson: string; line: string } | null; lessons: string[] }
-    | undefined;
-  const candidates = docCandidates(concept);
+function draftContext(
+  concept: { key: string; group: string; labelEn: string; labelEs: string; lessonCount: number; firstLesson: string | null },
+  allConcepts: { key: string; labelEn: string }[],
+  language: CompassLanguage,
+) {
+  const kit = compassKit(language);
+  const COURSE_INVENTORY = kit.inventory;
+  const usage = COURSE_INVENTORY.concepts.find((entry) => entry.key === concept.key);
+  const candidates = kit.docCandidates(concept);
   return [
     `# CONCEPT\nkey: ${concept.key}\ngroup: ${concept.group}\nname: ${concept.labelEn} / ${concept.labelEs}`,
     `# HOW THE COURSE USES IT\n${usage?.lessonCount ? `${usage.lessonCount} of ${COURSE_INVENTORY.taughtNotebooks} lessons, first in ${usage.firstLesson}.` : "The course doesn't use it yet."}${usage?.example ? `\nA line from lesson ${usage.example.lesson}: ${usage.example.line}` : ""}`,
@@ -159,6 +170,11 @@ function draftContext(concept: { key: string; group: string; labelEn: string; la
 
 export const DEFAULT_CARD_MODEL = "claude-sonnet-5-5";
 
+const CARD_SHAPE = `{"titleEs": "…", "titleEn": "…", "summaryEs": "…", "summaryEn": "…", "explanationEs": "…", "explanationEn": "…", "whenEs": "…", "whenEn": "…",
+ "examples": [{"code": "…", "output": "…", "noteEs": "…", "noteEn": "…"}],
+ "mistakes": [{"code": "…", "raises": "…", "output": "…", "whyEs": "…", "whyEn": "…", "fixEs": "…", "fixEn": "…"}],
+ "docs": ["…"], "related": ["…"]}`;
+
 /** A model's draft of a concept's card, checked (links, related concepts) but not proven yet. */
 export async function draftCard(input: {
   concept: { key: string; group: string; labelEn: string; labelEs: string; lessonCount: number; firstLesson: string | null };
@@ -168,36 +184,52 @@ export async function draftCard(input: {
   previous?: CardDraft;
   userId: string;
   deadline: number;
+  language?: CompassLanguage;
 }): Promise<{ ok: true; card: CardDraft; model: string; dropped: string[] } | { ok: false; error: string }> {
+  const language = input.language ?? "python";
+  const { docLink } = compassKit(language);
   const chosen = isAuthoringModel(input.model) ? input.model : DEFAULT_CARD_MODEL;
-  const parts = [{ text: draftContext(input.concept, input.allConcepts) }];
+  const parts = [{ text: draftContext(input.concept, input.allConcepts, language) }];
   if (input.previous && input.instruction) {
     parts.push({ text: `# THE CURRENT CARD\n${JSON.stringify(input.previous)}\n\n# THE ADMIN'S INSTRUCTION\n${input.instruction}\n\nRewrite the card following the instruction; keep everything it doesn't mention.` });
   } else {
     parts.push({ text: "Write the card as the JSON object." });
   }
-  const result = await generateWithFallback({
-    feature: "compass",
-    pool: "AUTHORING",
-    userId: input.userId,
-    models: authoringChain(chosen),
-    chosenFirst: true,
-    deadline: input.deadline,
-    contents: [{ role: "user", parts }],
-    config: { systemInstruction: SYSTEM_PROMPT, responseMimeType: "application/json", responseSchema: CARD_RESPONSE, maxOutputTokens: 6000, temperature: 0.4 },
-  });
-  if (!result.ok) return { ok: false, error: result.reason === "quota" ? "Today's authoring allowance is used up." : "No model could write the card in time. Try again." };
-  let card: CardDraft;
-  try {
-    card = CardSchema.parse(JSON.parse(result.text));
-  } catch {
-    return { ok: false, error: `${result.model} didn't answer with a valid card. Try again.` };
+  // The exact keys: a model given only "JSON" (DeepSeek's mode, when Claude isn't available) otherwise names them its own way.
+  parts.push({ text: `# THE JSON OBJECT'S SHAPE (these keys exactly, every one present)\n${CARD_SHAPE}` });
+  // One more try when a field is missing or misshaped (a model in plain JSON mode sometimes drops one), told what it was.
+  let card: CardDraft | null = null;
+  let model = "";
+  let why = "";
+  for (let attempt = 0; attempt < 2 && !card; attempt++) {
+    const retry = attempt ? [{ text: `Your last answer was missing or misshaped this: ${why}. Answer again with the whole card, every key present.` }] : [];
+    const result = await generateWithFallback({
+      feature: "compass",
+      pool: "AUTHORING",
+      userId: input.userId,
+      models: authoringChain(chosen),
+      chosenFirst: true,
+      deadline: input.deadline,
+      contents: [{ role: "user", parts: [...parts, ...retry] }],
+      config: { systemInstruction: language === "javascript" ? JAVASCRIPT_PROMPT : SYSTEM_PROMPT, responseMimeType: "application/json", responseSchema: CARD_RESPONSE, maxOutputTokens: 6000, temperature: 0.4 },
+    });
+    if (!result.ok) return { ok: false, error: result.reason === "quota" ? "Today's authoring allowance is used up." : "No model could write the card in time. Try again." };
+    model = result.model;
+    try {
+      card = CardSchema.parse(JSON.parse(result.text));
+    } catch (error) {
+      // What was wrong with it, so the retry (and the log) can say.
+      const issue = error instanceof z.ZodError ? error.issues[0] : null;
+      why = issue ? `${issue.path.join(".")}: ${issue.message}` : "not JSON";
+      console.info(JSON.stringify({ event: "compass.card_invalid", model, why, attempt: attempt + 1 }));
+    }
   }
+  if (!card) return { ok: false, error: `${model} didn't answer with a valid card (${why}). Try again.` };
   // Links and related concepts the model invented are dropped, and said so.
   const keys = new Set(input.allConcepts.map((entry) => entry.key));
   const dropped = [...card.docs.filter((key) => !docLink(key)), ...card.related.filter((key) => !keys.has(key))];
   card = { ...card, docs: card.docs.filter((key) => docLink(key)), related: card.related.filter((key) => keys.has(key) && key !== input.concept.key) };
-  return { ok: true, card, model: result.model, dropped };
+  return { ok: true, card, model, dropped };
 }
 
 // --- Proof ----------------------------------------------------------------------------------------------------------
@@ -231,7 +263,8 @@ function asMain(code: string): string {
  * Runs every example and mistake on the grader, as the learner would: an example must print exactly its output,
  * without an error; a mistake must raise the exception it names, or print exactly its output.
  */
-export async function proveCard(card: CardDraft): Promise<CardProof> {
+export async function proveCard(card: CardDraft, language: CompassLanguage = "python"): Promise<CardProof> {
+  if (language === "javascript") return proveJavaScriptCard(card);
   const run = (code: string) => gradeCode({ code: asMain(code), timeoutMs: 10_000 });
   const runs = await Promise.all([...card.examples.map((example) => run(example.code)), ...card.mistakes.map((mistake) => run(mistake.code))]);
   const unavailable = runs.find((run) => run.status === "unavailable");

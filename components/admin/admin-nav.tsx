@@ -116,6 +116,17 @@ export function AdminNav() {
                             Python
                         </Link>
                         <Link
+                            href="/admin/javascript"
+                            className={cn(
+                                "transition-colors hover:text-foreground/80",
+                                pathname?.startsWith("/admin/javascript")
+                                    ? "text-foreground"
+                                    : "text-foreground/60"
+                            )}
+                        >
+                            JavaScript
+                        </Link>
+                        <Link
                             href="/admin/lab-access"
                             className={cn(
                                 "transition-colors hover:text-foreground/80",
