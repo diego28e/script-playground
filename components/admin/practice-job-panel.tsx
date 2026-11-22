@@ -55,9 +55,9 @@ export function usePracticeJob(courseId: string) {
     wasActive.current = Boolean(job?.active);
   }, [job, router]);
 
-  const start = async (kind: "WRITE_TASKS" | "DRAFT_LESSONS", model?: string) => {
+  const start = async (kind: "WRITE_TASKS" | "DRAFT_LESSONS", model?: string, changedOnly = false) => {
     setStarting(true);
-    const result = await startPracticeJob(courseId, kind, model).catch(() => null);
+    const result = await startPracticeJob(courseId, kind, model, changedOnly).catch(() => null);
     setStarting(false);
     if (!result?.success) {
       toast.error(result?.error ?? "The job couldn't be started. Try again.");

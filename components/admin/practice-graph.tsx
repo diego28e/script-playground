@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRight, Check, CheckCheck, ListChecks, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
+import { ArrowRight, Check, CheckCheck, ListChecks, Pencil, Plus, RefreshCw, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
 import {
   addSkill,
   approveAllLessons,
@@ -41,7 +41,7 @@ type Course = PracticeGraphData["courses"][number];
 type Lesson = Course["modules"][number]["lessons"][number];
 type Skill = Lesson["practiceSkills"][number];
 type Lang = "es" | "en";
-type Filter = "all" | "todo" | "review" | "approved";
+type Filter = "all" | "todo" | "review" | "approved" | "changed";
 type SkillRef = { id: string; key: string; labelEs: string; labelEn: string; lesson: string; order: number };
 
 // Drafting starts with Claude Opus 5.5 (the platform's Anthropic credit); the list picks another starting model, and a
@@ -61,7 +61,18 @@ function storedModel(): string | null {
 }
 const plain = (text: string) => text.replaceAll("`", "").replaceAll("**", "");
 
-const stateOf = (lesson: Lesson): Exclude<Filter, "all"> => (!lesson.practiceDraft ? "todo" : lesson.practiceDraft.status === "APPROVED" ? "approved" : "review");
+const stateOf = (lesson: Lesson): Exclude<Filter, "all" | "changed"> => (!lesson.practiceDraft ? "todo" : lesson.practiceDraft.status === "APPROVED" ? "approved" : "review");
+
+/**
+ * Whether a lesson's skills may no longer match it (docs/practice.md, "When a lesson changes"): "changed" when an
+ * import found its text different after the skills were drafted, "missing" when the repository no longer has it.
+ */
+const driftOf = (lesson: Lesson): "changed" | "missing" | null => {
+  if (lesson.missingSince) return "missing";
+  if (lesson.practiceDraft && lesson.contentChangedAt && new Date(lesson.contentChangedAt) > new Date(lesson.practiceDraft.draftedAt)) return "changed";
+  return null;
+};
+const shortDate = (value: Date | string) => new Date(value).toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" });
 
 const STATE = {
   todo: { label: "Not drafted", dot: "bg-muted-foreground/40" },
@@ -100,8 +111,11 @@ function CourseReview({
   const lessons = useMemo(() => course.modules.flatMap((courseModule) => courseModule.lessons), [course]);
   const codeLabel = LANGUAGE[practiceLanguage(course.practiceLanguage)].label;
   const counts = useMemo(() => {
-    const result = { all: lessons.length, todo: 0, review: 0, approved: 0 };
-    for (const lesson of lessons) result[stateOf(lesson)] += 1;
+    const result = { all: lessons.length, todo: 0, review: 0, approved: 0, changed: 0 };
+    for (const lesson of lessons) {
+      result[stateOf(lesson)] += 1;
+      if (driftOf(lesson)) result.changed += 1;
+    }
     return result;
   }, [lessons]);
   const approvedSkills = lessons.filter((lesson) => stateOf(lesson) === "approved").reduce((sum, lesson) => sum + lesson.practiceSkills.length, 0);
@@ -229,6 +243,20 @@ function CourseReview({
   };
 
   const draftRemaining = () => startJob("DRAFT_LESSONS", model || undefined);
+
+  // Lessons whose text changed after their skills were drafted: redrafted together, with the chosen model. A redraft
+  // keeps every skill whose key the model keeps (and with it learners' history), and sends the lesson back to review.
+  const changedCount = lessons.filter((lesson) => driftOf(lesson) === "changed").length;
+  const redraftChanged = async () => {
+    const ok = await confirm({
+      title: `Redraft ${changedCount} changed ${changedCount === 1 ? "lesson" : "lessons"}?`,
+      detail: `Starting with ${models.find((entry) => entry.id === model)?.label ?? model ?? "the default model"}`,
+      description:
+        "Their text changed after their skills were drafted. The model drafts each one again from the new text: a skill that keeps its key keeps its place and learners' history, and each lesson goes back to review. Nothing reaches learners until you approve and publish a version.",
+      confirmLabel: "Redraft",
+    });
+    if (ok) void startJob("DRAFT_LESSONS", model || undefined, true);
+  };
 
   // Practice tasks: the published skills' stages that have no proven task yet.
   const missing = useMemo(
@@ -365,6 +393,13 @@ function CourseReview({
               <Sparkles className="mr-2 h-4 w-4" /> Draft {counts.todo} remaining
             </Button>
           )}
+          {!job?.active && changedCount > 0 && (
+            <Tip wrap content="Lessons whose text changed after their skills were drafted, drafted again with the model chosen here">
+              <Button variant="outline" size="sm" onClick={() => void redraftChanged()} disabled={starting}>
+                <RefreshCw className="mr-2 h-4 w-4" /> Redraft {changedCount} changed
+              </Button>
+            </Tip>
+          )}
           {!running && course.latest && (
             <Tip wrap content="One proven task for every stage of every published skill that has none yet">
               <Button variant="outline" size="sm" onClick={() => void writeMissing()} disabled={missing.length === 0 || starting}>
@@ -443,7 +478,7 @@ function LessonRail({
 }) {
   const needle = query.trim().toLowerCase();
   const matches = (lesson: Lesson) =>
-    (filter === "all" || stateOf(lesson) === filter) &&
+    (filter === "all" || (filter === "changed" ? Boolean(driftOf(lesson)) : stateOf(lesson) === filter)) &&
     (!needle ||
       `${lesson.code} ${plain(lesson.title)}`.toLowerCase().includes(needle) ||
       lesson.practiceSkills.some((skill) => `${skill.key} ${lang === "es" ? skill.labelEs : skill.labelEn}`.toLowerCase().includes(needle)));
@@ -469,13 +504,14 @@ function LessonRail({
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Find a lesson or skill" className="h-9 bg-background pl-8" />
         </div>
-        <div role="tablist" aria-label="Show" className="grid grid-cols-4 gap-1 rounded-lg bg-background p-1 text-xs">
+        <div role="tablist" aria-label="Show" className={cn("grid gap-1 rounded-lg bg-background p-1 text-xs", counts.changed ? "grid-cols-5" : "grid-cols-4")}>
           {(
             [
               ["all", "All"],
               ["todo", "To draft"],
               ["review", "Review"],
               ["approved", "Done"],
+              ...(counts.changed ? ([["changed", "Changed"]] as const) : []),
             ] as const
           ).map(([value, label]) => (
             <button
@@ -525,7 +561,12 @@ function LessonRail({
                         </Tip>
                         <span className="sr-only">{STATE[state].label}:</span>
                         <span className="w-10 shrink-0 tabular-nums text-muted-foreground">{lesson.code}</span>
-                        <span className="min-w-0 flex-1 leading-snug">{plain(lesson.title)}</span>
+                        <span className="min-w-0 flex-1 leading-snug">
+                          {plain(lesson.title)}
+                          {driftOf(lesson) && (
+                            <span className="mt-0.5 block text-xs font-medium text-amber-600 dark:text-amber-400">{driftOf(lesson) === "missing" ? "No longer in the course" : "Lesson changed"}</span>
+                          )}
+                        </span>
                         {lesson.practiceSkills.length > 0 && <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{lesson.practiceSkills.length}</span>}
                       </button>
                     </li>
@@ -665,6 +706,18 @@ function LessonDetail({
       </header>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+        {driftOf(lesson) === "changed" && (
+          <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm leading-relaxed">
+            This lesson&apos;s text changed on {shortDate(lesson.contentChangedAt!)}, after its skills were drafted on {shortDate(lesson.practiceDraft!.draftedAt)}. Its skills may
+            no longer match it: redraft it (skills that keep their key keep learners&apos; history), or edit them and approve again.
+          </p>
+        )}
+        {driftOf(lesson) === "missing" && (
+          <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm leading-relaxed">
+            The course repository no longer has this lesson (since {shortDate(lesson.missingSince!)}). It&apos;s kept, with learners&apos; progress, and its skills stay in
+            practice until you delete them and publish a version.
+          </p>
+        )}
         {lesson.objectives.length > 0 && (
           <details className="group rounded-xl bg-muted/40 px-4 py-3 text-sm" open={lesson.practiceSkills.length === 0}>
             <summary className="cursor-pointer font-medium marker:text-muted-foreground">The lesson&apos;s {lesson.objectives.length} objectives</summary>

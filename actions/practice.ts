@@ -51,6 +51,8 @@ export async function getPracticeGraph() {
               code: true,
               title: true,
               objectives: true,
+              contentChangedAt: true,
+              missingSince: true,
               practiceDraft: { select: { status: true, model: true, draftedAt: true, approvedAt: true } },
               practiceSkills: {
                 orderBy: { position: "asc" },

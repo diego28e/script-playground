@@ -26,6 +26,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import type { LessonKind, Prisma } from "@prisma/client";
+import { lessonFingerprint } from "@/lib/lesson-content";
 import { parseLessonVideo } from "@/lib/lesson-video";
 
 type ParsedLesson = {
@@ -39,6 +40,8 @@ type ParsedLesson = {
   objectives: string[];
   sourcePath: string | null;
   body: string | null;
+  // What the lesson says, as a fingerprint (lib/lesson-content.ts); null for a video lesson.
+  contentHash: string | null;
   // The sidecar's JSON, checked; undefined leaves the lesson's video as it is.
   video: Prisma.InputJsonValue | undefined;
 };
@@ -109,6 +112,12 @@ function readNotebook(path: string): string[] {
     .map((cell) => (Array.isArray(cell.source) ? cell.source.join("") : cell.source));
 }
 
+/** Every cell of a notebook, markdown and code, in order: what the lesson says, for its fingerprint. */
+function notebookText(path: string): string {
+  const notebook = JSON.parse(readFileSync(path, "utf8")) as { cells: { cell_type: string; source: string[] | string }[] };
+  return notebook.cells.map((cell) => `${cell.cell_type}\n${Array.isArray(cell.source) ? cell.source.join("") : cell.source}`).join("\n\n");
+}
+
 function parseNotebook(repo: string, path: string, kind: LessonKind): ParsedLesson {
   const markdown = readNotebook(path);
   const titleCell = markdown[0] ?? "";
@@ -128,6 +137,7 @@ function parseNotebook(repo: string, path: string, kind: LessonKind): ParsedLess
     objectives,
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body: null,
+    contentHash: lessonFingerprint(title, objectives, notebookText(path)),
     video: undefined,
   };
 }
@@ -156,6 +166,7 @@ function parseGuide(repo: string, path: string): ParsedLesson {
     objectives: guideObjectives(body),
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body,
+    contentHash: lessonFingerprint(title, guideObjectives(body), body),
     video: undefined,
   };
 }
@@ -187,6 +198,7 @@ function parseVideoLesson(repo: string, path: string): ParsedLesson {
     objectives: [],
     sourcePath: null,
     body: null,
+    contentHash: null,
     video: raw,
   };
 }
@@ -301,6 +313,7 @@ async function save(course: ParsedCourse, publish: boolean, makePrivate: boolean
   const { prisma } = await import("@/lib/prisma");
   const target = new URL(process.env.DATABASE_URL ?? "").host;
   console.log(`  writing to ${target}`);
+  const changedLessons: string[] = [];
   try {
     const removed = await prisma.$transaction(
       async (tx) => {
@@ -318,7 +331,17 @@ async function save(course: ParsedCourse, publish: boolean, makePrivate: boolean
             update: fields,
           });
           for (const [index, { video, ...lesson }] of lessons.entries()) {
-            const data = { ...lesson, position: index + 1 };
+            // A lesson whose text changed since the last import is marked, so the practice skills drafted from the old
+            // text can be found (docs/practice.md, "When a lesson changes"). A row from before fingerprints has none:
+            // a guide's is worked out from its stored text; a notebook's can't be, and it starts being tracked now.
+            const before = await tx.lesson.findUnique({
+              where: { moduleId_slug: { moduleId: savedModule.id, slug: lesson.slug } },
+              select: { contentHash: true, title: true, objectives: true, body: true },
+            });
+            const previous = before?.contentHash ?? (before?.body != null ? lessonFingerprint(before.title, before.objectives, before.body) : null);
+            const changed = Boolean(previous && lesson.contentHash && previous !== lesson.contentHash);
+            if (changed) changedLessons.push(`${courseModule.slug}/${lesson.slug}`);
+            const data = { ...lesson, position: index + 1, missingSince: null, ...(changed ? { contentChangedAt: new Date() } : {}) };
             const savedLesson = await tx.lesson.upsert({
               where: { moduleId_slug: { moduleId: savedModule.id, slug: lesson.slug } },
               create: { ...data, moduleId: savedModule.id },
@@ -337,13 +360,19 @@ async function save(course: ParsedCourse, publish: boolean, makePrivate: boolean
             }
           }
         }
-        return tx.lesson.findMany({
+        const gone = await tx.lesson.findMany({
           where: { module: { courseId: saved.id }, id: { notIn: [...kept] } },
-          select: { slug: true, module: { select: { slug: true } } },
+          select: { id: true, slug: true, missingSince: true, module: { select: { slug: true } } },
         });
+        // Kept, with learners' progress, and marked: Admin → Practice shows them so their skills can be retired.
+        await tx.lesson.updateMany({ where: { id: { in: gone.filter((lesson) => !lesson.missingSince).map((lesson) => lesson.id) } }, data: { missingSince: new Date() } });
+        return gone;
       },
       { timeout: 60_000 },
     );
+    if (changedLessons.length) {
+      console.log(`  changed since the last import (their practice skills may need redrafting, Admin → Practice): ${changedLessons.length}: ${changedLessons.join(", ")}`);
+    }
     if (removed.length) {
       console.log(`  no longer in the repository (kept, with any progress): ${removed.map((lesson) => `${lesson.module.slug}/${lesson.slug}`).join(", ")}`);
     }

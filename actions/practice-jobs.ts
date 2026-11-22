@@ -15,11 +15,14 @@ async function requireAdmin() {
   return session?.user.role === "ADMIN" ? session : null;
 }
 
-/** Starts writing every missing task, or drafting every remaining lesson, for a course. */
-export async function startPracticeJob(courseId: string, kind: "WRITE_TASKS" | "DRAFT_LESSONS", model?: string): Promise<Result<{ job: PracticeJobView }>> {
+/**
+ * Starts writing every missing task, or drafting every remaining lesson, for a course; with `changedOnly`, redrafting
+ * the lessons whose text changed since their skills were drafted.
+ */
+export async function startPracticeJob(courseId: string, kind: "WRITE_TASKS" | "DRAFT_LESSONS", model?: string, changedOnly = false): Promise<Result<{ job: PracticeJobView }>> {
   const session = await requireAdmin();
   if (!session) return { success: false, error: "Only admins can start practice jobs." };
-  const created = await createPracticeJob({ courseId, kind, userId: session.user.id, model });
+  const created = await createPracticeJob({ courseId, kind, userId: session.user.id, model, changedOnly });
   if (!created.ok) return { success: false, error: created.error };
   const job = await jobView(courseId);
   return job ? { success: true, job } : { success: false, error: "The job couldn't be read back." };

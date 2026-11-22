@@ -43,7 +43,20 @@ async function missingStages(courseId: string): Promise<{ skillKey: string; stag
 }
 
 /** Starts a job for a course: refuses when one is already active there, or when there's nothing to do. */
-export async function createPracticeJob(input: { courseId: string; kind: PracticeJobKind; userId: string; model?: string }): Promise<{ ok: true; job: PracticeJob; items: number } | { ok: false; error: string }> {
+/**
+ * Lessons whose text changed after their skills were drafted (lib/lesson-content.ts, docs/practice.md "When a lesson
+ * changes"): an import found them different after the draft's date. Redrafting one clears it.
+ */
+export async function changedLessons(courseId: string): Promise<{ id: string; code: string | null; title: string }[]> {
+  const lessons = await prisma.lesson.findMany({
+    where: { module: { courseId }, contentChangedAt: { not: null }, missingSince: null, practiceDraft: { isNot: null } },
+    orderBy: [{ module: { position: "asc" } }, { position: "asc" }],
+    select: { id: true, code: true, title: true, contentChangedAt: true, practiceDraft: { select: { draftedAt: true } } },
+  });
+  return lessons.filter((lesson) => lesson.practiceDraft && lesson.contentChangedAt! > lesson.practiceDraft.draftedAt).map(({ id, code, title }) => ({ id, code, title }));
+}
+
+export async function createPracticeJob(input: { courseId: string; kind: PracticeJobKind; userId: string; model?: string; changedOnly?: boolean }): Promise<{ ok: true; job: PracticeJob; items: number } | { ok: false; error: string }> {
   const active = await prisma.practiceJob.findFirst({ where: { courseId: input.courseId, status: { in: [...ACTIVE] } }, select: { id: true } });
   if (active) return { ok: false, error: "A job is already running for this course. Stop it first, or wait for it to finish." };
 
@@ -51,14 +64,20 @@ export async function createPracticeJob(input: { courseId: string; kind: Practic
   if (input.kind === "WRITE_TASKS") {
     items = (await missingStages(input.courseId)).map(({ skillKey, stage }, position) => ({ position, skillKey, stage, label: `${skillKey} · ${stage}` }));
   } else {
-    const lessons = await prisma.lesson.findMany({
-      where: { module: { courseId: input.courseId }, practiceDraft: null },
-      orderBy: [{ module: { position: "asc" } }, { position: "asc" }],
-      select: { id: true, code: true, title: true },
-    });
+    // Drafting: the lessons with no draft yet, or (changedOnly) the drafted ones whose text changed since. A lesson no
+    // longer in the repository is never drafted.
+    const lessons = input.changedOnly
+      ? await changedLessons(input.courseId)
+      : await prisma.lesson.findMany({
+          where: { module: { courseId: input.courseId }, practiceDraft: null, missingSince: null },
+          orderBy: [{ module: { position: "asc" } }, { position: "asc" }],
+          select: { id: true, code: true, title: true },
+        });
     items = lessons.map((lesson, position) => ({ position, lessonId: lesson.id, label: lesson.code ?? lesson.title.replaceAll("`", "") }));
   }
-  if (!items.length) return { ok: false, error: input.kind === "WRITE_TASKS" ? "Every published stage already has a proven task." : "Every lesson is drafted." };
+  if (!items.length) {
+    return { ok: false, error: input.kind === "WRITE_TASKS" ? "Every published stage already has a proven task." : input.changedOnly ? "No lesson has changed since its skills were drafted." : "Every lesson is drafted." };
+  }
 
   const job = await prisma.practiceJob.create({
     data: { courseId: input.courseId, kind: input.kind, model: input.model, concurrency: input.kind === "WRITE_TASKS" ? 2 : 1, createdById: input.userId },

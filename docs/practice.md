@@ -390,6 +390,29 @@ that ran past Amplify's 28 s (lib/request-budget.ts) was killed. On 2026-11-10 a
   failed or retrying item and why). It can be closed: opening it again shows where the job is. When the worker hasn't
   been heard from for a minute, it says so and how to check it. When a job ends, a summary stays until closed.
 
+## When a lesson changes
+
+A course is improved after its skills are drafted (an audit rewrites lessons, a lesson is split or dropped). Skills
+drafted from the old text may no longer match the lesson, so the platform keeps track (built 2026-11-23):
+
+- **The import fingerprints each lesson** (`lib/lesson-content.ts`): its title, its objectives, and its text (a guide's
+  Markdown, or every cell of a notebook), line endings ignored. When an import finds a lesson's fingerprint different
+  from the stored one, it sets `lesson.contentChangedAt` and lists the lesson in its output ("changed since the last
+  import"). A lesson imported before fingerprints existed has none: a guide's is worked out from the text already
+  stored, so the first import after this change already finds changed guides; a notebook's can't be, so notebooks are
+  tracked from that import on.
+- **A lesson the repository no longer has** gets `lesson.missingSince`. It stays, with learners' progress, as before.
+- **Admin → Practice shows both.** A lesson is "changed" when its text changed after its skills were drafted
+  (`contentChangedAt` later than the draft's `draftedAt`): it says "Lesson changed" in the list, and a note at the top of
+  the lesson gives both dates. A lesson no longer in the course says so too, and that its skills stay in practice until
+  deleted and a version is published. A "Changed" tab, shown only when there are any, lists both kinds.
+- **"Redraft N changed"** runs the drafting job (`lib/practice/jobs.ts`, `changedOnly`) on just the changed lessons, with
+  the model chosen beside it, so another model can be used when one runs out. A redraft keeps every skill whose key the
+  model keeps, with learners' history and later lessons' prerequisite links, and sends the lesson back to review.
+  Redrafting a lesson clears its mark, since its draft is then newer than the change. Editing the skills by hand and
+  approving again doesn't clear it; redraft, or leave it if the skills still fit.
+- Drafting the remaining lessons ("Draft N remaining") never drafts a lesson that's no longer in the course.
+
 ## Finding and fixing a task
 
 Built 2026-11-09. A task found wrong or unclear is one search away, and fixed with the task editor (above: an edit is

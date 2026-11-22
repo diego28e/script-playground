@@ -302,6 +302,13 @@ model Lesson {
   sourcePath       String?
   // Markdown body of a READING lesson.
   body             String?
+  // A fingerprint of what the lesson says (title, objectives, and its guide or notebook), set by the import, and when
+  // an import last found it different: practice skills drafted before then may no longer match the lesson
+  // (docs/practice.md, "When a lesson changes").
+  contentHash      String?
+  contentChangedAt DateTime?
+  // Set when an import no longer finds the lesson in the repository; it's kept, with learners' progress.
+  missingSince     DateTime?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
   module           CourseModule         @relation(fields: [moduleId], references: [id], onDelete: Cascade)
