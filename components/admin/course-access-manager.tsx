@@ -4,8 +4,8 @@ import { useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowUpRight, AudioLines, Globe, Lock, SquareTerminal, X } from "lucide-react";
-import { addCourseAccess, removeCourseAccess, setCoursePracticeLanguage, setCoursePracticeWidget, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
+import { ArrowUpRight, AudioLines, Globe, Lock, Rocket, SquareTerminal, Undo2, X } from "lucide-react";
+import { addCourseAccess, removeCourseAccess, setCoursePracticeLanguage, setCoursePracticeWidget, setCourseStatus, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
 import { LANGUAGE, PRACTICE_LANGUAGES } from "@/lib/practice/language";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -122,6 +122,34 @@ function CourseCard({ course }: { course: AdminCourse }) {
     }
   };
 
+  // Publishing changes who can open the course: it asks first, saying who that is (docs/private-courses.md).
+  const changeStatus = async (next: "DRAFT" | "PUBLISHED") => {
+    if (next === course.status || busy) return;
+    const ok =
+      next === "PUBLISHED"
+        ? await confirm({
+            title: `Publish “${course.title}”?`,
+            description: isPrivate
+              ? course.access.length
+                ? `It stays private: only the ${people(course.access.length)} on its list and admins will see it in the catalog, open it and enrol. Everyone else still won't know it exists.`
+                : "It stays private, and its list is empty: only admins will see it until you add people below."
+              : "Everyone will see it in the catalog, open its lessons and enrol. Make it private first if it's only for some people.",
+            detail: `${course.moduleCount} modules · ${course.lessonCount} lessons`,
+            confirmLabel: "Publish",
+            icon: Rocket,
+          })
+        : await confirm({
+            title: `Take “${course.title}” back to draft?`,
+            description: course.enrolledCount
+              ? `Nobody but admins will see it: the ${people(course.enrolledCount)} enrolled lose its pages, practice and lab until you publish it again. Their enrolment and progress are kept.`
+              : "Nobody but admins will see it until you publish it again.",
+            confirmLabel: "Back to draft",
+            icon: Undo2,
+          });
+    if (!ok) return;
+    if (await run("status", () => setCourseStatus(course.id, next))) toast.success(next === "PUBLISHED" ? `${course.title} is published.` : `${course.title} is a draft again.`);
+  };
+
   const toggleWidget = async (widget: "scratchbook" | "voice", label: string, on: boolean) => {
     if (busy) return;
     if (await run(widget, () => setCoursePracticeWidget(course.id, widget, on))) toast.success(`${label}: ${on ? "on" : "off"} for ${course.title}.`);
@@ -189,6 +217,10 @@ function CourseCard({ course }: { course: AdminCourse }) {
           >
             {draft ? "Draft" : "Published"}
           </span>
+          <Button variant={draft ? "default" : "outline"} size="sm" onClick={() => void changeStatus(draft ? "PUBLISHED" : "DRAFT")} loading={busy === "status"} loadingLabel={draft ? "Publishing…" : "Saving…"} disabled={Boolean(busy) && busy !== "status"}>
+            {draft ? <Rocket className="mr-1.5 size-3.5" aria-hidden="true" /> : <Undo2 className="mr-1.5 size-3.5" aria-hidden="true" />}
+            {draft ? "Publish" : "Back to draft"}
+          </Button>
           {!draft && (
             <Link href={`/courses/${course.slug}`} className="inline-flex items-center gap-1 text-sm font-medium underline-offset-4 hover:underline">
               Open

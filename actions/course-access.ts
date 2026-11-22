@@ -126,6 +126,24 @@ export async function setCourseVisibility(courseId: string, visibility: CourseVi
   }
 }
 
+/**
+ * Publishes a draft, or takes a published course back to draft (docs/private-courses.md, "Publishing"). A draft is seen
+ * by nobody but admins, whatever its visibility; published, it is in the catalog for everyone (public) or for its list
+ * (private). Back to draft keeps everyone's enrolment and progress, for when it is published again.
+ */
+export async function setCourseStatus(courseId: string, status: CourseStatus): Promise<Result> {
+  if (!(await requireAdmin())) return { success: false, error: "Only admins can publish a course." };
+  if (status !== "DRAFT" && status !== "PUBLISHED") return { success: false, error: "That isn't a course status." };
+  try {
+    const course = await prisma.course.update({ where: { id: courseId }, data: { status }, select: { slug: true } });
+    refresh(course.slug);
+    revalidatePath(`/practice/${course.slug}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "The course couldn't be updated. Try again." };
+  }
+}
+
 /** Turns one of the widgets beside a course's practice on or off (docs/practice.md, "Widgets"). */
 export async function setCoursePracticeWidget(courseId: string, widget: "scratchbook" | "voice", on: boolean): Promise<Result> {
   if (!(await requireAdmin())) return { success: false, error: "Only admins can change a course's practice." };

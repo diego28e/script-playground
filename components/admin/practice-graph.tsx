@@ -16,6 +16,7 @@ import {
   type PracticeGraphData,
   type SkillInput,
   turnOffCodeTasks,
+  recheckCourseCodeTasks,
 } from "@/actions/practice";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -197,6 +198,36 @@ function CourseReview({
     });
   };
 
+  // Re-checking the code flags against the course's language (lib/practice/recheck.ts), batch by batch from here: for
+  // skills drafted under another language's rule (the TypeScript course's, drafted when the rule was Python's).
+  const [recheck, setRecheck] = useState<{ done: number; total: number; on: number; off: number; running: boolean; error?: string } | null>(null);
+  const recheckCodeTasks = async () => {
+    const ok = await confirm({
+      title: `Re-check which skills get ${codeLabel} code tasks?`,
+      detail: `${course.title}: ${allSkills} skills, ${codeSkills} with code tasks now`,
+      description: `A model (DeepSeek, a few US cents for the whole course) reads each skill with the drafter's rule for ${codeLabel} and changes only whether it gets code tasks. Keys, labels, prerequisites, approvals and tasks stay. Keep this page open until it finishes; if it stops, run it again. Learners see the change once you publish a version.`,
+      confirmLabel: "Re-check",
+    });
+    if (!ok) return;
+    let offset = 0;
+    let on = 0;
+    let off = 0;
+    setRecheck({ done: 0, total: allSkills, on, off, running: true });
+    for (;;) {
+      const result = await recheckCourseCodeTasks(course.id, offset).catch(() => null);
+      if (!result || !result.success) {
+        setRecheck({ done: offset, total: allSkills, on, off, running: false, error: result && !result.success ? result.error : "The server couldn't be reached. Run it again." });
+        return;
+      }
+      on += result.changed.filter((change) => change.runnable).length;
+      off += result.changed.filter((change) => !change.runnable).length;
+      offset += result.checked;
+      setRecheck({ done: offset, total: result.total, on, off, running: result.next !== null });
+      if (result.next === null) break;
+    }
+    toast.success(on + off ? `${on + off} skills changed. Publish a version to apply it.` : "Every skill's code tasks were already right.");
+  };
+
   const draftRemaining = () => startJob("DRAFT_LESSONS", model || undefined);
 
   // Practice tasks: the published skills' stages that have no proven task yet.
@@ -282,8 +313,31 @@ function CourseReview({
                   {turningOff ? "Turning off…" : "Turn off for all"}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => void recheckCodeTasks()}
+                disabled={Boolean(recheck?.running) || turningOff || Boolean(running)}
+                className="font-medium text-foreground underline underline-offset-4 hover:no-underline disabled:opacity-50"
+              >
+                Re-check for {codeLabel}
+              </button>
             </p>
           )}
+          {recheck && (
+            <p role="status" className={cn("text-sm", recheck.error ? "text-destructive" : "text-muted-foreground")}>
+              {recheck.running && <DotLoader className="mr-2 inline-block" />}
+              {recheck.running ? `Re-checking: ${recheck.done} of ${recheck.total} skills` : `Re-checked ${recheck.done} of ${recheck.total} skills`}
+              {` · ${recheck.on} now get ${codeLabel} code tasks, ${recheck.off} now questions only`}
+              {recheck.error ? ` · ${recheck.error}` : !recheck.running && recheck.on + recheck.off > 0 ? " · publish a version to apply it" : ""}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Code tasks for this course are written in {codeLabel}.{" "}
+            <a href="/admin/courses" className="underline underline-offset-4 hover:no-underline">
+              Change it in Admin → Courses
+            </a>
+            .
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">

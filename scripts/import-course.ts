@@ -60,6 +60,8 @@ type ParsedCourse = {
   sourceRepoUrl: string | null;
   sourceRef: string;
   modules: ParsedModule[];
+  // The language of its code practice, from its lessons (detectLanguage); set on a course's first import only.
+  language: { practice: "python" | "typescript"; python: number; typescript: number };
 };
 
 const { values } = parseArgs({
@@ -241,14 +243,42 @@ function parseCourse(repo: string, slug?: string): ParsedCourse {
     .filter((entry) => entry.isDirectory() && /^\d{2}-/.test(entry.name))
     .map((entry) => entry.name)
     .sort();
+  const modules = folders.map((folder) => parseModule(repo, folder));
   return {
     slug: slug ?? basename(remote ?? repo),
     title: readme.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? basename(repo),
     summary: readme.match(/^>\s+(.+)$/m)?.[1]?.trim() ?? null,
     sourceRepoUrl: remote,
     sourceRef: git(repo, ["rev-parse", "HEAD"]),
-    modules: folders.map((folder) => parseModule(repo, folder)),
+    modules,
+    language: detectLanguage(repo, modules),
   };
+}
+
+/**
+ * The language of a course's code practice (docs/practice.md, "Languages"), from what its lessons have the learner
+ * write: Python code cells in notebooks and ```python blocks in guides, against ```ts / ```typescript blocks. Whichever
+ * there is more of wins; a course with neither (the SRE course: shell and prose) is Python, the platform's default, and
+ * its skills get no code tasks anyway. The lessons, not files like tsconfig.json or package.json, because those can sit
+ * in a repository for other reasons, while the lessons are exactly what the practice drills.
+ */
+function detectLanguage(repo: string, modules: ParsedModule[]): ParsedCourse["language"] {
+  let python = 0;
+  let typescript = 0;
+  for (const lesson of modules.flatMap((courseModule) => courseModule.lessons)) {
+    if (lesson.body) {
+      python += lesson.body.match(/^\s*```(?:python|py)\s*$/gm)?.length ?? 0;
+      typescript += lesson.body.match(/^\s*```(?:ts|typescript|tsx)\s*$/gm)?.length ?? 0;
+    } else if (lesson.sourcePath?.endsWith(".ipynb")) {
+      try {
+        const notebook = JSON.parse(readFileSync(join(repo, lesson.sourcePath), "utf8")) as { cells?: { cell_type: string }[] };
+        python += (notebook.cells ?? []).filter((cell) => cell.cell_type === "code").length;
+      } catch {
+        // An unreadable notebook says nothing about the language.
+      }
+    }
+  }
+  return { practice: typescript > python ? "typescript" : "python", python, typescript };
 }
 
 function printSummary(course: ParsedCourse) {
@@ -256,6 +286,7 @@ function printSummary(course: ParsedCourse) {
   const byKind = Object.fromEntries(["NOTEBOOK", "READING", "PROJECT", "VIDEO"].map((kind) => [kind, lessons.filter((lesson) => lesson.kind === kind).length]));
   console.log(`${course.title} (${course.slug}) @ ${course.sourceRef.slice(0, 7)}`);
   console.log(`  ${course.modules.length} modules, ${lessons.length} lessons ${JSON.stringify(byKind)}`);
+  console.log(`  code practice: ${course.language.practice === "typescript" ? "TypeScript" : "Python"} (${course.language.typescript} TypeScript and ${course.language.python} Python code blocks in its lessons; set on its first import only)`);
   const withVideo = lessons.filter((lesson) => lesson.video !== undefined).map((lesson) => lesson.slug);
   if (withVideo.length) console.log(`  with a video from the repository: ${withVideo.join(", ")}`);
   const missing = lessons.filter((lesson) => lesson.kind !== "READING" && lesson.kind !== "VIDEO" && lesson.objectives.length === 0).map((lesson) => lesson.slug);
@@ -275,7 +306,7 @@ async function save(course: ParsedCourse, publish: boolean, makePrivate: boolean
       async (tx) => {
         const saved = await tx.course.upsert({
           where: { slug: course.slug },
-          create: { slug: course.slug, title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), status: publish ? "PUBLISHED" : "DRAFT", visibility: makePrivate ? "PRIVATE" : "PUBLIC" },
+          create: { slug: course.slug, title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), status: publish ? "PUBLISHED" : "DRAFT", visibility: makePrivate ? "PRIVATE" : "PUBLIC", practiceLanguage: course.language.practice },
           update: { title: course.title, summary: course.summary, sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef, importedAt: new Date(), ...(publish ? { status: "PUBLISHED" as const } : {}), ...(makePrivate ? { visibility: "PRIVATE" as const } : {}) },
         });
         const kept = new Set<string>();
@@ -317,8 +348,10 @@ async function save(course: ParsedCourse, publish: boolean, makePrivate: boolean
       console.log(`  no longer in the repository (kept, with any progress): ${removed.map((lesson) => `${lesson.module.slug}/${lesson.slug}`).join(", ")}`);
     }
     console.log(`  saved${publish ? " and published" : " (status unchanged; --publish shows a draft in the catalog)"}`);
-    const { visibility } = await prisma.course.findUniqueOrThrow({ where: { slug: course.slug }, select: { visibility: true } });
+    const { visibility, practiceLanguage } = await prisma.course.findUniqueOrThrow({ where: { slug: course.slug }, select: { visibility: true, practiceLanguage: true } });
     console.log(visibility === "PRIVATE" ? "  private: only the people on its list (Admin → Courses) and admins see it" : "  public: everyone sees it once published (--private keeps it to a list)");
+    // An existing course keeps its language (an admin may have chosen it): say so when it isn't what was detected.
+    if (practiceLanguage !== course.language.practice) console.log(`  code practice stays ${practiceLanguage === "typescript" ? "TypeScript" : "Python"}, as set before (change it in Admin → Courses)`);
   } finally {
     await prisma.$disconnect();
   }

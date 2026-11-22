@@ -10,6 +10,7 @@ import { addDiscoveryToCourse, courseDiscoveries, setDiscoveryStatus, type Cours
 import { draftLesson, normaliseKey } from "@/lib/practice/draft";
 import { publishGraph, type PublishedGraph } from "@/lib/practice/graph";
 import { aiEditTask, generateTask, saveTaskEdit, type TaskContent, type TaskForm } from "@/lib/practice/tasks";
+import { recheckCodeFlags, type RecheckResult } from "@/lib/practice/recheck";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 
 // The practice skill graph's admin page (/admin/practice, docs/practice.md): draft each lesson's skills with a model,
@@ -133,7 +134,7 @@ export async function approveAllLessons(courseId: string): Promise<Result<{ appr
 }
 
 /**
- * Turns Python code tasks off for every skill of a course that has them on: for a course that isn't about Python,
+ * Turns code tasks off for every skill of a course that has them on: for a course that isn't about code,
  * whose skills then get questions and spoken explanations (lib/practice/graph.ts skillForms). Approvals stay as they
  * are; it reaches learners with the next published version.
  */
@@ -142,6 +143,19 @@ export async function turnOffCodeTasks(courseId: string): Promise<Result<{ chang
   const { count } = await prisma.practiceSkill.updateMany({ where: { courseId, runnable: true }, data: { runnable: false } });
   refresh();
   return { success: true, changed: count };
+}
+
+/**
+ * Re-checks, for the next batch of a course's skills, whether code tasks in the course's language can practise them
+ * (lib/practice/recheck.ts), and saves the flags that change. The page calls it batch by batch.
+ */
+export async function recheckCourseCodeTasks(courseId: string, offset: number): Promise<Result<Extract<RecheckResult, { ok: true }>>> {
+  const session = await requireAdmin();
+  if (!session) return denied;
+  const result = await recheckCodeFlags({ courseId, offset: Math.max(0, Math.floor(Number(offset) || 0)), userId: session.user.id, deadline: Date.now() + REQUEST_BUDGET_MS });
+  if (!result.ok) return { success: false, error: result.error };
+  if (result.changed.length) refresh();
+  return { success: true, ...result };
 }
 
 const SkillSchema = z.object({

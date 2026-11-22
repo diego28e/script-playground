@@ -634,6 +634,34 @@ migration `course_practice_language`; `lib/practice/language.ts`). It decides th
 language new code tasks are written in. A task keeps the language it was written in (`content.language`, left out for
 Python), so switching a course back and forth loses nothing, and every answer is graded as its task was proven.
 
+**Set from the course on its first import** (`scripts/import-course.ts`, `detectLanguage`). The importer counts what the
+lessons have the learner write: Python code cells in notebooks and ```` ```python ```` blocks in guides, against
+```` ```ts ```` / ```` ```typescript ```` blocks; whichever there is more of wins, and a course with neither is Python, the
+default (the SRE course: shell and prose, and its skills get no code tasks anyway). The lessons rather than files like
+`tsconfig.json` or `package.json`, since those can sit in a repository for other reasons while the lessons are what the
+practice drills. The TypeScript course: 807 TypeScript blocks and no Python. Only a new course gets it: a re-import
+never changes a course's language, so an admin's choice stays, and the importer says so when it differs from what it
+detected. Admin → Practice says under the course's bar which language its code tasks are written in, with a link to
+change it.
+
+**Skills drafted under the wrong language.** A skill's code flag (`runnable`, "code tasks can practise it") is decided
+when it is drafted, against the rule of the course's language then. Before TypeScript had one, every course was drafted
+against Python's ("plain Python and the course's packages … false when it isn't about Python at all"), so a TypeScript
+course drafted then has flags a model guessed at. Redrafting the whole course would replace them, but costs a full
+draft with Opus and loses edits. **Re-check for <language>** in Admin → Practice's course bar (`lib/practice/recheck.ts`,
+`recheckCourseCodeTasks`) instead asks DeepSeek, 24 skills a call, to read each skill with the drafter's own rule for the
+course's language, and changes only the flag: keys, labels, prerequisites, approvals and tasks stay. It runs from the
+page, batch by batch, with its progress and what changed; a few US cents for a whole course. It reaches learners with
+the next published version.
+
+Tried on 2026-11-22 locally: eight lessons of the TypeScript course drafted the way production's were (the Python rule,
+which `draftPrompt("python")` returns word for word) flagged 24 of 43 skills for code, close to production's 341 of 550.
+The flags were inconsistent: every skill of 07.05 (conditional types, checkable by tsc) was questions only, and so was
+"read TS18046 and TS2322", while "choose type or interface" (a judgement) got code. The re-check changed 12: ten in the
+right direction by my reading (every type-level skill to code, the judgement to questions), two debatable ("diagnose
+TS2769…" to questions only, though tsc in one file reports it, and a module augmentation skill). A second run changed 2
+more borderline skills, so check a few in the skill editor afterwards; any skill can be switched by hand there.
+
 **What the TypeScript course asks for.** Modules 00 to 09 (written so far) are plain TypeScript: predict what code
 prints or what type something has, fix the compiler's error, write a function from scratch, with Node 26 running the
 `.ts` file (it strips the types) and `tsc` 7 checking it with the course's strict tsconfig. The practice does the same:

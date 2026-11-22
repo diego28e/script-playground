@@ -41,12 +41,16 @@ Rules worth knowing:
 - **People with access**: add one email or paste several (commas, spaces or new lines). Each person shows whether they
   have an account yet and whether they are enrolled. Emails that can't be read stay in the box to be fixed; the rest
   are added.
+- **Publish** and **Back to draft** (beside the status, `setCourseStatus`, added 2026-11-22). Each asks first and says
+  who will see it: for a private course, still only its list and admins (or admins alone while the list is empty); for
+  a public one, everyone. Back to draft hides it from everyone but admins and keeps every enrolment and all progress, for
+  when it is published again. Before this, a course was only published by importing it with `--publish`.
 
-**A course that must never be public** is made private on its first import, before it is published:
+**A course that must never be public** is made private on its first import, before it is published, then published
+from Admin → Courses when it's ready (`--publish` still works on an import too):
 
 ```bash
 pnpm course:import --repo <path> --private            # a private draft
-pnpm course:import --repo <path> --private --publish  # private, and visible to its list
 ```
 
 An import never makes a course public again; that is only done from Admin → Courses. Without `--private`, an import

@@ -49,9 +49,9 @@ export function draftPrompt(language: PracticeLanguage): string {
   return `${prompt.slice(0, example)}{"skills": [${EXAMPLE_TYPESCRIPT_SKILL}]}`;
 }
 
-const RUNNABLE_PYTHON =
+export const RUNNABLE_PYTHON =
   "- runnable: true when a short task can practise it offline with plain Python and the course's packages: no network, no API keys, no GPU, no Docker. LangChain's fake chat models count as offline. False when it only makes sense against a live service, or isn't about Python at all (shell, cloud consoles, Kubernetes, incident response, interview answers): then it gets questions and explanations.";
-const RUNNABLE_TYPESCRIPT =
+export const RUNNABLE_TYPESCRIPT =
   "- runnable: true when a short task can practise it in ONE TypeScript file that tsc checks in strict mode and Node.js runs, with Node's built-in modules only (node:fs, node:path, node:assert…): no npm packages (no Express, NestJS, TypeORM, Zod or Vitest), no network, no database, no Docker. Skills about types count: a task's tests can check what a value is at run time and also that a wrong use does NOT compile. False when it needs a package, a server, a database, the shell, a tsconfig file, an editor or a version manager, or isn't about code (choosing a tool, reading an error out loud): then it gets questions and explanations.";
 const EXAMPLE_PYTHON = `{"skills": [{"key": "dotenv-load-env-file"`;
 const EXAMPLE_TYPESCRIPT_SKILL = `{"key": "narrow-union-with-typeof", "labelEn": "Narrow a union with typeof", "labelEs": "Estrechar una unión con typeof", "descriptionEn": "Checks typeof before using a string | number value, so each branch only uses what that type allows.", "descriptionEs": "Comprueba typeof antes de usar un valor string | number, de modo que cada rama solo usa lo que ese tipo permite.", "knowledge": "procedural", "runnable": true, "criteriaHint": "Branches on typeof and uses a type-specific method in each branch with no cast; not just a union annotation.", "prerequisites": [{"key": "read-union-types", "strength": "hard", "reason": "Narrowing only makes sense once the union is read."}]}`;
