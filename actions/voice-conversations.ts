@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { courseVisibleTo } from "@/lib/course-access";
 import { currentViewer } from "@/lib/viewer";
 import { deleteConversation, listConversations, readConversation, type ConversationMessage, type ConversationSummary, type Scope } from "@/lib/voice/conversations";
+import { forgetProfile, profileFor } from "@/lib/voice/profile";
 
 // A learner's own conversations with the voice teachers (docs/voice-context.md): the list for a lesson or a course's
 // practice, one conversation's messages, and deleting one. Reading and deleting only: turns are written by the lab's
@@ -59,4 +60,23 @@ export async function deleteVoiceConversation(conversationId: string): Promise<{
   const viewer = await currentViewer();
   if (!viewer) return { success: false };
   return { success: await deleteConversation(viewer.id, conversationId).catch(() => false) };
+}
+
+/** What the voice teachers keep about the learner, for this course (docs/voice-context.md, "The learner profile"). */
+export async function getVoiceProfile(scope: VoiceScope): Promise<{ general: string | null; course: string | null; updatedAt: string | null }> {
+  const empty = { general: null, course: null, updatedAt: null };
+  try {
+    const resolved = await scopeFor(scope);
+    return resolved ? await profileFor(resolved.userId, resolved.courseId) : empty;
+  } catch {
+    return empty;
+  }
+}
+
+/** Forgets what the voice teachers keep about the learner: how they learn, and what they know in this course. */
+export async function forgetVoiceProfile(scope: VoiceScope): Promise<{ success: boolean }> {
+  const resolved = await scopeFor(scope).catch(() => null);
+  if (!resolved) return { success: false };
+  await forgetProfile(resolved.userId, resolved.courseId);
+  return { success: true };
 }

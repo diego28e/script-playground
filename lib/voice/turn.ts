@@ -4,6 +4,7 @@ import { generateWithFallback, logAi, type AiFeature, type ModelEntry, type Toke
 import { prisma } from "@/lib/prisma";
 import { assemble, compactionCut, fitSummary, summaryRequest, SUMMARY_SYSTEM, titleOf, turnsFor, type ContextSizes, type StoredMessage } from "@/lib/voice/context";
 import { appendMessage, earlierTitles, markLastReplyInterrupted, openConversation, openMessages, saveSummary, type Scope } from "@/lib/voice/conversations";
+import { learnFromConversation, learnFromLeftConversations, readProfile } from "@/lib/voice/profile";
 
 // One turn of a stored conversation with a voice teacher (docs/voice-context.md): the lesson tutor and the practice
 // coach both go through here. The caller brings what only it knows (who the model is, what it teaches from, what is
@@ -16,6 +17,24 @@ export type TurnEvent = { type: "delta"; text: string } | { type: "reset" } | { 
 export type VoiceTurnResult =
   | { ok: true; reply: string; model: string; traceId: string; conversationId: string }
   | { ok: false; reason: "quota" | "unavailable"; conversationId: string };
+
+/**
+ * The profile as a conversation first read it, kept for the rest of that conversation: the profile is rewritten in the
+ * background every few exchanges, and a change in the system instruction would cost every later turn its cache. What
+ * the profile learns reaches the next conversation; this one has its own note (compaction). Lost on a restart, which
+ * only costs one re-read.
+ */
+const profiles = new Map<string, { at: number; value: Promise<string | null> }>();
+const PROFILE_KEEP_MS = 6 * 60 * 60_000;
+
+function profileFor(conversationId: string, read: () => Promise<string | null>): Promise<string | null> {
+  const hit = profiles.get(conversationId);
+  if (hit && Date.now() - hit.at < PROFILE_KEEP_MS) return hit.value;
+  const value = read();
+  profiles.set(conversationId, { at: Date.now(), value });
+  if (profiles.size > 500) profiles.delete(profiles.keys().next().value as string);
+  return value;
+}
 
 export async function runVoiceTurn(input: {
   scope: Scope;
@@ -47,10 +66,15 @@ export async function runVoiceTurn(input: {
 
   // The stored turns the summary doesn't cover, and the titles of earlier conversations here: read before this turn's
   // own message is stored, so the new message is only ever sent once, as the question.
-  const [open, digest] = await Promise.all([conversation.isNew ? Promise.resolve([] as StoredMessage[]) : openMessages(conversation.id, conversation.summarySeq), earlierTitles(scope, conversation.id)]);
+  // The learner profile too: what the teachers know about this learner from earlier conversations.
+  const [open, digest, profile] = await Promise.all([
+    conversation.isNew ? Promise.resolve([] as StoredMessage[]) : openMessages(conversation.id, conversation.summarySeq),
+    earlierTitles(scope, conversation.id),
+    profileFor(conversation.id, () => readProfile(scope.userId, scope.courseId, language).catch(() => null)),
+  ]);
   await appendMessage(conversation.id, "learner", input.question, "ok", input.learnerMeta, conversation.isNew ? titleOf(input.question) : undefined);
 
-  const { system, sizes } = assemble({ role: input.role, grounding: input.grounding, summary: conversation.summary, digest }, language);
+  const { system, sizes } = assemble({ role: input.role, grounding: input.grounding, profile, summary: conversation.summary, digest }, language);
   const turns = turnsFor(open, conversation.summarySeq, input.question, language, input.situation);
   const context: ContextSizes = { ...sizes, turns: turns.chars, situation: turns.situationChars, total: system.length + turns.chars + turns.situationChars };
 
@@ -92,6 +116,10 @@ export async function runVoiceTurn(input: {
   // Compaction runs after the reply is on its way: the learner never waits for it, and a failure only means the next
   // turn sends a few more turns word for word and tries again.
   void compact(conversation.id, scope.userId, language, input.models).catch((error) => logAi("warn", { event: "voice.compact_failed", conversationId: conversation.id, error: String(error).slice(0, 300) }));
+  // The profile learns from the conversation the same way, after the reply: every few exchanges, and, when a new
+  // conversation starts, from what the learner's earlier ones still hold (lib/voice/profile.ts).
+  void learnFromConversation(conversation.id, language, input.models);
+  if (conversation.isNew) void learnFromLeftConversations(scope.userId, conversation.id, language, input.models).catch(() => undefined);
   return { ok: true, reply, model: result.model, traceId: result.traceId, conversationId: conversation.id };
 }
 

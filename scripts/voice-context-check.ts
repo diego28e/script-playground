@@ -3,6 +3,8 @@
 // layers. No database and no model: the rules are pure functions.
 //
 //   pnpm voice:context:check
+import { isEcho, isInterruption, wordsOf } from "@/lib/voice/barge";
+import { splitNote } from "@/lib/voice/profile";
 import { assemble, BUDGET, compactionCut, fitSummary, SECTIONS, turnsFor, unsummarised, type StoredMessage } from "@/lib/voice/context";
 
 /** A conversation of `count` messages, learner first, each reply `replyChars` long. */
@@ -77,6 +79,42 @@ const bare = fitSummary(`THE LEARNER\n- wants AWS examples\n\nTOPIC NOW\nlocking
 check("headings without a colon are read too", bare.startsWith("THE LEARNER:\n- wants AWS examples") && bare.includes("EXACT THINGS GIVEN:\n- `terraform plan`") && bare.length <= limit, `${bare.length} chars`);
 check("a line of text that begins with a heading's word isn't a heading", fitSummary("THE LEARNER:\n- fine\nOPEN:\n- OPEN questions were answered\nCOVERED:\n- locking", "en").includes("- OPEN questions were answered"));
 check("a note without the headings is cut to the whole budget", fitSummary("x".repeat(5000), "en").length <= BUDGET.summaryChars + 1);
+
+// Interrupting by voice (lib/voice/barge.ts): what the microphone hears while the teacher speaks.
+const speaking = "The resolver remembers the answer for as long as the TTL says, so lowering the TTL a day before a migration means every resolver asks again within a minute of the change.";
+check("a real question cuts the teacher off", isInterruption("wait so what happens with the old answer", speaking));
+check("a stop word alone is enough", isInterruption("wait", speaking) && isInterruption("espera", speaking));
+check("listening sounds don't interrupt", !isInterruption("mm-hm okay yeah", speaking) && !isInterruption("sí, vale", speaking));
+check("two words aren't enough", !isInterruption("the resolver", speaking));
+check("the teacher's own voice coming back isn't the learner", !isInterruption("remembers the answer for as long as the TTL says", speaking) && isEcho(wordsOf("every resolver asks again within a minute"), speaking));
+check("a learner reusing the teacher's words in a question still interrupts", isInterruption("why does the resolver keep the old answer", speaking));
+
+// The learner profile (lib/voice/profile.ts): two parts, each section to its own limit.
+const longLines = Array.from({ length: 30 }, (_, index) => `- knows topic ${index + 1} well, explained it back`).join("\n");
+const profileNote = [
+  "HOW THEY LIKE TO LEARN:",
+  "- learns by debating in conversation, not by listening",
+  "- wants AWS examples",
+  "WHAT WORKS:",
+  "- worked examples",
+  "WHAT DOESN'T:",
+  "- being quizzed after every answer",
+  "THEIR GOALS:",
+  "- SRE interviews",
+  "MISCONCEPTIONS:",
+  "- thought TTL deletes the record (corrected)",
+  "STILL SHAKY:",
+  "- negative caching",
+  "KNOWS WELL:",
+  longLines,
+].join("\n");
+const { general, course } = splitNote(profileNote, "en");
+check("the profile's general part keeps how they learn", general.startsWith("HOW THEY LIKE TO LEARN:\n- learns by debating") && general.includes("being quizzed after every answer") && !general.includes("KNOWS WELL"));
+check("the course part keeps misconceptions whole and the newest of a long list", course.includes("thought TTL deletes the record") && course.includes("topic 30") && !course.includes("topic 1 well"));
+check("the profile sits in memory, after the lesson and before the conversation's note", (() => {
+  const built = assemble({ role: "ROLE", grounding: "GROUNDING", profile: "PROFILE", summary: "notes", digest: [] }, "en").system;
+  return built.indexOf("GROUNDING") < built.indexOf("PROFILE") && built.indexOf("PROFILE") < built.indexOf("THIS CONVERSATION SO FAR");
+})());
 
 console.log(failures ? `${failures} FAILED` : "All passed.");
 process.exit(failures ? 1 : 0);

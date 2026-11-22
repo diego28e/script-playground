@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, History, Mic, MicOff, Play, Plus, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { deleteVoiceConversation, getVoiceConversation, getVoiceHistory, type VoiceScope } from "@/actions/voice-conversations";
+import { deleteVoiceConversation, forgetVoiceProfile, getVoiceConversation, getVoiceHistory, getVoiceProfile, type VoiceScope } from "@/actions/voice-conversations";
 import { clock } from "@/components/courses/video-player/player-state";
 import { cn } from "@/lib/utils";
 import type { ConversationMessage, ConversationSummary } from "@/lib/voice/conversations";
 import { DEFAULT_SPEAK_SPEED, SPEAK_SPEEDS } from "@/lib/voice/speed";
 import { Tip } from "@/components/ui/tip";
 import { Orb, type OrbState } from "@/lib/voice/orb";
+import { isInterruption } from "@/lib/voice/barge";
 import { pieces, SoundBlocked, Speaker, speakable, speechCut, VoiceStream, type ListenGrant } from "@/lib/voice/browser";
 
 // The voice sheet: a hands-free conversation with an AI, out loud. The orb listens (Deepgram Flux, which knows when the
@@ -27,7 +28,7 @@ const COPY = {
   es: {
     connecting: "Conectando…",
     thinking: "Pensando…",
-    speaking: "Hablando. Toca el orbe para interrumpir.",
+    speaking: "Hablando. Habla o toca el orbe para interrumpir.",
     idle: "Micrófono apagado.",
     interrupt: "Interrumpir y hablar",
     micOn: "Hablar",
@@ -37,6 +38,12 @@ const COPY = {
     history: "Conversaciones anteriores",
     backToTalk: "Volver a la conversación",
     noHistory: "Aún no hay conversaciones guardadas aquí.",
+    remembered: "Lo que el profesor recuerda de ti",
+    rememberedNone: "Aún nada. El profesor toma notas de cómo te gusta aprender y de lo que dominas a medida que conversáis, y las usa en cada conversación de este curso.",
+    rememberedNote: "Notas que escribe un modelo a partir de tus conversaciones. Borrar una conversación no las borra; olvidarlas, sí.",
+    forget: "Olvidarlo",
+    forgetConfirm: "¿Olvidar todo esto?",
+    forgetYes: "Sí, olvidar",
     resumed: "Sigues donde lo dejaste.",
     turns: (count: number) => (count === 1 ? "1 mensaje" : `${count} mensajes`),
     jump: (at: string) => `Ir a ${at} de la lección`,
@@ -59,7 +66,7 @@ const COPY = {
   en: {
     connecting: "Connecting…",
     thinking: "Thinking…",
-    speaking: "Speaking. Tap the orb to interrupt.",
+    speaking: "Speaking. Just talk, or tap the orb, to interrupt.",
     idle: "Microphone off.",
     interrupt: "Interrupt and talk",
     micOn: "Talk",
@@ -69,6 +76,12 @@ const COPY = {
     history: "Earlier conversations",
     backToTalk: "Back to the conversation",
     noHistory: "No saved conversations here yet.",
+    remembered: "What the teacher remembers about you",
+    rememberedNone: "Nothing yet. As you talk, the teacher notes how you like to learn and what you've mastered, and uses it in every conversation in this course.",
+    rememberedNote: "Notes a model writes from your conversations. Deleting a conversation doesn't remove them; forgetting does.",
+    forget: "Forget it",
+    forgetConfirm: "Forget all of this?",
+    forgetYes: "Yes, forget",
     resumed: "Picking up where you left off.",
     turns: (count: number) => (count === 1 ? "1 message" : `${count} messages`),
     jump: (at: string) => `Go to ${at} in the lesson`,
@@ -285,7 +298,8 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
     async (question: string, spoken: boolean) => {
       const text = question.trim();
       if (!text || closed.current) return;
-      stream.current?.pause();
+      // The microphone stays heard while the teacher thinks and speaks, so the learner can cut in by speaking.
+      stream.current?.guard();
       const interrupted = cutOff.current || Boolean(speaker?.playing);
       cutOff.current = false;
       speaker?.stop();
@@ -388,6 +402,34 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
     askRef.current = ask;
   }, [ask]);
 
+  /**
+   * The learner spoke while the teacher was thinking or speaking (lib/voice/barge.ts decides whether it counts): the
+   * teacher stops at once, its reply is marked as cut off, and the microphone listens normally again. If they had
+   * already finished speaking, what they said is the next question; otherwise it is when they finish.
+   */
+  const barge = useCallback(
+    (words: string, final: boolean) => {
+      if (closed.current || !stream.current?.isGuarded) return;
+      const last = messagesRef.current.at(-1);
+      const speaking = last?.role === "teacher" ? last.text : "";
+      if (!isInterruption(words, speaking)) return;
+      cutOff.current = true;
+      setMessagesBoth((list) => list.map((message, index) => (index === list.length - 1 && message.role === "teacher" ? { ...message, pending: false, interrupted: true } : message)));
+      speaker?.stop();
+      turn.current?.abort();
+      stream.current.resume();
+      setBusy(false);
+      setPhase("listening");
+      if (final) void askRef.current(words, true);
+      else setHeard(words);
+    },
+    [setMessagesBoth, speaker],
+  );
+  const bargeRef = useRef(barge);
+  useEffect(() => {
+    bargeRef.current = barge;
+  }, [barge]);
+
   /** The microphone on: a grant from the learning service, then the stream straight to Deepgram. */
   const startMic = useCallback(async () => {
     wantMic(true);
@@ -400,7 +442,14 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
       if (!response.ok || !data?.grant) throw new Error(data?.message ?? t.micFailed);
       const opened = await VoiceStream.open(data.grant, data.maxMinutes ?? 10, {
         onWords: (words) => setHeard(words),
-        onTurn: (words) => void askRef.current(words, true),
+        onTurn: (words, startedGuarded) => {
+          // A turn that began while the teacher was speaking counts only if it is the learner taking the turn, not a
+          // listening sound or the teacher's own voice that ran on as the reply ended.
+          const last = messagesRef.current.at(-1);
+          if (startedGuarded && !isInterruption(words, last?.role === "teacher" ? last.text : "")) return setHeard("");
+          void askRef.current(words, true);
+        },
+        onGuarded: (words, final) => bargeRef.current(words, final),
         onLevel: (level) => (micLevel.current = level),
         onEnd: (reason) => {
           stream.current = null;
@@ -413,7 +462,7 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
       });
       if (closed.current) return opened.stop();
       stream.current = opened;
-      if (turn.current || speaker?.playing) opened.pause();
+      if (turn.current || speaker?.playing) opened.guard();
       else setPhase("listening");
     } catch (error) {
       wantMic(false);
@@ -673,6 +722,7 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-3 [scrollbar-color:rgba(255,255,255,0.25)_transparent]" aria-live="polite">
+        {view === "history" && <Remembered scope={scope} t={t} />}
         {view === "history" ? (
           earlier.length === 0 ? (
             <p className="text-sm leading-relaxed text-white/60">{t.noHistory}</p>
@@ -816,6 +866,87 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the teachers keep about the learner (lib/voice/profile.ts), shown above the earlier conversations: folded by
+ * default, with a way to forget it. Read again each time the list opens.
+ */
+function Remembered({ scope, t }: { scope: VoiceScope; t: (typeof COPY)["en"] }) {
+  const [profile, setProfile] = useState<{ general: string | null; course: string | null } | null>(null);
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void getVoiceProfile(scope).then((found) => {
+      if (live) setProfile(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, [scope]);
+  const text = [profile?.general, profile?.course].filter(Boolean).join("\n\n").trim();
+  const forget = async () => {
+    setAsking(false);
+    const result = await forgetVoiceProfile(scope).catch(() => ({ success: false }));
+    if (result.success) setProfile({ general: null, course: null });
+  };
+  return (
+    <details className="group mb-3 rounded-2xl bg-white/5 px-3.5 py-2.5">
+      <summary className="cursor-pointer list-none text-sm font-medium text-white/85 marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+        <span className="mr-1.5 inline-block text-white/45 transition-transform group-open:rotate-90" aria-hidden="true">›</span>
+        {t.remembered}
+      </summary>
+      {profile === null ? null : text ? (
+        <div className="mt-2 space-y-2">
+          <ProfileNotes text={text} />
+          <p className="text-xs text-white/45">{t.rememberedNote}</p>
+          {asking ? (
+            <span className="flex items-center gap-1.5 text-xs">
+              <span className="text-white/60">{t.forgetConfirm}</span>
+              <button type="button" onClick={() => void forget()} className="rounded-full bg-red-400/20 px-2.5 py-1 font-medium text-red-200 hover:bg-red-400/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+                {t.forgetYes}
+              </button>
+              <button type="button" onClick={() => setAsking(false)} className="rounded-full px-2.5 py-1 text-white/70 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+                {t.removeNo}
+              </button>
+            </span>
+          ) : (
+            <button type="button" onClick={() => setAsking(true)} className="rounded-full px-2.5 py-1 text-xs text-white/60 ring-1 ring-white/15 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+              {t.forget}
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs leading-relaxed text-white/55">{t.rememberedNone}</p>
+      )}
+    </details>
+  );
+}
+
+/** The profile's notes as headings and lines; a section with nothing in it ("none", "nada") is left out. */
+function ProfileNotes({ text }: { text: string }) {
+  const sections = text
+    .split(/\n(?=[^\n-][^\n]*:\s*$)/m)
+    .map((block) => {
+      const [heading, ...lines] = block.trim().split("\n");
+      const items = lines.map((line) => line.replace(/^-\s*/, "").trim()).filter((line) => line && !/^(none|nada)( yet| aún)?\.?$/i.test(line));
+      return { heading: heading.replace(/:\s*$/, ""), items };
+    })
+    .filter((section) => section.items.length);
+  return (
+    <div className="space-y-2">
+      {sections.map((section) => (
+        <div key={section.heading}>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-white/45">{section.heading.toLowerCase()}</p>
+          <ul className="mt-0.5 space-y-0.5 text-xs leading-relaxed text-white/80">
+            {section.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

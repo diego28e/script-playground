@@ -119,12 +119,38 @@ what the learner said. The code is `assemble` and `turnsFor` in `lib/voice/conte
 - **Failed.** A reply that failed is stored as failed and left out of the context. Its question is joined to the next
   one, so the two sides still alternate.
 
-### 7. Memory across conversations: titles only
+### 7. Memory across conversations: the learner profile and titles
 
-The model is given the titles of the learner's last five conversations on the same lesson, marked as "titles only; you
-don't have their text". That is enough to say "we talked about this before" without pretending to remember details, and
-it costs about 50 tokens. A conversation left less than 6 hours ago is continued when the sheet opens; an older one
-waits in the list.
+**The learner profile** (`lib/voice/profile.ts`, table `learner_profile`) is what carries over from one conversation to
+the next, built 2026-11-23.
+
+- **What.** Notes on the learner, in two parts. Scope `all`, for every course and both teachers: `HOW THEY LIKE TO
+  LEARN`, `WHAT WORKS`, `WHAT DOESN'T`, `THEIR GOALS`. One per course: `MISCONCEPTIONS` (each wrong idea, the right one,
+  and whether it's corrected), `STILL SHAKY`, `KNOWS WELL` (only what they showed, by explaining, applying or answering
+  well, not what was explained to them).
+- **How it's written.** In the background, after the reply, like compaction: every 6 new messages in a conversation,
+  the model is given the notes so far and the new stretch, and writes the notes again. A short conversation never
+  reaches 6, so when the learner starts a new conversation, the ones they left at least 10 minutes ago with anything
+  new are learned from too (at most three). Each section has its own size limit, enforced in code (`fitSections`): how
+  they learn keeps its oldest lines, what they know keeps its newest. Its own feature in the AI ledger
+  (`voice-profile`), never counted against the learner's turns.
+- **How it's read.** In the memory part, after the lesson and before the conversation's own note, as "what you know
+  about this learner: use it to teach this person better, adapt to how they like to learn, and don't recite it". A
+  conversation reads the profile once and keeps that copy (in the service's memory, 6 hours): the profile is rewritten
+  every few exchanges, and a change in the system instruction would cost every later turn its cache. What it learns
+  reaches the next conversation.
+- **The learner sees it and can forget it**: "What the teacher remembers about you", at the top of the sheet's earlier
+  conversations, with "Forget it". Deleting a conversation doesn't remove what was learned from it; forgetting does.
+- **Why our own, not a memory service.** Zep's self-hosted edition is discontinued, and a hosted one sends learners'
+  conversations to a third party, which matters once other teachers' learners are on the platform. The profile is a
+  few rows in our own database, written by a call we already make the same way, readable and deletable by the learner.
+- **Not yet:** it doesn't read the practice (spaced repetition) state, which knows objectively which skills a learner
+  keeps lapsing on; that's the next step for "what they struggle with".
+
+**Titles.** The model is also given the titles of the learner's last five conversations on the same lesson, marked as
+"titles only; you don't have their text". That is enough to say "we talked about this before" without pretending to
+remember details, and it costs about 50 tokens. A conversation left less than 6 hours ago is continued when the sheet
+opens; an older one waits in the list.
 
 ### 8. Who said what
 
@@ -179,6 +205,33 @@ either way. What compaction buys is a **bound**: the prompt stays near 8,000 tok
 or 200, the first words stay at about a second, and the teacher still knows who it is talking to. The discount for
 cached tokens is pending verification against DeepSeek's pricing page.
 
+### The learner leads, measured (2026-11-23)
+
+`pnpm voice:context:measure led`: lesson 00.04, paused at 1:00, seven questions from a learner who leads. They ask about
+the conflict story (which the recording only reaches three quarters in), what "idempotent" means, push back on the
+lesson's ninety seconds, ask for a bad and a good answer, ask a quick fact (how many stories), the commonest mistake,
+then "go on". The same conversation was run with the old instructions and the new, on DeepSeek V4.1 Flash.
+
+| | Old instructions | New instructions |
+|---|---|---|
+| Replies ending with a question | 7 of 7 | 1 of 7 |
+| Words a reply | 229 to 338, about 261 on average | 46 to 272, about 169 on average |
+| The quick fact ("how many stories?") | 259 words | 46 words |
+| Questions put off | none in this script | none |
+
+The old teacher answered the question about later in the lesson here; the putting off the learner met came from the
+recording's next words in its context, which this script doesn't happen to trigger. The check stays in the script so it
+can't come back unnoticed. The first new version still gave the quick fact 209 words; the length rule was rewritten
+around listening ("150 words take a minute; a question with a short answer gets it in one to three sentences") and the
+next run gave 46.
+
+The learner profile, from that conversation and the 21-turn one after it, began "Asks for a slow pace and AWS examples
+explicitly", "Learns by comparing bad vs good worked examples", "Pushes back on rules and asks for the reasoning behind
+them", with the TTL misconception marked corrected and "what idempotent means" as still shaky. With the profile in the
+memory part, the 21-turn conversation's recall checks still passed, and the memory part grew to about 3,700
+characters. The recall check for an exact value had only counted values in backticks; the teacher recalled "60", said
+in a sentence in its first reply, so numbers count now too.
+
 ## What the measurement caught
 
 Three faults were found by running the measurement, not by reading the code. Each is a short story worth telling.
@@ -219,8 +272,8 @@ Two limits of ours remain on the voice teachers, both on the model, none on Deep
   model can't get it back, though the learner can still read it. A tool that looks up old turns would fix that.
 - **The note is written by the cheapest model.** It sometimes puts lesson progress under `THE LEARNER`. The section
   limits contain the damage; a stronger model for compaction would reduce it.
-- **Nothing is remembered about the learner across conversations** except titles. A short profile per learner (pace,
-  examples they like) is the natural next step.
+- **The profile doesn't read the practice state** yet (which skills a learner keeps lapsing on in spaced repetition);
+  it learns only from conversations.
 - **Compaction can arrive one turn late** when turns come faster than it runs (seen once at 5 seconds between turns).
   By design the turn then just carries more messages.
 - **The evaluation is one scripted conversation** in English with keyword checks. It catches a broken memory; it does

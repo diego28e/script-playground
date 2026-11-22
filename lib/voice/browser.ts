@@ -14,12 +14,21 @@ export type ListenGrant = {
 export type StreamEvents = {
   /** The words of the turn so far, as they come. */
   onWords: (text: string) => void;
-  /** The speaker finished: the whole turn. */
-  onTurn: (text: string) => void;
+  /**
+   * The speaker finished: the whole turn. `startedGuarded`: the turn began while the stream was guarded, and went on
+   * after it was resumed (a listening sound as the tutor finished, or the start of a real question).
+   */
+  onTurn: (text: string, startedGuarded?: boolean) => void;
   /** How loud the microphone is, 0..1, about ten times a second. */
   onLevel: (level: number) => void;
   /** The stream ended without being stopped: the provider closed it, or it ran for maxMinutes. */
   onEnd: (reason: "timeout" | "error") => void;
+  /**
+   * While guarded (the teacher thinks or speaks): what the microphone hears, as it comes, and whether the speaker has
+   * finished. The words go nowhere else until the stream is resumed; lib/voice/barge.ts decides whether they're the
+   * learner taking the turn.
+   */
+  onGuarded?: (text: string, final: boolean) => void;
 };
 
 /**
@@ -67,9 +76,18 @@ registerProcessor('academia-pcm16', Pcm16);
 
 const SILENCE = new Int16Array(1600).buffer;
 
-/** A hands-free stream: the microphone to the provider until stopped, paused while the tutor answers or speaks. */
+/**
+ * A hands-free stream: the microphone to the provider until stopped. While the tutor answers or speaks it is either
+ * paused (silence is sent: the provider hears nothing) or guarded (the microphone is still heard, and what it hears
+ * goes to onGuarded only, so the learner can interrupt by speaking).
+ */
 export class VoiceStream {
   private paused = false;
+  private guarded = false;
+  /** Words were heard while guarded and that turn hasn't ended. */
+  private guardTurnOpen = false;
+  /** The current turn began while guarded. */
+  private turnStartedGuarded = false;
   private stopped = false;
   private words = "";
   /** Dictation: the words heard since the last final result, not final yet. */
@@ -118,7 +136,7 @@ export class VoiceStream {
       if (this.stopped || this.socket.readyState !== WebSocket.OPEN) return;
       // Paused: silence keeps the stream open without the provider hearing the room (or the tutor reading aloud).
       this.socket.send(this.paused ? SILENCE : event.data.audio);
-      this.events.onLevel(this.paused ? 0 : Math.min(1, event.data.level * 4));
+      this.events.onLevel(this.paused || this.guarded ? 0 : Math.min(1, event.data.level * 4));
     };
     source.connect(node);
     this.socket.onmessage = (event) => {
@@ -146,10 +164,21 @@ export class VoiceStream {
       return;
     }
     if (this.paused) return;
+    if (this.guarded) {
+      if (this.protocol === "flux" && message.type === "TurnInfo") {
+        const heard = (message.transcript ?? "").trim();
+        const final = message.event === "EndOfTurn";
+        this.guardTurnOpen = !final && (this.guardTurnOpen || Boolean(heard));
+        this.events.onGuarded?.(heard, final);
+      }
+      return;
+    }
     if (this.protocol === "flux" && message.type === "TurnInfo") {
       const text = (message.transcript ?? "").trim();
       if (message.event === "EndOfTurn") {
-        if (text) this.events.onTurn(text);
+        const startedGuarded = this.turnStartedGuarded;
+        this.turnStartedGuarded = false;
+        if (text) this.events.onTurn(text, startedGuarded);
         this.events.onWords("");
       } else if (text) {
         this.events.onWords(text);
@@ -169,11 +198,30 @@ export class VoiceStream {
   /** While the tutor answers or reads aloud: the stream stays open, sending silence. */
   pause(): void {
     this.paused = true;
+    this.guarded = false;
+    this.events.onWords("");
+  }
+
+  /**
+   * While the tutor answers or reads aloud, with interrupting by voice: the microphone is still heard, but what it
+   * hears goes to onGuarded until resume(). Hands-free conversation (Flux) only; dictation is paused instead.
+   */
+  guard(): void {
+    if (this.protocol !== "flux" || !this.events.onGuarded) return this.pause();
+    this.paused = false;
+    this.guarded = true;
     this.events.onWords("");
   }
 
   resume(): void {
+    if (this.guarded && this.guardTurnOpen) this.turnStartedGuarded = true;
     this.paused = false;
+    this.guarded = false;
+    this.guardTurnOpen = false;
+  }
+
+  get isGuarded(): boolean {
+    return this.guarded;
   }
 
   get isPaused(): boolean {

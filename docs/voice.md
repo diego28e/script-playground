@@ -121,6 +121,32 @@ The browser streams with the same `VoiceStream` as the tutor; Stop calls its new
 once, sends `CloseStream` so Deepgram sends its last results, waits for it to close (3 s at most) and returns every
 word, the last ones even if they never became final. A stream lasts 5 minutes at most; Dictate again adds to the box.
 
+## Interrupting by voice
+
+In the lesson tutor and the practice coach (`components/voice/voice-tutor.tsx`), the learner can cut the teacher off by
+speaking, as with a person. Built 2026-11-23; before, the microphone was paused while the teacher thought and spoke,
+and only tapping the orb cut it off.
+
+- **While the teacher thinks or speaks, the microphone is guarded, not paused** (`VoiceStream.guard()`,
+  `lib/voice/browser.ts`): its audio still goes to Flux, but what Flux hears goes only to a check, not to the
+  conversation. The browser's echo cancellation (`echoCancellation: true`) removes most of the teacher's voice coming
+  out of the speakers.
+- **The check** (`isInterruption`, `lib/voice/barge.ts`) cuts the teacher off when it hears a stop word ("wait",
+  "stop", "espera") or at least three words that aren't listening sounds ("mm-hm", "okay", "sí, vale" never interrupt),
+  and the words aren't the teacher's own voice coming back (most of their three-word runs found, in order, in what the
+  teacher is saying).
+- **Cut off,** the speech stops at once, the reply in progress is abandoned and marked "cut off", and the microphone
+  listens normally. When the learner finishes, what they said is the next question, and the model is told its last
+  reply was cut off.
+- **A turn that runs on** as the reply ends (a listening sound just as the teacher stops) is sent only if the same check
+  says it is the learner taking the turn.
+- Tapping the orb still cuts the teacher off too. Typing a question does as well.
+- **Not covered:** the lab's tutor panel (`infra/lab/tutor/labextension`) still pauses the microphone. On a phone on
+  loudspeaker, echo cancellation is weaker; the echo check is the safety net. Tried in code and with rule checks
+  (`pnpm voice:context:check`); a microphone can't be used in the automated browser, so it needs trying on a real
+  phone and computer.
+- **Cost:** none extra. Flux bills the stream's time, and the stream was already open (sending silence) while paused.
+
 ## The explainer's voice
 
 Every AI reply read aloud is in one voice, chosen for the whole platform in **Admin → Audio**, "The AI explainers'

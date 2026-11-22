@@ -5,6 +5,9 @@
 //
 //   pnpm voice:context:measure            the long conversation: 21 turns, 5 compactions, then two recall questions
 //   pnpm voice:context:measure moving     6 turns with the audio at another moment each time
+//   pnpm voice:context:measure led        7 turns where the learner leads: asks about what comes later in the lesson,
+//                                         pushes back, asks a quick fact; checks the teacher answers instead of putting
+//                                         it off, doesn't end every reply with a question, and keeps quick answers short
 //   … --keep                              leave the conversation in the database (it is deleted otherwise)
 //   … --out file.json                     also write the rows to a file
 //
@@ -16,7 +19,18 @@ import { prisma } from "@/lib/prisma";
 import { runLessonTurn } from "@/lib/lesson-tutor/turn";
 
 type Check = { name: string; pass: (reply: string, early: string[]) => boolean };
-type Scenario = { lesson: string; at: (turn: number) => number; learner: string[]; checks: Record<number, Check[]> };
+type Scenario = {
+  lesson: string;
+  at: (turn: number) => number;
+  learner: string[];
+  checks: Record<number, Check[]>;
+  /** Checks on the whole conversation once it's over: every reply, in order. */
+  after?: { name: string; pass: (replies: string[]) => boolean }[];
+};
+
+/** Phrases that put a question off instead of answering it. */
+const PUT_OFF = /later in (the|this) (lesson|recording)|we'?ll (get|come) (to|back to) (that|this|it)|we will (get|come) to|coming up (later|next)|for now,? (just )?(know|remember)|that'?s for (later|another)|más adelante en la (lección|grabación)|ya llegaremos/i;
+const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
 const SCENARIOS: Record<string, Scenario> = {
   long: {
@@ -50,8 +64,32 @@ const SCENARIOS: Record<string, Scenario> = {
         { name: "recalls how the learner asked to be taught (slowly, AWS examples)", pass: (reply) => /AWS/.test(reply) && /slow/i.test(reply) },
         { name: "recalls the learner's first mistake (the server deleting the record)", pass: (reply) => /delet/i.test(reply) },
       ],
-      21: [{ name: "recalls an exact value from the first replies", pass: (reply, early) => early.some((value) => reply.includes(value)) }],
+      21: [{ name: "recalls an exact value from the first replies", pass: (reply, early) => early.some((value) => (/^\d+$/.test(value) ? new RegExp(`\\b${value}\\b`).test(reply) : reply.includes(value))) }],
     },
+  },
+  // The learner leads (lib/voice/teaching.ts): early in lesson 00.04, they ask about what the recording only reaches
+  // three quarters in (the conflict story), push back on the lesson, and ask a quick fact.
+  led: {
+    lesson: "00.04",
+    at: () => 60,
+    learner: [
+      "Before you go on: how do I answer a conflict question, like a time I disagreed with a colleague? Give me a concrete way to structure it.",
+      "What does idempotent actually mean, in plain terms?",
+      "I don't buy the ninety seconds. Senior interviews let you talk longer. Why ninety?",
+      "Fair. Give me a bad answer and a good answer to the conflict question, so I can hear the difference.",
+      "How many stories should the bank have, in total?",
+      "And what's the single most common mistake people make with these stories?",
+      "Go on.",
+    ],
+    checks: {
+      1: [{ name: "answers a question about later in the lesson instead of putting it off", pass: (reply) => !PUT_OFF.test(reply) && words(reply) >= 60 }],
+      3: [{ name: "engages with the pushback instead of repeating the lesson", pass: (reply) => !PUT_OFF.test(reply) && /\b(fair|you're right|right that|true|point|longer|depends|senior)\b/i.test(reply) }],
+      5: [{ name: "a quick fact gets a short answer", pass: (reply) => words(reply) <= 90 }],
+    },
+    after: [
+      { name: "no reply puts the learner's question off", pass: (replies) => replies.every((reply) => !PUT_OFF.test(reply)) },
+      { name: "at most half the replies end with a question", pass: (replies) => replies.filter((reply) => reply.trim().endsWith("?")).length <= Math.floor(replies.length / 2) },
+    ],
   },
   // The audio at another moment on every question: what changes each turn must not cost the turns their cache.
   moving: {
@@ -91,10 +129,18 @@ async function main() {
       `turn ${String(turn).padStart(2)} | sent ${String(meta.messagesSent).padStart(2)} msgs | turns ${String(meta.context.turns).padStart(5)} ch (everything: ${String(allTurns).padStart(5)}) | memory ${String(meta.context.memory).padStart(4)} | now ${String(meta.context.situation).padStart(4)} | total ${meta.context.total} ch | in ${meta.tokens?.input} tok, cached ${meta.tokens?.cached ?? "?"} | summary up to ${String(meta.summarised).padStart(2)} | first text ${firstText} ms`,
     );
     const checks = scenario.checks[turn];
-    if (checks) {
+    if (checks && scenario !== SCENARIOS.long) {
+      console.log(`   Q: ${question}\n   A: ${result.reply.replace(/\s+/g, " ")}`);
+      for (const check of checks) {
+        const pass = check.pass(result.reply, []);
+        if (!pass) failed.push(check.name);
+        console.log(`   ${pass ? "ok  " : "FAIL"} ${check.name}`);
+      }
+    } else if (checks) {
       // Exact values the teacher gave in the first replies: the ones the first compaction folded away.
       const early = await prisma.voiceMessage.findMany({ where: { conversationId: conversationId!, role: "teacher", seq: { lte: 6 } }, select: { text: true } });
-      const values = [...new Set(early.flatMap((entry) => [...entry.text.matchAll(/`([^`\n]{2,80})`/g)].map((match) => match[1])))];
+      // Commands and names in backticks, and numbers: a value said in a sentence ("lower it to 60") counts too.
+      const values = [...new Set(early.flatMap((entry) => [...[...entry.text.matchAll(/`([^`\n]{2,80})`/g)].map((match) => match[1]), ...(entry.text.match(/\b\d{2,}\b/g) ?? [])]))];
       console.log(`   Q: ${question}\n   A: ${result.reply.replace(/\s+/g, " ")}`);
       for (const check of checks) {
         const pass = check.pass(result.reply, values);
@@ -105,6 +151,13 @@ async function main() {
     // Compaction runs after the reply; a person talking leaves it at least this long.
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
+  const replies = rows.map((row) => String(row.reply));
+  for (const check of scenario.after ?? []) {
+    const pass = check.pass(replies);
+    if (!pass) failed.push(check.name);
+    console.log(`${pass ? "ok  " : "FAIL"} ${check.name}`);
+  }
+  console.log(`reply words: ${replies.map(words).join(", ")}; ending with a question: ${replies.filter((reply) => reply.trim().endsWith("?")).length} of ${replies.length}`);
   const conversation = await prisma.voiceConversation.findUniqueOrThrow({ where: { id: conversationId! }, select: { id: true, title: true, summary: true, summarySeq: true, messageCount: true } });
   console.log(`\nconversation ${conversation.id} | messages ${conversation.messageCount} | summary covers up to ${conversation.summarySeq}\n--- summary (${conversation.summary?.length ?? 0} ch) ---\n${conversation.summary ?? "(none)"}`);
   if (out) writeFileSync(out, JSON.stringify({ conversation, rows }, null, 1));

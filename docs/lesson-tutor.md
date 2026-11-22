@@ -17,8 +17,8 @@ and the moment the audio was paused at.
   question sends itself when the learner stops talking (Deepgram Flux, patient turn-taking, as in the lab:
   `docs/voice.md`).
 - **The answer** appears as it's written and is read aloud as it comes: its first sentence at once, then a few
-  sentences at a time. The orb says "Thinking" until the teacher is heard. Tapping the orb while it speaks cuts it off
-  and listens.
+  sentences at a time. The orb says "Thinking" until the teacher is heard. **Speaking over the teacher cuts it off**
+  (`docs/voice.md`, "Interrupting by voice"), and so does tapping the orb.
 - **Then it listens again**, for a follow-up.
 - **The conversation is kept** (`docs/voice-context.md`): reopening the sheet within 6 hours continues it; the header
   has **New conversation** and **Earlier conversations**, a list where each one can be opened, deleted, or used to jump
@@ -39,24 +39,44 @@ Gemini models. The model is told:
   lesson in the service.
 - **Where the learner stopped**: the last 260 words the teacher had said and the next 80, found from the transcript's
   word timings (or their estimate), with the time ("1:10 / 15:02").
-- **How to answer, as the teacher**: the direct answer first, in a sentence or two, building on what had just been
-  said; then it teaches it properly (below). Correct a misunderstanding kindly. 120 to 220 words a reply, plus any code.
-  Stay with the lesson; never invent facts. In the learner's platform language.
+- **How to answer, as the teacher**: what the recording had just said and was about to say is context for the
+  question, never a reason to hold anything back. Anything in the lesson, the course or the field around it gets a full
+  answer; only a question unrelated to the course gets a short one. Never invent facts. In the learner's platform
+  language.
+- **What it knows about the learner** (`docs/voice-context.md`, "The learner profile"): how they like to learn and what
+  they know in this course, from their earlier conversations.
 
 ## How it teaches (`lib/voice/teaching.ts`)
 
-Shared with the practice coach (`docs/practice.md`, "Widgets"). The first version answered a question with several
-concepts in a sentence each, which is easy to say and hard to learn from. Now:
+Shared with the practice coach (`docs/practice.md`, "Widgets"). **The learner leads**: they decide what to talk about
+and how deep to go; the teacher decides how to explain it well. Rewritten on 2026-11-23, after the second version
+proved slow, shallow and imposed (below).
 
-- **One concept at a time.** A question that holds several is split: the teacher names them, starts with the one the
-  others depend on, and says the rest come after.
-- **Five steps per concept, in order:** what it is (and the problem it solves); how it works (the mechanism, where it
-  lives); why it is that way (what breaks without it, the tradeoff); in practice (the procedure in production: the
-  command to run, the file to edit and what goes in it, what you should see, how to check it worked); what goes wrong
-  (the common mistakes and what each costs).
-- **At the learner's pace.** One or two steps a reply, never more, then a short question that makes the learner use
-  what was just said (never "does that make sense?"). It goes on when they answer or say "next"; "again" gets another
-  explanation with a different example; "deeper" stays on the step. A partly wrong answer is corrected first, plainly.
+- **Whatever they ask is answered now, fully.** Never "we'll get to that", "the lesson covers that later" or "for now
+  just know". The lesson is material, not a script; a question about what the recording reaches later is answered
+  anyway. A learner who would rather build the idea in conversation, or argue it out, than listen, can.
+- **The answer first**, in the first sentence: no preamble, no "great question", no recap of the question.
+- **Debate is welcome.** Pushed back on, the teacher takes a clear position with the reason and the evidence, and says
+  so plainly when the learner is right.
+- **Practical and deep where it matters:** a concrete example, the exact command, code or configuration, what you would
+  see and what it means. When a concept is to be understood properly, the reply covers what's needed of what it is
+  (and the problem it solves), how it works, why it is that way, how it's done for real, and what goes wrong, in the
+  same reply, not dripped over several. A question holding several big ideas takes the one the others depend on first
+  and names the rest.
+- **As long as the answer needs.** A quick fact in one to three sentences; a concept usually 80 to 180 words; a
+  procedure or "explain it properly" longer. No filler, no summary at the end of a short answer.
+- **Checking understanding is the teacher's judgement, not a rule.** It reads what the learner says every turn and
+  checks only when worth it (after something hard or easy to get wrong, before building on it, after a passive
+  stretch), in varied ways: predict what happens, apply it to a new case, find the mistake, say it back. Never a
+  question at the end of every reply; if the learner ignores a question and asks something else, it follows them. A
+  partly wrong answer is still corrected plainly.
+- **The learner's words steer:** "next" or "go on" continues, "again" gets another explanation and example, "deeper"
+  adds detail, "shorter" shortens from then on.
+
+The history, since each rule replaced one that hurt: the first version gave several concepts a sentence each. The
+second took every concept through five fixed steps, one or two a reply, and ended every reply with a check question;
+with the recording's next words in its context, it also put questions off ("you'll learn that later in the lesson").
+The learner found it slow, shallow, and imposed.
 - **Exact commands, files and settings**, in backticks (`terraform init -migrate-state`), shown on the sheet as code
   and read aloud when short (60 characters or fewer). A configuration of several lines goes in a code block, which is
   shown and not read: the teacher says in words what it does. Only what it is sure of, from the lesson when the lesson

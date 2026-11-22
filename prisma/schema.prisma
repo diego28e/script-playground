@@ -33,6 +33,7 @@ model User {
   practiceLearners   PracticeLearner[]
   // Conversations with the voice teachers (docs/voice-context.md).
   voiceConversations VoiceConversation[]
+  learnerProfiles    LearnerProfile[]
 
   @@map("user")
 }
@@ -182,6 +183,8 @@ model VoiceConversation {
   // The turns themselves stay; this is derived from them and can be made again.
   summary      String?
   summarySeq   Int            @default(0)
+  // The learner profile has learned from the messages up to this one (lib/voice/profile.ts).
+  profileSeq   Int            @default(0)
   messageCount Int            @default(0)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
@@ -191,6 +194,26 @@ model VoiceConversation {
   @@index([userId, kind, lessonId, updatedAt])
   @@index([userId, kind, courseId, updatedAt])
   @@map("voice_conversation")
+}
+
+// What the voice teachers know about a learner beyond one conversation (docs/voice-context.md, "The learner profile"):
+// notes a model writes from the learner's conversations, which both teachers read. Two rows a learner: scope "all"
+// (how they like to learn, for every course) and one per course (what they know, what is shaky, their misconceptions).
+// Derived from the conversations; the learner can read it and forget it from the voice sheet.
+model LearnerProfile {
+  id        String   @id @default(cuid())
+  userId    String
+  // "all", or a course's id.
+  scope     String
+  notes     String
+  // How many times it has been rewritten from new conversation.
+  updates   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scope])
+  @@map("learner_profile")
 }
 
 // One thing said in a conversation, in order. Text only: a reply is read aloud again from its text when asked.

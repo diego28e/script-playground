@@ -41,6 +41,8 @@ export const BUDGET = {
   summaryChars: 2_600,
   /** The list of earlier conversations on the same lesson or course. */
   digestChars: 600,
+  /** What is known about the learner, both parts together (lib/voice/profile.ts). */
+  profileChars: 2_800,
   /** One message as stored and as sent. */
   messageChars: 4_000,
 } as const;
@@ -125,6 +127,8 @@ export type Layers = {
   role: string;
   /** The course and the lesson: what it teaches from. */
   grounding: string;
+  /** What the teachers know about this learner from earlier conversations (lib/voice/profile.ts), or none yet. */
+  profile?: string | null;
   /** The conversation's summary, or none before the first compaction. */
   summary: string | null;
   /** Earlier conversations on the same lesson or course, one line each. */
@@ -133,12 +137,14 @@ export type Layers = {
 
 const HEADINGS = {
   en: {
+    profile: "# WHAT YOU KNOW ABOUT THIS LEARNER (your notes from earlier conversations: use them to teach this person better, adapt to how they like to learn, and don't recite them back)",
     summary: "# THIS CONVERSATION SO FAR (your own notes; the latest turns follow word for word)",
     digest: "# EARLIER CONVERSATIONS WITH THIS LEARNER HERE (titles only; they may not remember them, and you don't have their text)",
     situation: "# RIGHT NOW (from the platform, not said by the learner)",
     said: "# THE LEARNER SAYS",
   },
   es: {
+    profile: "# LO QUE SABES DE ESTE ESTUDIANTE (tus notas de conversaciones anteriores: úsalas para enseñarle mejor, adáptate a cómo le gusta aprender, y no se las recites)",
     summary: "# ESTA CONVERSACIÓN HASTA AHORA (tus propias notas; los últimos turnos van después, palabra por palabra)",
     digest: "# CONVERSACIONES ANTERIORES CON ESTE ESTUDIANTE AQUÍ (solo títulos; puede que no las recuerde, y no tienes su texto)",
     situation: "# AHORA MISMO (lo dice la plataforma, no el estudiante)",
@@ -152,6 +158,7 @@ export type ContextSizes = { role: number; grounding: number; memory: number; si
 export function assemble(layers: Layers, language: "es" | "en"): { system: string; sizes: Pick<ContextSizes, "role" | "grounding" | "memory"> } {
   const h = HEADINGS[language];
   const memoryParts = [
+    layers.profile?.trim() ? `${h.profile}\n${clip(layers.profile.trim(), BUDGET.profileChars)}` : "",
     layers.summary ? `${h.summary}\n${fitSummary(layers.summary, language)}` : "",
     layers.digest.length ? `${h.digest}\n${clip(layers.digest.map((line) => `- ${line}`).join("\n"), BUDGET.digestChars)}` : "",
   ].filter(Boolean);
@@ -210,14 +217,22 @@ function fitLines(body: string, limit: number, keep: "oldest" | "newest"): strin
  * with none of the headings (a model that ignored the format) is kept as it is, cut to the whole budget.
  */
 export function fitSummary(text: string, language: "es" | "en"): string {
-  const marks = SECTIONS.flatMap((section) => {
+  return fitSections(text, SECTIONS, language, BUDGET.summaryChars);
+}
+
+/** A section of a note a model writes: its heading in each language, its size limit, and which lines it keeps. */
+export type NoteSection = { readonly en: string; readonly es: string; readonly chars: number; readonly keep: "oldest" | "newest" };
+
+/** A note made to fit `sections` (see fitSummary): each section cut to its own limit, in the fixed order. */
+export function fitSections(text: string, sections: ReadonlyArray<NoteSection>, language: "es" | "en", whole: number): string {
+  const marks = sections.flatMap((section) => {
     // A heading starts a line, in capitals, and ends in a colon or stands alone on its line: the same model writes it
     // both ways from one compaction to the next, with "#", "-" or "**" around it.
     const found = new RegExp(`^[#*\\-\\s]*${section[language]}\\**(?:[ \\t]*:\\**[ \\t]*|[ \\t]*$)`, "m").exec(text);
     return found ? [{ section, at: found.index, bodyAt: found.index + found[0].length }] : [];
   }).sort((a, b) => a.at - b.at);
-  if (!marks.length) return clip(text.trim(), BUDGET.summaryChars);
-  return SECTIONS.map((section) => {
+  if (!marks.length) return clip(text.trim(), whole);
+  return sections.map((section) => {
     const index = marks.findIndex((mark) => mark.section === section);
     const body = index < 0 ? "" : text.slice(marks[index].bodyAt, marks[index + 1]?.at ?? text.length);
     return `${section[language]}:\n${fitLines(body, section.chars, section.keep) || (language === "es" ? "nada" : "none")}`;
