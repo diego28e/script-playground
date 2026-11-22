@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { courseVisibleTo } from "@/lib/course-access";
+import { courseVisibleTo, sourceForLearners } from "@/lib/course-access";
 import { currentViewer } from "@/lib/viewer";
 import { storedVideoTitle } from "@/lib/lesson-video";
 import { pythonInLesson } from "@/lib/compass/lesson";
@@ -29,6 +29,7 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         slug: true,
         title: true,
         language: true,
+        visibility: true,
         sourceRepoUrl: true,
         sourceRef: true,
         modules: {
@@ -111,7 +112,8 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
     return {
       success: true as const,
       data: {
-        course,
+        // A private course's pages never link to its repository (docs/private-courses.md).
+        course: { ...course, ...sourceForLearners(course) },
         module: { slug: courseModule.slug, position: courseModule.position, title: courseModule.title },
         lesson,
         position: { index: index + 1, total: sequence.length },

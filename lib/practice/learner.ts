@@ -6,6 +6,7 @@ import { courseVisibleTo, viewerById } from "@/lib/course-access";
 import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
 import { gradeCode, type GradeTest } from "@/lib/practice/grader";
+import { practiceLanguage, type Diagnostic } from "@/lib/practice/language";
 import { normaliseAnswer, sameOutput, courseSubject, type TaskContent } from "@/lib/practice/tasks";
 import { canGrade, gradeExplanation, type PointMade } from "@/lib/practice/explain";
 
@@ -410,6 +411,8 @@ export type Feedback = {
   error?: { type: string; message: string } | null;
   stdout?: string;
   status?: string;
+  /** TypeScript: what tsc reported, with lines in the learner's own code. */
+  diagnostics?: Diagnostic[];
   // Explanations (lib/practice/explain.ts): each point of the rubric and whether it was made, with the grader's note
   // (in the learner's language when they answered); the misconceptions held; other wrong claims; the grader's word to
   // the learner; and a good answer to compare with.
@@ -447,13 +450,14 @@ async function grade(content: TaskContent, answer: Answer, context?: GradeContex
     }
     case "code":
     case "debug": {
-      const run = await gradeCode({ code: answer.code ?? "", tests: content.tests });
+      // In the language the task was written and proved in (none: Python).
+      const run = await gradeCode({ code: answer.code ?? "", tests: content.tests, language: practiceLanguage(content.language) });
       if (run.status === "unavailable") throw new Error("The grader can't be reached right now. Your answer wasn't recorded; try again in a moment.");
       const total = Math.max(run.tests.length, 1);
       const passedTests = run.tests.filter((test) => test.passed).length;
       const passed = run.status === "passed";
       return {
-        feedback: { passed, score: passed ? 1 : passedTests / total, tests: run.tests, error: run.error, stdout: run.stdout.slice(0, 4000), status: run.status },
+        feedback: { passed, score: passed ? 1 : passedTests / total, tests: run.tests, error: run.error, stdout: run.stdout.slice(0, 4000), status: run.status, ...(run.diagnostics?.length ? { diagnostics: run.diagnostics } : {}) },
         maxScore: 1,
         checks: { passed: passedTests, total },
       };

@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
 import { normaliseKey } from "@/lib/practice/draft";
 import { skillForms } from "@/lib/practice/graph";
+import { practiceLanguage, type PracticeLanguage } from "@/lib/practice/language";
 import { composeLearnerGraph, latestGraph, loadLearner, type Answer, type Feedback, type LearnerExtension, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import { generateTask, type TaskContent } from "@/lib/practice/tasks";
 import { pendingTutorRequests, resolveNextTutorRequest, tutorRequestedSkills } from "@/lib/practice/tutor-requests";
@@ -124,6 +125,23 @@ RULES
 - If the failures look like a slip, a misread question, or a gap in the blocked skill itself rather than in something before it, return an empty list.
 - rationale: one sentence in English saying what in the answers points to the gap.
 Answer with the JSON object only.`;
+
+/** The language of the course's code practice (docs/practice.md, "Languages"). */
+async function courseLanguage(courseId: string): Promise<PracticeLanguage> {
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { practiceLanguage: true } });
+  return practiceLanguage(course?.practiceLanguage);
+}
+
+/** The diagnosis's instructions for the course's language: Python's as they always were, TypeScript's with its background. */
+function diagnosisPrompt(language: PracticeLanguage): string {
+  if (language === "python") return SYSTEM_PROMPT;
+  return SYSTEM_PROMPT.replace("(Python, LangChain, LangGraph)", "(TypeScript and Node.js for the backend)")
+    .replace(
+      "(usually general Python or programming background: dictionaries, f-strings, comprehensions, classes, async/await, JSON, type hints, decorators, HTTP basics)",
+      "(usually JavaScript or programming background: objects and arrays, references vs copies, functions and callbacks, destructuring, ES modules, classes and this, promises and async/await, errors, JSON)",
+    )
+    .replace("runnable=true when plain offline Python can practise it", "runnable=true when one TypeScript file with Node's built-in modules can practise it");
+}
 
 const RESPONSE_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -292,7 +310,7 @@ export async function runDiagnosis(userId: string, courseId: string, diagnosisId
       chosenFirst: true,
       deadline,
       contents: [{ role: "user", parts: [{ text: facts }] }],
-      config: { systemInstruction: SYSTEM_PROMPT, responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 4096 },
+      config: { systemInstruction: diagnosisPrompt(await courseLanguage(courseId)), responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 4096 },
     });
     if (!result.ok) {
       await finish("FAILED", { error: `no model answered (${result.reason})` });

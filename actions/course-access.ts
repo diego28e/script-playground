@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { CourseStatus, CourseVisibility } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { accessEmail } from "@/lib/course-access";
+import { PRACTICE_LANGUAGES, practiceLanguage, type PracticeLanguage } from "@/lib/practice/language";
 import { currentViewer } from "@/lib/viewer";
 
 // Admin → Courses (docs/private-courses.md): who can see each course. A course is public, or private with a list of
@@ -38,6 +39,8 @@ export type AdminCourse = {
   /** The widgets beside the course's practice (docs/practice.md, "Widgets"). */
   practiceScratchbook: boolean;
   practiceVoice: boolean;
+  /** The language of its code practice: the scratchbook's, and new code tasks' (docs/practice.md, "Languages"). */
+  practiceLanguage: PracticeLanguage;
   moduleCount: number;
   lessonCount: number;
   enrolledCount: number;
@@ -59,6 +62,7 @@ export async function listCoursesForAdmin(): Promise<AdminCourse[]> {
       visibility: true,
       practiceScratchbook: true,
       practiceVoice: true,
+      practiceLanguage: true,
       access: { orderBy: { createdAt: "asc" }, select: { id: true, email: true } },
       modules: { select: { _count: { select: { lessons: true } } } },
       _count: { select: { enrollments: true } },
@@ -77,6 +81,7 @@ export async function listCoursesForAdmin(): Promise<AdminCourse[]> {
   return Promise.all(
     courses.map(async ({ access, modules, _count, ...course }) => ({
       ...course,
+      practiceLanguage: practiceLanguage(course.practiceLanguage),
       moduleCount: modules.length,
       lessonCount: modules.reduce((sum, courseModule) => sum + courseModule._count.lessons, 0),
       enrolledCount: _count.enrollments,
@@ -133,6 +138,24 @@ export async function setCoursePracticeWidget(courseId: string, widget: "scratch
     });
     revalidatePath(`/practice/${course.slug}`);
     revalidatePath("/admin/courses");
+    return { success: true };
+  } catch {
+    return { success: false, error: "The course couldn't be updated. Try again." };
+  }
+}
+
+/**
+ * The language of a course's code practice (docs/practice.md, "Languages"): the scratchbook's, and the one new code
+ * tasks are written in. Tasks already written keep theirs, so switching back and forth loses nothing.
+ */
+export async function setCoursePracticeLanguage(courseId: string, language: PracticeLanguage): Promise<Result> {
+  if (!(await requireAdmin())) return { success: false, error: "Only admins can change a course's practice." };
+  if (!(PRACTICE_LANGUAGES as readonly string[]).includes(language)) return { success: false, error: "That isn't a practice language." };
+  try {
+    const course = await prisma.course.update({ where: { id: courseId }, data: { practiceLanguage: language }, select: { slug: true } });
+    revalidatePath(`/practice/${course.slug}`);
+    revalidatePath("/admin/courses");
+    revalidatePath("/admin/practice", "layout");
     return { success: true };
   } catch {
     return { success: false, error: "The course couldn't be updated. Try again." };

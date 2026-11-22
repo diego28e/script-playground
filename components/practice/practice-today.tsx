@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tip";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { defineAcademiaTheme } from "@/lib/monaco-theme";
+import { configureTypeScript } from "@/lib/monaco-typescript";
+import { COMPILE_CHECK, LANGUAGE, type PracticeLanguage } from "@/lib/practice/language";
 import type { DiscoveryNote } from "@/lib/practice/discovery";
 import type { Feedback } from "@/lib/practice/learner";
 import { VoiceStream } from "@/lib/voice/browser";
@@ -232,7 +234,7 @@ export function PracticeToday({
   courseSlug: string;
   courseTitle: string;
   /** The widgets beside this course's practice, as its admin set them (Admin → Courses). */
-  widgets: { scratchbook: boolean; coach: boolean };
+  widgets: { scratchbook: boolean; coach: boolean; language: PracticeLanguage };
   /** For an admin only: the task editor's models, and an Edit button on each task. */
   editModels?: { id: string; label: string }[];
 }) {
@@ -365,10 +367,22 @@ export function PracticeToday({
   // The streak was counted when the page loaded; finishing today's set here adds today to it.
   const streak = today ? today.streak.days + (finished && items.length > 0 && !today.extra && !today.streak.doneToday ? 1 : 0) : 0;
 
+  // The widgets beside this task: the scratchbook (not while explaining an idea, where running code doesn't help) and
+  // the coach (also once the set is done). Each button takes 3.5 rem of the corner, stacked.
+  const showScratchbook = state === "ready" && widgets.scratchbook && items[index]?.form !== "explain";
+  const showCoach = state === "ready" && widgets.coach;
+  const buttons = Number(showScratchbook) + Number(showCoach);
+  const widgetRoom = buttons ? `${1 + 3.5 * buttons}rem` : "0px";
+
   return (
-    // The scratchbook docks on the right on a computer and the practice moves left to keep the task in view; on a
-    // phone it's a sheet below, and the page gets room to scroll above it.
-    <div className="transition-[padding] duration-300 max-lg:pb-[var(--scratchbook-sheet,0px)] lg:pr-[max(var(--scratchbook-width,0px),var(--coach-width,0px))]">
+    // The scratchbook docks on the right on a computer and the coach's sheet floats there, and the practice moves left
+    // to keep the task in view; on a phone either is a sheet below, and the page gets room to scroll above it. One is
+    // open at a time (components/practice/widgets.ts). The buttons' own room at the bottom (--widget-room) means the
+    // end of a task can always be scrolled clear of them.
+    <div
+      className="transition-[padding] duration-300 max-lg:pb-[calc(max(var(--scratchbook-sheet,0px),var(--coach-sheet,0px))+var(--widget-room,0px))] lg:pb-[var(--widget-room,0px)] lg:pr-[max(var(--scratchbook-width,0px),var(--coach-width,0px))]"
+      style={{ "--widget-room": widgetRoom } as React.CSSProperties}
+    >
       <div className="container mx-auto max-w-3xl px-4 py-10 md:py-14">
         <Link href={`/courses/${courseSlug}`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" aria-hidden="true" /> {t.back}
@@ -492,16 +506,8 @@ export function PracticeToday({
       </div>
       {/* The course's widgets (Admin → Courses). Python beside a task, except while explaining an idea, where running
           code doesn't help; the coach to talk a task through, also once the set is done. */}
-      {state === "ready" && widgets.scratchbook && items[index]?.form !== "explain" && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} />}
-      {state === "ready" && widgets.coach && (
-        <PracticeCoach
-          courseSlug={courseSlug}
-          sessionId={today?.sessionId ?? null}
-          taskId={items[index]?.id ?? null}
-          language={language}
-          raised={widgets.scratchbook && items[index]?.form !== "explain"}
-        />
-      )}
+      {showScratchbook && <Scratchbook courseSlug={courseSlug} taskId={items[index]?.id ?? null} language={language} codeLanguage={widgets.language} />}
+      {showCoach && <PracticeCoach courseSlug={courseSlug} sessionId={today?.sessionId ?? null} taskId={items[index]?.id ?? null} language={language} raised={showScratchbook} />}
     </div>
   );
 }
@@ -773,8 +779,13 @@ function TaskCard({
             <div className="h-72 bg-code-panel md:h-80">
               <Editor
                 height="100%"
-                defaultLanguage="python"
-                beforeMount={defineAcademiaTheme}
+                // The task's own language; a file per task, so TypeScript checks each one on its own.
+                language={LANGUAGE[item.language].monaco}
+                path={`task-${item.id}.${LANGUAGE[item.language].extension}`}
+                beforeMount={(monaco) => {
+                  defineAcademiaTheme(monaco);
+                  if (item.language === "typescript") configureTypeScript(monaco);
+                }}
                 theme="academia-dark"
                 loading={<DotLoader className="text-code-foreground" />}
                 value={answer ? (answer.given.code ?? "") : code}
@@ -1139,7 +1150,8 @@ function TrialResults({ feedback, t }: { feedback: Feedback; t: Copy }) {
               {test.passed ? <Check className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : <X className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />}
               <span>
                 <code className="font-mono text-xs">{test.name}</code>
-                {!test.passed && test.message && <span className="block whitespace-pre-wrap text-muted-foreground">{test.message.split("\n").slice(-3).join("\n")}</span>}
+                {/* The compiler's report in full (each line one error); a test's last lines say what failed. */}
+                {!test.passed && test.message && <span className="block whitespace-pre-wrap text-muted-foreground">{test.name === COMPILE_CHECK ? test.message : test.message.split("\n").slice(-3).join("\n")}</span>}
               </span>
             </li>
           ))}

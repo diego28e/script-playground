@@ -142,6 +142,9 @@ model Course {
   // scratchbook, for courses whose tasks are code, and the voice coach, to talk a task through out loud.
   practiceScratchbook Boolean               @default(true)
   practiceVoice    Boolean                  @default(false)
+  // The language of the course's code practice (lib/practice/language.ts): "python" or "typescript". It picks the
+  // scratchbook's language and the one new code tasks are written in; a task keeps the language it was written in.
+  practiceLanguage String                   @default("python")
   sourceRepoUrl    String?
   // The commit the course was last imported from.
   sourceRef        String?

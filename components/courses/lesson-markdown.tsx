@@ -9,7 +9,8 @@ import { MermaidDiagram } from "@/components/courses/mermaid-diagram";
 // A course guide (a Markdown file in the course repository) rendered in the lesson page, with GitHub's
 // extensions (tables, task lists, strikethrough) and the platform's tokens, since the app has no typography
 // plugin. A fenced block tagged `mermaid` is drawn as a diagram (docs/lesson-diagrams.md). Relative links are resolved against the guide's own folder: one to another lesson's file opens that
-// lesson's page, anything else opens the file on GitHub at the imported commit.
+// lesson's page, anything else opens the file on GitHub at the imported commit (a private course has no repository to
+// link to, so there it stays plain text).
 
 type Props = {
   markdown: string;
@@ -45,7 +46,8 @@ function resolveLink(href: string, { sourcePath, repoUrl, sourceRef, lessonPages
   const page = lessonPages[decodeURIComponent(resolved)];
   if (page) return { href: hash ? `${page}#${hash}` : page, external: false };
   const file = sourceFileUrl(repoUrl, sourceRef, resolved);
-  return file ? { href: hash ? `${file}#${hash}` : file, external: true } : { href, external: true };
+  // No repository to link to (a private course, docs/private-courses.md): the text stays, without a link.
+  return file ? { href: hash ? `${file}#${hash}` : file, external: true } : null;
 }
 
 export function LessonMarkdown({ markdown, ...context }: Props) {
@@ -83,6 +85,7 @@ export function LessonMarkdown({ markdown, ...context }: Props) {
     strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
     a: ({ href = "", children }) => {
       const link = resolveLink(href, context);
+      if (!link) return <span>{children}</span>;
       const className = "font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground";
       return link.external ? (
         <a href={link.href} target="_blank" rel="noopener noreferrer" className={className}>

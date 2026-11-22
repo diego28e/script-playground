@@ -72,8 +72,10 @@ const { values } = parseArgs({
   },
 });
 
-function git(repo: string, ...args: string[]) {
-  return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+/** A git command in the course repository. `quiet` keeps git's own error message off the screen, for a question whose
+ * failure is an answer (a folder with no GitHub remote has no repository link). */
+function git(repo: string, args: string[], { quiet = false } = {}) {
+  return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", quiet ? "ignore" : "inherit"] }).trim();
 }
 
 /** "90–120 min" → 120, "2–3 h" → 180, "4–6 hours" → 360: the upper bound, in minutes. */
@@ -128,6 +130,15 @@ function parseNotebook(repo: string, path: string, kind: LessonKind): ParsedLess
   };
 }
 
+/**
+ * A guide's objectives: the numbered list under its "## Learning objectives" heading, up to the next heading or rule
+ * (the TypeScript course's lessons have one). A guide without that heading has none, as before.
+ */
+function guideObjectives(body: string): string[] {
+  const section = body.replace(/\r/g, "").match(/^##\s+Learning objectives\s*\n([\s\S]*?)(?=^#{1,6}\s|^---\s*$|^>\s|(?![\s\S]))/m)?.[1] ?? "";
+  return [...section.matchAll(/^\s*\d+\.\s+(.+)$/gm)].map((match) => match[1].trim());
+}
+
 function parseGuide(repo: string, path: string): ParsedLesson {
   const body = readFileSync(path, "utf8");
   const [code, title] = splitHeading(body.match(/^#\s+(.+)$/m)?.[1] ?? basename(path, ".md"));
@@ -140,7 +151,7 @@ function parseGuide(repo: string, path: string): ParsedLesson {
     estimatedTime,
     estimatedMinutes: upperMinutes(estimatedTime),
     prerequisites: null,
-    objectives: [],
+    objectives: guideObjectives(body),
     sourcePath: relative(repo, path).replaceAll("\\", "/"),
     body,
     video: undefined,
@@ -221,7 +232,7 @@ function parseCourse(repo: string, slug?: string): ParsedCourse {
   const readme = readFileSync(join(repo, "README.md"), "utf8");
   const remote = (() => {
     try {
-      return git(repo, "remote", "get-url", "origin").replace(/\.git$/, "");
+      return git(repo, ["remote", "get-url", "origin"], { quiet: true }).replace(/\.git$/, "");
     } catch {
       return null;
     }
@@ -235,7 +246,7 @@ function parseCourse(repo: string, slug?: string): ParsedCourse {
     title: readme.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? basename(repo),
     summary: readme.match(/^>\s+(.+)$/m)?.[1]?.trim() ?? null,
     sourceRepoUrl: remote,
-    sourceRef: git(repo, "rev-parse", "HEAD"),
+    sourceRef: git(repo, ["rev-parse", "HEAD"]),
     modules: folders.map((folder) => parseModule(repo, folder)),
   };
 }
@@ -248,6 +259,8 @@ function printSummary(course: ParsedCourse) {
   const withVideo = lessons.filter((lesson) => lesson.video !== undefined).map((lesson) => lesson.slug);
   if (withVideo.length) console.log(`  with a video from the repository: ${withVideo.join(", ")}`);
   const missing = lessons.filter((lesson) => lesson.kind !== "READING" && lesson.kind !== "VIDEO" && lesson.objectives.length === 0).map((lesson) => lesson.slug);
+  const readingObjectives = lessons.filter((lesson) => lesson.kind === "READING" && lesson.objectives.length > 0).length;
+  if (readingObjectives) console.log(`  guides with learning objectives: ${readingObjectives}`);
   if (missing.length) console.log(`  without objectives or requirements: ${missing.join(", ")}`);
   const untimed = lessons.filter((lesson) => lesson.estimatedMinutes === null).map((lesson) => lesson.slug);
   if (untimed.length) console.log(`  without an estimated time: ${untimed.join(", ")}`);

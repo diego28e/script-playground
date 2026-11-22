@@ -4,6 +4,7 @@ import { authoringChain, generateWithFallback, isAuthoringModel } from "@/lib/ai
 import { prisma } from "@/lib/prisma";
 import { lessonText } from "@/lib/lesson-text";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
+import { practiceLanguage, type PracticeLanguage } from "@/lib/practice/language";
 
 // Drafting a lesson's practice skills (docs/practice.md, "The skill graph"): a model reads the lesson (objectives,
 // prerequisites and the notebook or reading itself) and the skills earlier lessons already have, and proposes this
@@ -29,6 +30,31 @@ RULES
 RESPONSE
 Answer with one JSON object, for example (the content is only an illustration):
 {"skills": [{"key": "dotenv-load-env-file", "labelEn": "Load a .env file with python-dotenv", "labelEs": "Cargar un archivo .env con python-dotenv", "descriptionEn": "Loads settings from a .env file into the environment and says where the file is found.", "descriptionEs": "Carga la configuración de un archivo .env en el entorno y sabe dónde se busca el archivo.", "knowledge": "procedural", "runnable": true, "criteriaHint": "Calls load_dotenv (or find_dotenv) before reading the variable; not just os.environ access.", "prerequisites": [{"key": "env-var-read-default", "strength": "hard", "reason": "Loading a .env file only matters once you read the variables."}]}]}`;
+
+/**
+ * The drafting instructions for a course whose code practice is in `language` (docs/practice.md, "Languages"). Python is
+ * SYSTEM_PROMPT as it always was; TypeScript changes only what code tasks can practise, and the example.
+ */
+export function draftPrompt(language: PracticeLanguage): string {
+  if (language === "python") return SYSTEM_PROMPT;
+  const swap = (text: string, from: string, to: string) => {
+    if (!text.includes(from)) throw new Error(`The drafting prompt changed: "${from.slice(0, 40)}…" is not in it.`);
+    return text.replace(from, to);
+  };
+  let prompt = swap(SYSTEM_PROMPT, "where Python can practise it,", "where TypeScript can practise it,");
+  prompt = swap(prompt, RUNNABLE_PYTHON, RUNNABLE_TYPESCRIPT);
+  // The example is the prompt's last line: a TypeScript skill instead of the Python one.
+  const example = prompt.indexOf(EXAMPLE_PYTHON);
+  if (example === -1) throw new Error("The drafting prompt changed: its example is not where it was.");
+  return `${prompt.slice(0, example)}{"skills": [${EXAMPLE_TYPESCRIPT_SKILL}]}`;
+}
+
+const RUNNABLE_PYTHON =
+  "- runnable: true when a short task can practise it offline with plain Python and the course's packages: no network, no API keys, no GPU, no Docker. LangChain's fake chat models count as offline. False when it only makes sense against a live service, or isn't about Python at all (shell, cloud consoles, Kubernetes, incident response, interview answers): then it gets questions and explanations.";
+const RUNNABLE_TYPESCRIPT =
+  "- runnable: true when a short task can practise it in ONE TypeScript file that tsc checks in strict mode and Node.js runs, with Node's built-in modules only (node:fs, node:path, node:assert…): no npm packages (no Express, NestJS, TypeORM, Zod or Vitest), no network, no database, no Docker. Skills about types count: a task's tests can check what a value is at run time and also that a wrong use does NOT compile. False when it needs a package, a server, a database, the shell, a tsconfig file, an editor or a version manager, or isn't about code (choosing a tool, reading an error out loud): then it gets questions and explanations.";
+const EXAMPLE_PYTHON = `{"skills": [{"key": "dotenv-load-env-file"`;
+const EXAMPLE_TYPESCRIPT_SKILL = `{"key": "narrow-union-with-typeof", "labelEn": "Narrow a union with typeof", "labelEs": "Estrechar una unión con typeof", "descriptionEn": "Checks typeof before using a string | number value, so each branch only uses what that type allows.", "descriptionEs": "Comprueba typeof antes de usar un valor string | number, de modo que cada rama solo usa lo que ese tipo permite.", "knowledge": "procedural", "runnable": true, "criteriaHint": "Branches on typeof and uses a type-specific method in each branch with no cast; not just a union annotation.", "prerequisites": [{"key": "read-union-types", "strength": "hard", "reason": "Narrowing only makes sense once the union is read."}]}`;
 
 const DraftSchema = z.object({
   skills: z
@@ -128,6 +154,7 @@ export async function draftLesson(lessonId: string, userId: string, model?: stri
             select: {
               id: true,
               title: true,
+              practiceLanguage: true,
               sourceRepoUrl: true,
               sourceRef: true,
               modules: { orderBy: { position: "asc" }, select: { position: true, title: true } },
@@ -170,7 +197,7 @@ export async function draftLesson(lessonId: string, userId: string, model?: stri
     deadline,
     contents,
     config: {
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: draftPrompt(practiceLanguage(course.practiceLanguage)),
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },

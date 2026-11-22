@@ -19,7 +19,7 @@ is a change to `.env`, not a rebuild (see [Opening up](#opening-up)).
 | `compose.yaml` | Runs the hub on `127.0.0.1:8000`, and the learning service on the lab's private network (and `127.0.0.1:8091` for the lesson tutor's routes) |
 | `tutor/` | The AI tutor in JupyterLab: the panel (`labextension/`, built inside the student image) and the server extension `academia_tutor`, which forwards to the learning service |
 | `learning/` | The learning service's image: the tutor's backend (`services/learning`), built with `pnpm learning:build`; its settings in `learning/.env` |
-| `grader/` | The practice grader: runs learners' code answers in throwaway containers from the student image, under gVisor (`grader/server.mjs`, `grader/harness.py`); its secret in `grader/.env` |
+| `grader/` | The practice grader: runs learners' code answers in throwaway containers from the student image (Python) or the TypeScript sandbox (`grader/ts-sandbox/`), under gVisor (`grader/server.mjs`, `grader/harness.py`, `grader/harness-ts.mjs`); its secret in `grader/.env` |
 | `.dockerignore` | Keeps `.env` files, the services' folders and the tutor's local build output out of the student image's build |
 | `nginx/lab.conf` | The host nginx site, with WebSocket support for kernels and terminals |
 | `.env.example` | The platform client, the server limit and the per-student limits |
@@ -182,6 +182,19 @@ second and the grader carries on.
 Check a grader end to end from your PC with `pnpm grader:check` (right, wrong and hostile answers; it uses
 `GRADER_URL` and `GRADER_SECRET` from `.env.local`). On Docker Desktop, which has no gVisor, add `GRADER_RUNTIME=runc`
 to `infra/lab/.env`.
+
+**TypeScript answers** (docs/practice.md, "Languages"). A request with `language: "typescript"` runs in a second image,
+`GRADER_TS_IMAGE` in `.env` (from `grader/ts-sandbox/`: Node 26, `tsc` 7 and Node's types, pinned to the TypeScript
+course's versions), through `grader/harness-ts.mjs`, which the grader passes in like `harness.py`. Same limits, same
+gVisor; the result also has `diagnostics`, what `tsc` reported. With `GRADER_TS_IMAGE` empty the grader refuses
+TypeScript and runs Python as before. Build the image on the server (natively: npm installs the compiler for the machine
+it builds on), with a date as its tag:
+
+```bash
+docker build -t lab-ts-sandbox:<date> ~/lab/grader/ts-sandbox
+```
+
+`pnpm grader:check --typescript` adds 14 TypeScript cases to the checks.
 
 ## The practice worker
 

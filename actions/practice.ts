@@ -35,6 +35,7 @@ export async function getPracticeGraph() {
       title: true,
       slug: true,
       status: true,
+      practiceLanguage: true,
       skillGraphs: { orderBy: { version: "desc" }, take: 1, select: { version: true, skillCount: true, edgeCount: true, publishedAt: true, graph: true } },
       modules: {
         orderBy: { position: "asc" },

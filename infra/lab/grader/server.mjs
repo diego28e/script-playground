@@ -2,12 +2,14 @@
 // (docs/practice.md). The platform calls it over HTTPS through nginx at /grader/ on the lab's domain, signing each
 // request with a shared secret. No dependencies: Docker's Engine API is plain HTTP over its socket.
 //
-// Each run gets a fresh container from the lab's student image (the course's own Python and packages) with no network,
+// Each run gets a fresh container from the lab's student image (the course's own Python and packages), or for a
+// TypeScript answer from the TypeScript sandbox image (ts-sandbox/: Node 26 and tsc 7, docs/practice.md "Languages"), with no network,
 // a read-only filesystem but a small /tmp, every capability dropped, no privilege gain, 256 MB, one CPU, 64
 // processes, and the gVisor runtime (a sandbox kernel) on the server. This service holds the Docker socket, which makes
 // it root-equivalent on the host: it never runs learner code itself, only creates, waits for and removes containers.
 //
-//   POST /v1/run   {code, tests?, timeoutMs?}  ->  {status, ok, tests, error, stdout, seconds, wallMs}
+//   POST /v1/run   {code, tests?, timeoutMs?, language?}  ->  {status, ok, tests, error, stdout, seconds, wallMs, language}
+// language is "python" (the default) or "typescript"; a TypeScript result also has `diagnostics`, what tsc reported.
 //   GET  /healthz
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -21,6 +23,9 @@ const RUNTIME = process.env.GRADER_RUNTIME ?? "runsc";
 const PYTHON = process.env.GRADER_PYTHON ?? "/opt/course/bin/python";
 const SOCKET = process.env.DOCKER_SOCKET ?? "/var/run/docker.sock";
 const HARNESS = readFileSync(new URL("./harness.py", import.meta.url), "utf8");
+// TypeScript answers (optional: without an image the grader runs Python only and says so).
+const TS_IMAGE = process.env.GRADER_TS_IMAGE ?? "";
+const HARNESS_TS = readFileSync(new URL("./harness-ts.mjs", import.meta.url), "utf8");
 
 const MAX_CODE = 64 * 1024;
 const MAX_BODY = 256 * 1024;
@@ -91,12 +96,20 @@ async function cleanUp() {
 
 // --- One run -------------------------------------------------------------------------------------------------------
 
-async function run({ code, tests, timeoutMs }) {
+/** What a run of each language starts: the image, its harness, and what its environment needs. */
+const LANGUAGES = {
+  python: { image: () => IMAGE, entrypoint: [PYTHON, "-I", "-c", HARNESS], env: ["PYTHONDONTWRITEBYTECODE=1", "MPLCONFIGDIR=/tmp"] },
+  // Node runs the harness as a module; the harness runs tsc, then imports the answer (Node strips its types).
+  typescript: { image: () => TS_IMAGE, entrypoint: ["node", "--input-type=module", "-e", HARNESS_TS], env: ["NODE_DISABLE_COLORS=1", "NO_COLOR=1"] },
+};
+
+async function run({ code, tests, timeoutMs, language }) {
   const nonce = randomBytes(16).toString("hex");
   const started = Date.now();
+  const kind = LANGUAGES[language];
   const created = await docker("POST", `/containers/create?name=grader-${nonce.slice(0, 12)}`, {
-    Image: IMAGE,
-    Entrypoint: [PYTHON, "-I", "-c", HARNESS],
+    Image: kind.image(),
+    Entrypoint: kind.entrypoint,
     Cmd: [],
     User: "1000:1000",
     WorkingDir: "/tmp",
@@ -105,8 +118,7 @@ async function run({ code, tests, timeoutMs }) {
       `GRADER_CODE=${Buffer.from(code, "utf8").toString("base64")}`,
       `GRADER_TESTS=${Buffer.from(tests ?? "", "utf8").toString("base64")}`,
       "HOME=/tmp",
-      "PYTHONDONTWRITEBYTECODE=1",
-      "MPLCONFIGDIR=/tmp",
+      ...kind.env,
     ],
     NetworkDisabled: true,
     Labels: { [LABEL]: "1" },
@@ -149,15 +161,15 @@ async function run({ code, tests, timeoutMs }) {
     const wallMs = Date.now() - started;
     const output = demultiplex(buffer);
     const line = output.split("\n").reverse().find((entry) => entry.startsWith(nonce));
-    if (timedOut) return { status: "timeout", ok: false, tests: [], error: { type: "Timeout", message: `The answer ran for more than ${Math.round(timeoutMs / 1000)} seconds.` }, stdout: "", wallMs };
-    if (inspect?.State?.OOMKilled) return { status: "oom", ok: false, tests: [], error: { type: "MemoryError", message: "The answer used more than 256 MB of memory." }, stdout: "", wallMs };
+    if (timedOut) return { status: "timeout", ok: false, tests: [], error: { type: "Timeout", message: `The answer ran for more than ${Math.round(timeoutMs / 1000)} seconds.` }, stdout: "", wallMs, language };
+    if (inspect?.State?.OOMKilled) return { status: "oom", ok: false, tests: [], error: { type: "MemoryError", message: "The answer used more than 256 MB of memory." }, stdout: "", wallMs, language };
     // No result line: the answer ended the interpreter itself, or the sandbox ended it. Under gVisor, an answer that
     // keeps about 20 or more processes alive at once is ended this way (exit code 2), instead of a fork failing.
     if (!line) {
-      return { status: "crashed", ok: false, tests: [], error: { type: "Crashed", message: `The sandbox stopped the answer before it finished (exit code ${inspect?.State?.ExitCode ?? "?"}). This usually means it started too many processes at once, or called os._exit or os.abort.` }, stdout: output.slice(-4000), wallMs };
+      return { status: "crashed", ok: false, tests: [], error: { type: "Crashed", message: `The sandbox stopped the answer before it finished (exit code ${inspect?.State?.ExitCode ?? "?"}). This usually means it started too many processes at once, or ${language === "python" ? "called os._exit or os.abort" : "called process.exit or process.abort"}.` }, stdout: output.slice(-4000), wallMs, language };
     }
     const result = JSON.parse(line.slice(nonce.length));
-    return { status: result.error ? "error" : result.ok ? "passed" : "failed", ...result, wallMs };
+    return { status: result.error ? "error" : result.ok ? "passed" : "failed", ...result, wallMs, language };
   } finally {
     await removeContainer(id);
   }
@@ -228,10 +240,13 @@ const server = createServer(async (req, res) => {
     const tests = typeof input.tests === "string" ? input.tests : "";
     if (code === null || code.length > MAX_CODE || tests.length > MAX_CODE) return send(res, 400, { ok: false, message: "code (and tests) must be text of at most 64 KB." });
     const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || DEFAULT_TIMEOUT_MS, 1000), MAX_TIMEOUT_MS);
+    const language = input.language === undefined ? "python" : input.language;
+    if (!Object.hasOwn(LANGUAGES, language)) return send(res, 400, { ok: false, message: "language must be python or typescript." });
+    if (!LANGUAGES[language].image()) return send(res, 400, { ok: false, message: `This grader has no ${language} sandbox (GRADER_TS_IMAGE isn't set).` });
     if (waiting.length >= MAX_WAITING) return send(res, 503, { ok: false, message: "The grader is busy. Try again in a moment." });
 
-    const result = await schedule(() => run({ code, tests, timeoutMs }));
-    log({ event: "grader.run", status: result.status, tests: result.tests?.length ?? 0, wallMs: result.wallMs, running, waiting: waiting.length });
+    const result = await schedule(() => run({ code, tests, timeoutMs, language }));
+    log({ event: "grader.run", language, status: result.status, tests: result.tests?.length ?? 0, wallMs: result.wallMs, running, waiting: waiting.length });
     return send(res, 200, result);
   } catch (error) {
     const status = error.status ?? 500;
@@ -241,5 +256,5 @@ const server = createServer(async (req, res) => {
 });
 
 await cleanUp();
-server.listen(PORT, () => log({ event: "grader.start", port: PORT, image: IMAGE, runtime: RUNTIME }));
+server.listen(PORT, () => log({ event: "grader.start", port: PORT, image: IMAGE, typescriptImage: TS_IMAGE || null, runtime: RUNTIME }));
 for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => server.close(() => process.exit(0)));

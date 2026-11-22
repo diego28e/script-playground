@@ -52,6 +52,19 @@ pnpm course:import --repo <path> --private --publish  # private, and visible to 
 An import never makes a course public again; that is only done from Admin → Courses. Without `--private`, an import
 leaves the visibility as it is (a new course starts public).
 
+**A course that isn't on GitHub** (the TypeScript and NestJS course, 2026-11-22) imports from its folder all the same:
+the importer reads the files and the folder's git commit, and stores each guide's text in the database. With no `origin`
+remote it has no repository link (nothing to hide), and its slug must be given, since the folder's name would be used
+otherwise:
+
+```bash
+pnpm course:import --repo <path to the folder> --slug typescript-nestjs-course --private
+```
+
+The importer reads a guide's "## Learning objectives" numbered list too (added 2026-11-22; the TypeScript course's 111
+lessons have one, the other courses' guides none), so the course page shows them and drafting gets them. Only notebooks
+in the lab need the repository on GitHub (a private repository, `infra/lab/start-lab.sh`); this course has none.
+
 ## How it works
 
 - `Course.visibility` (`PUBLIC` | `PRIVATE`) and `CourseAccess` (`courseId`, `email`), in `prisma/schema.prisma`.
@@ -76,5 +89,7 @@ leaves the visibility as it is (a new course starts public).
   clone a second, private repository for the people in its `course:<slug>` group.
 - **The tutor in the lab** reads this rule from the learning service's own build. After deploying this to the platform,
   rebuild the learning service (`infra/lab/README.md`) before a private course has notebooks in the lab.
-- **"View on GitHub"** on a course's page links to its repository. For a private course, keep that repository private
-  on GitHub too: the link then only works for people GitHub lets in.
+- **The repository is never linked.** A private course's page and lesson pages show no "View on GitHub", and a guide's
+  links to other files of its repository are plain text (`sourceForLearners` in `lib/course-access.ts`, applied in
+  `actions/courses.ts` and `actions/lessons.ts`). The repository can still be private on GitHub; the platform only reads
+  it on the server, for admins' work (drafting, video briefs). Public courses keep their links.

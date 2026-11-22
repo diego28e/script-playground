@@ -11,9 +11,12 @@ import { EVERYWHERE } from "@/lib/compass/everywhere";
 import { Tip } from "@/components/ui/tip";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { defineAcademiaTheme } from "@/lib/monaco-theme";
+import { configureTypeScript } from "@/lib/monaco-typescript";
+import { LANGUAGE, type PracticeLanguage } from "@/lib/practice/language";
+import { markWidget, onOtherWidgetOpened } from "@/components/practice/widgets";
 import { cn } from "@/lib/utils";
 
-// The practice scratchbook (docs/practice.md, "Scratchbook"): Python beside every task, to calculate, try a line or
+// The practice scratchbook (docs/practice.md, "Scratchbook"): Python (or the course's TypeScript, "Languages") beside every task, to calculate, try a line or
 // prove an idea instead of reaching for a calculator or an IDE. On a computer it docks on the right and the practice
 // moves left, so the question stays in view; on a phone it's a sheet over the lower part of the page. The code is
 // kept per course in this browser; each run shows what it printed, the last line's value (like a Python prompt) or
@@ -78,10 +81,39 @@ const COPY = {
   },
 };
 
-type NewEntry = { kind: "run"; run: ScratchRun | null } | { kind: "question"; text: string } | { kind: "answer"; text: string | null };
+// The TypeScript scratchbook's words (docs/practice.md, "Languages"): the course's two jobs, tsc checks and Node runs.
+const COPY_TYPESCRIPT: typeof COPY = {
+  es: {
+    ...COPY.es,
+    open: "Scratchbook de TypeScript",
+    tips: [
+      "Cada ejecución hace los dos trabajos: tsc revisa los tipos y Node ejecuta el código, aunque tsc se queje.",
+      "Pasa el ratón sobre un nombre para ver su tipo, como en tu editor.",
+      "console.log() muestra valores; JSON.stringify() muestra objetos tal cual.",
+      "Si tsc se queja, pregúntale a la IA qué significa el error: te explica tu código, nunca la respuesta.",
+    ],
+    empty: "Escribe TypeScript y ejecútalo: aquí verás lo que dice tsc y lo que imprime Node.",
+    starter: "// Tu borrador de TypeScript: prueba una línea, mira un tipo, comprueba una idea.\n// Ejecutar hace los dos trabajos: tsc revisa, Node ejecuta.\nconst budget: number = 6000;\nconsole.log(Math.floor(budget / 400));\n",
+  },
+  en: {
+    ...COPY.en,
+    open: "TypeScript scratchbook",
+    tips: [
+      "Every run does both jobs: tsc checks the types and Node runs the code, even when tsc complains.",
+      "Hover a name to see its type, as in your editor.",
+      "console.log() shows values; JSON.stringify() shows objects as they are.",
+      "If tsc complains, ask the AI what the error means: it explains your code, never the answer.",
+    ],
+    empty: "Write TypeScript and run it: what tsc says and what Node prints shows here.",
+    starter: "// Your TypeScript scratchpad: try a line, look at a type, test an idea.\n// Run does both jobs: tsc checks, Node runs.\nconst budget: number = 6000;\nconsole.log(Math.floor(budget / 400));\n",
+  },
+};
+
+type NewEntry ={ kind: "run"; run: ScratchRun | null } | { kind: "question"; text: string } | { kind: "answer"; text: string | null };
 type Entry = NewEntry & { id: number };
 
-const STORE = (course: string) => `adc.scratchbook.${course}`;
+// Python's code keeps the key it always had; another language's is kept apart, so switching a course loses nothing.
+const STORE = (course: string, codeLanguage: PracticeLanguage) => (codeLanguage === "python" ? `adc.scratchbook.${course}` : `adc.scratchbook.${course}.${codeLanguage}`);
 const OPEN_KEY = "adc.scratchbook.open";
 const WIDTH_KEY = "adc.scratchbook.width";
 const WIDTH = { min: 340, max: 720, initial: 460 };
@@ -104,7 +136,9 @@ function writeStore(key: string, value: string) {
 /** What a run showed, as text for the AI. */
 function describe(run: ScratchRun | null): string {
   if (!run) return "";
-  return [run.stdout, run.value !== null ? `=> ${run.value}` : "", run.error ? `${run.error.type}: ${run.error.message}${run.error.line ? ` (line ${run.error.line})` : ""}` : ""].filter(Boolean).join("\n");
+  return [
+    ...(run.diagnostics ?? []).map((entry) => `tsc: ${entry.line ? `line ${entry.line}: ` : ""}${entry.code}: ${entry.message}`),
+    run.stdout, run.value !== null ? `=> ${run.value}` : "", run.error ? `${run.error.type}: ${run.error.message}${run.error.line ? ` (line ${run.error.line})` : ""}` : ""].filter(Boolean).join("\n");
 }
 
 /**
@@ -148,8 +182,20 @@ function CodeConcepts({ run, cards, language }: { run: ScratchRun; cards: Record
   );
 }
 
-export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: string; taskId: string | null; language: "es" | "en" }) {
-  const t = COPY[language];
+export function Scratchbook({
+  courseSlug,
+  taskId,
+  language,
+  codeLanguage = "python",
+}: {
+  courseSlug: string;
+  taskId: string | null;
+  language: "es" | "en";
+  /** The course's code practice language (Admin → Courses). */
+  codeLanguage?: PracticeLanguage;
+}) {
+  const t = (codeLanguage === "typescript" ? COPY_TYPESCRIPT : COPY)[language];
+  const python = codeLanguage === "python";
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(WIDTH.initial);
   const [code, setCode] = useState("");
@@ -166,26 +212,28 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
   // The Python Compass's published cards, by concept: a run links the constructs in the code to them.
   const [cards, setCards] = useState<Record<string, { es: string; en: string }>>({});
   useEffect(() => {
-    if (!open || Object.keys(cards).length) return;
+    // The cards are Python's (docs/compass.md): another language has none.
+    if (!open || !python || Object.keys(cards).length) return;
     void getPublishedConcepts()
       .then(setCards)
       .catch(() => undefined);
-  }, [open, cards]);
+  }, [open, cards, python]);
 
   // What this browser kept: open or not, the width, and this course's code. Read after mount (the server has none).
   useEffect(() => {
     const restore = setTimeout(() => {
-      setOpen(readStore(OPEN_KEY) === "1");
+      // Left open last time, but not over the coach if the learner is talking to it now (components/practice/widgets.ts).
+      setOpen(readStore(OPEN_KEY) === "1" && !document.documentElement.dataset.practiceWidget);
       const stored = Number(readStore(WIDTH_KEY));
       if (stored >= WIDTH.min && stored <= WIDTH.max) setWidth(stored);
-      setCode(readStore(STORE(courseSlug)) ?? t.starter);
+      setCode(readStore(STORE(courseSlug, codeLanguage)) ?? t.starter);
     }, 0);
     return () => clearTimeout(restore);
-  }, [courseSlug, t.starter]);
+  }, [courseSlug, codeLanguage, t.starter]);
   useEffect(() => {
-    const save = setTimeout(() => code && writeStore(STORE(courseSlug), code), 400);
+    const save = setTimeout(() => code && writeStore(STORE(courseSlug, codeLanguage), code), 400);
     return () => clearTimeout(save);
-  }, [code, courseSlug]);
+  }, [code, courseSlug, codeLanguage]);
 
   // The practice moves left to make room on a computer (practice-today.tsx reads --scratchbook-width).
   useEffect(() => {
@@ -193,9 +241,11 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
     root.setProperty("--scratchbook-width", open ? `${width}px` : "0px");
     // On a phone the sheet covers the lower part: the page gets room to scroll the task above it.
     root.setProperty("--scratchbook-sheet", open ? "62svh" : "0px");
+    markWidget("scratchbook", open);
     return () => {
       root.removeProperty("--scratchbook-width");
       root.removeProperty("--scratchbook-sheet");
+      markWidget("scratchbook", false);
     };
   }, [open, width]);
 
@@ -204,6 +254,8 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
     writeStore(OPEN_KEY, next ? "1" : "0");
     if (next) setTimeout(() => editorRef.current?.focus(), 50);
   };
+  // The coach opened: one widget at a time. The code stays as it is.
+  useEffect(() => onOtherWidgetOpened("scratchbook", () => setOpen(false)), []);
 
   const add = useCallback((entry: NewEntry) => {
     const id = nextId.current++;
@@ -217,14 +269,16 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
     consoleRef.current?.scrollTo({ top: consoleRef.current.scrollHeight, behavior: "smooth" });
   }, [entries]);
 
-  const markError = (line: number | null) => {
+  /** Marks the line an error happened on (red) and, in TypeScript, the lines tsc complained about (amber). */
+  const markError = (line: number | null, compileLines: number[] = []) => {
     const editor = editorRef.current;
     const monaco = monacoRef.current;
     if (!editor || !monaco) return;
-    decorations.current = editor.deltaDecorations(
-      decorations.current,
-      line ? [{ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: "scratch-error-line", glyphMarginClassName: "scratch-error-glyph" } }] : [],
-    );
+    const mark = (at: number, className: string) => ({ range: new monaco.Range(at, 1, at, 1), options: { isWholeLine: true, className, glyphMarginClassName: "scratch-error-glyph" } });
+    decorations.current = editor.deltaDecorations(decorations.current, [
+      ...(line ? [mark(line, "scratch-error-line")] : []),
+      ...[...new Set(compileLines)].filter((at) => at !== line).map((at) => mark(at, "scratch-compile-line")),
+    ]);
   };
 
   const run = async () => {
@@ -232,7 +286,7 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
     setRunning(true);
     markError(null);
     const id = add({ kind: "run", run: null });
-    const result = await runScratch(code).catch(() => null);
+    const result = await runScratch(code, "scratchbook", codeLanguage).catch(() => null);
     setRunning(false);
     if (!result?.success) {
       setEntries((list) => list.filter((entry) => entry.id !== id));
@@ -240,7 +294,7 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
       return;
     }
     replace(id, { run: result.run });
-    markError(result.run.error?.line ?? null);
+    markError(result.run.error?.line ?? null, (result.run.diagnostics ?? []).flatMap((entry) => (entry.line ? [entry.line] : [])));
   };
   useEffect(() => {
     runRef.current = () => void run();
@@ -254,7 +308,7 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
     add({ kind: "question", text });
     const id = add({ kind: "answer", text: null });
     setQuestion("");
-    const result = await askScratch({ taskId, code, output: describe(lastRun), question: text, language }).catch(() => null);
+    const result = await askScratch({ taskId, code, output: describe(lastRun), question: text, language, codeLanguage }).catch(() => null);
     setAsking(false);
     if (!result?.success) {
       replace(id, { text: `_${result?.error ?? t.error}_` });
@@ -288,10 +342,13 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
           type="button"
           onClick={() => toggle(true)}
           aria-label={t.open}
-          className="rise-in fixed bottom-5 right-5 z-40 inline-flex h-11 items-center gap-2 rounded-full bg-code px-4 text-sm font-medium text-code-foreground shadow-[0_10px_30px_-10px_rgba(0,0,0,0.55)] ring-1 ring-code-border transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+          // Its place in the corner, and out of the way of an open coach (app/globals.css, .practice-widget-button).
+          data-widget="scratchbook"
+          data-stack="1"
+          className="practice-widget-button rise-in z-40 inline-flex h-11 items-center gap-2 rounded-full bg-code px-4 text-sm font-medium text-code-foreground shadow-[0_10px_30px_-10px_rgba(0,0,0,0.55)] ring-1 ring-code-border transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
         >
           <SquareTerminal className="size-4 text-signal" aria-hidden="true" />
-          Python
+          <span className="practice-widget-label">{LANGUAGE[codeLanguage].label}</span>
         </button>
       </Tip>
     );
@@ -359,8 +416,13 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
         <div className="min-h-[9rem] flex-[1.1] border-b border-code-border">
           <Editor
             height="100%"
-            defaultLanguage="python"
-            beforeMount={defineAcademiaTheme}
+            language={LANGUAGE[codeLanguage].monaco}
+            // Its own file, so the browser's TypeScript checks the scratchbook apart from a code task's editor.
+            path={`scratchbook.${LANGUAGE[codeLanguage].extension}`}
+            beforeMount={(monaco) => {
+              defineAcademiaTheme(monaco);
+              if (!python) configureTypeScript(monaco);
+            }}
             theme="academia-dark"
             loading={<DotLoader className="text-code-foreground" />}
             value={code}
@@ -393,6 +455,20 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
                       <p className="text-[10px] uppercase tracking-[0.14em] text-code-foreground/40">
                         {t.run} · {(entry.run.ms / 1000).toFixed(1)} s
                       </p>
+                      {/* TypeScript: the first job's report, tsc's, then what Node printed (lesson 00.03's two jobs). */}
+                      {entry.run.diagnostics &&
+                        (entry.run.diagnostics.length ? (
+                          <ul className="space-y-1 rounded-md bg-amber-400/10 px-2 py-1.5 text-amber-200">
+                            {entry.run.diagnostics.map((diagnostic, at) => (
+                              <li key={at} className="whitespace-pre-wrap break-words">
+                                <span className="font-semibold">{diagnostic.code}</span>
+                                {diagnostic.line ? <span className="text-amber-200/70"> · {t.line(diagnostic.line)}</span> : null}: {diagnostic.message}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-emerald-300/80">tsc: {language === "es" ? "sin errores" : "no errors"}</p>
+                        ))}
                       {entry.run.stdout && <pre className="whitespace-pre-wrap break-words text-code-foreground">{entry.run.stdout}</pre>}
                       {entry.run.value !== null && (
                         <pre className="whitespace-pre-wrap break-words text-signal">
@@ -407,7 +483,7 @@ export function Scratchbook({ courseSlug, taskId, language }: { courseSlug: stri
                         </p>
                       )}
                       {!entry.run.stdout && entry.run.value === null && !entry.run.error && <p className="text-code-foreground/40">{t.noOutput}</p>}
-                      <CodeConcepts run={entry.run} cards={cards} language={language} />
+                      {python && <CodeConcepts run={entry.run} cards={cards} language={language} />}
                     </div>
                   ))}
                 {entry.kind === "question" && (

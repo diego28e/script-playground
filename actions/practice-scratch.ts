@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { courseVisibleTo } from "@/lib/course-access";
 import { TUTOR_CHAIN, chainStartingAt, generateWithFallback } from "@/lib/ai/gemini";
 import { gradeCode } from "@/lib/practice/grader";
+import { LANGUAGE, practiceLanguage, type Diagnostic, type PracticeLanguage } from "@/lib/practice/language";
 import type { TaskContent } from "@/lib/practice/tasks";
 import { DETECTOR_SOURCE } from "@/lib/compass/detector-source";
 import { conceptOfError, recordSignal } from "@/lib/compass/signals";
@@ -90,18 +91,22 @@ export type ScratchRun = {
   ms: number;
   /** The Python constructs the code uses, by the detector's key, with their lines. */
   concepts: Record<string, number[]>;
+  /** TypeScript: what tsc reported (the code ran all the same, as Node runs code tsc rejects). */
+  diagnostics?: Diagnostic[];
 };
 
 /**
  * Runs the learner's scratch code in the grader's sandbox (10 s at most). `surface` says where it was run from, for the
  * Compass's signals: the scratchbook, or a card's example in the Python guide.
  */
-export async function runScratch(code: string, surface: "scratchbook" | "guide" = "scratchbook"): Promise<Result<{ run: ScratchRun }>> {
+export async function runScratch(code: string, surface: "scratchbook" | "guide" = "scratchbook", language: PracticeLanguage = "python"): Promise<Result<{ run: ScratchRun }>> {
   const user = await signedIn();
   if (!user) return { success: false, error: "Sign in to run code." };
-  if (!code.trim()) return { success: false, error: "Write some Python first." };
+  const typescript = practiceLanguage(language) === "typescript";
+  if (!code.trim()) return { success: false, error: typescript ? "Write some TypeScript first." : "Write some Python first." };
   if (code.length > MAX_CODE) return { success: false, error: "That's more code than the scratchbook runs at once." };
   if (overLimit(user.id)) return { success: false, error: "That's a lot of runs in a minute. Wait a moment and run again." };
+  if (typescript) return runTypeScript(code);
 
   const started = Date.now();
   const outcome = await gradeCode({ code: wrap(code), timeoutMs: RUN_TIMEOUT_MS });
@@ -135,13 +140,41 @@ export async function runScratch(code: string, surface: "scratchbook" | "guide" 
   return { success: true, run: { stdout: lines.join("\n").replace(/\n+$/, ""), value, error, ms, concepts } };
 }
 
+/**
+ * TypeScript scratch code, run the course's way (lesson 00.03): tsc checks it and Node runs it, both every time, so the
+ * learner sees what the compiler says and what the code does. No wrapper: what it prints is what Node prints.
+ */
+async function runTypeScript(code: string): Promise<Result<{ run: ScratchRun }>> {
+  const started = Date.now();
+  const outcome = await gradeCode({ code, timeoutMs: RUN_TIMEOUT_MS, language: "typescript" });
+  const ms = Date.now() - started;
+  if (outcome.status === "unavailable") return { success: false, error: "The TypeScript sandbox can't be reached right now. Try again in a moment." };
+  const base = { value: null, ms, concepts: {}, diagnostics: outcome.diagnostics ?? [] };
+  if (outcome.status === "timeout") return { success: true, run: { ...base, stdout: outcome.stdout ?? "", error: { type: "Timeout", message: `It ran longer than ${RUN_TIMEOUT_MS / 1000} seconds (an endless loop?).`, line: null } } };
+  if (outcome.status === "oom") return { success: true, run: { ...base, stdout: outcome.stdout ?? "", error: { type: "MemoryError", message: "It used more memory than the sandbox allows.", line: null } } };
+  // The compiler's errors are shown as its report; an error here is one the code hit while it ran.
+  const error = outcome.error && outcome.error.type !== "CompileError" ? { type: outcome.error.type, message: outcome.error.message, line: outcome.error.line ?? null } : null;
+  return { success: true, run: { ...base, stdout: (outcome.stdout ?? "").replace(/\n+$/, ""), error } };
+}
+
 const AskSchema = z.object({
   taskId: z.string().max(100).nullable(),
   code: z.string().max(MAX_CODE),
   output: z.string().max(8000),
   question: z.string().trim().max(2000),
   language: z.enum(["es", "en"]),
+  // The scratchbook's language; Python unless said.
+  codeLanguage: z.enum(["python", "typescript"]).default("python"),
 });
+
+const SYSTEM_TYPESCRIPT = (language: "es" | "en") => `You help a learner with the TypeScript in their scratchbook: a place beside a practice task where they try lines, check types and test ideas. Their code is checked by tsc 7 in strict mode and run by Node.js 26, with Node's built-in modules only. They are learning TypeScript for the backend and may be shaky on JavaScript.
+
+- Explain their code, what tsc reported and what Node printed or threw, plainly: what each part does, what the compiler's message means in plain words (name its TS code, like TS2322), why it happened, and how to fix the code they wrote. Keep the two jobs apart: tsc checks the types, Node runs the code, and code with type errors can still run. Short paragraphs or a few bullets; code in Markdown code blocks.
+- You may see the practice task they are on. NEVER solve it, never state its answer or which option is right, never write the code that answers it, and never confirm or deny a guess about it. If they ask for the answer, say kindly that the scratchbook helps with their own code, and that the task's Hint button is there for a nudge.
+- Explaining what their own code prints, or why it fails to compile or run, is fine even when it is close to the task: explain the TypeScript, don't conclude the task.
+- Stay with plain TypeScript and Node: no npm packages, and no syntax Node can't strip (enum, namespace, parameter properties).
+- Never say "simply", "just" or "obviously": what is easy for you may not be for them.
+- Answer in ${language === "es" ? "Spanish (Latin American, keep technical terms in English)" : "English"}. Be warm and brief: at most about 150 words unless they ask for more.`;
 
 const SYSTEM = (language: "es" | "en") => `You help a learner with the Python in their scratchbook: a place beside a practice task where they calculate, try lines and test ideas. They are learning LangChain and may be shaky on Python.
 
@@ -157,7 +190,7 @@ export async function askScratch(input: z.input<typeof AskSchema>): Promise<Resu
   if (!user) return { success: false, error: "Sign in to ask the AI." };
   const parsed = AskSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "That question can't be sent." };
-  const { taskId, code, output, question, language } = parsed.data;
+  const { taskId, code, output, question, language, codeLanguage } = parsed.data;
   if (!code.trim() && !question) return { success: false, error: "Write some code or a question first." };
 
   // What the learner sees of the task, never its key: the prompt, the options, a code task's starter.
@@ -182,7 +215,7 @@ export async function askScratch(input: z.input<typeof AskSchema>): Promise<Resu
 
   const message = [
     task ? `# The practice task they are on (do not answer it)\n${task}` : "",
-    `# Their scratchbook code\n\`\`\`python\n${code || "(empty)"}\n\`\`\``,
+    `# Their scratchbook code\n\`\`\`${LANGUAGE[codeLanguage].fence}\n${code || "(empty)"}\n\`\`\``,
     output ? `# What the last run showed\n\`\`\`\n${output}\n\`\`\`` : "",
     `# Their question\n${question || (language === "es" ? "Explícame mi código y lo que mostró." : "Explain my code and what it showed.")}`,
   ]
@@ -195,7 +228,7 @@ export async function askScratch(input: z.input<typeof AskSchema>): Promise<Resu
     models: SCRATCH_CHAIN,
     deadline: Date.now() + REQUEST_BUDGET_MS,
     contents: [{ role: "user", parts: [{ text: message }] }],
-    config: { systemInstruction: SYSTEM(language), temperature: 0.3, maxOutputTokens: 1200 },
+    config: { systemInstruction: codeLanguage === "typescript" ? SYSTEM_TYPESCRIPT(language) : SYSTEM(language), temperature: 0.3, maxOutputTokens: 1200 },
   });
   if (!result.ok) {
     return { success: false, error: result.reason === "quota" ? "The AI has reached its limit for now. Try again later." : "The AI isn't answering right now. Try again in a moment." };

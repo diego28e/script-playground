@@ -104,6 +104,7 @@ end of the phases that need them.
 | Today's practice for learners: state and log, the daily set, grading, retries on code, a few more | `lib/practice/learner.ts`, `actions/practice-learner.ts`, `/practice/<course>` (`components/practice/practice-today.tsx`), migrations `add_practice_learners` and `rescale_task_difficulty`; a "Practise today" button on the course page | Deployed (Amplify job 63) |
 | Entry from the tutor's requests; the due badge, streak and progress map; a `/practice` index | `lib/practice/learner.ts` (`focusSkills`, `practiceDue`, `practiceStreak`, `progressMap`), `components/practice/practice-nav-link.tsx`, `/practice`, `/practice/<course>/map` | Deployed (Amplify job 64) |
 | Missing prerequisites: diagnosis, probes, the learner's own graph, the admin's Discovered view | `lib/practice/discovery.ts`, `lib/practice/learner.ts` (`loadLearner`, `composeLearnerGraph`), migration `add_practice_discovery` (`practice_diagnosis`, `practice_found_skill`, `practice_discovered_edge`, `practice_learner.extensions`), `components/admin/practice-discoveries.tsx` | Deployed (Amplify job 65) |
+| TypeScript practice: the course's language, the TypeScript sandbox and harness, tasks and scratchbook in TypeScript; the widgets one at a time | `lib/practice/language.ts`, `infra/lab/grader/` (`harness-ts.mjs`, `ts-sandbox/`, `server.mjs`), `lib/practice/tasks.ts`, `components/practice/` (`scratchbook.tsx`, `widgets.ts`, `practice-coach.tsx`), migration `course_practice_language` ("Languages") | Built and tried locally |
 | Going back to earlier tasks; hints by DeepSeek; editing a task by hand or with a model | `components/practice/practice-today.tsx`, `lib/practice/hints.ts`, `lib/practice/tasks.ts` (`aiEditTask`, `saveTaskEdit`), `components/admin/practice-task-editor.tsx`, migration `add_practice_hints` (`practice_hint`, `practice_task.editedFromId`) | Built and tried locally (below) |
 
 **The review page.** Master-detail, so it fits one screen: the course's lessons on the left (filters for to draft,
@@ -413,7 +414,7 @@ calculator or an IDE: the habit the course is about. Decided with the admin: it 
 print?" ones included (honesty is the learner's; a tips icon says how to use it well), its AI is free and never answers
 the task, and the code runs on the grader.
 
-- **Where** (`components/practice/scratchbook.tsx`): a "Python" button floats at the bottom right of the practice page.
+- **Where** (`components/practice/scratchbook.tsx`): a "Python" button (or "TypeScript", "Languages") floats at the bottom right of the practice page.
   On a computer the scratchbook docks on the right (drag its edge to resize; 340 to 720 px) and the practice moves
   left, so the task stays in view; on a phone it's a sheet over the lower part of the page. Whether it's open, its width
   and each course's code are kept in the browser.
@@ -555,11 +556,31 @@ shows the next time the practice page loads.
 
 | Widget | Default | For |
 |---|---|---|
-| **Python scratchbook** (below, "Scratchbook") | On | Courses whose tasks are code. Hidden on explain tasks whatever the switch says. |
+| **Scratchbook** (below, "Scratchbook"), in the course's language ("Languages") | On | Courses whose tasks are code. Hidden on explain tasks whatever the switch says. |
 | **Talk it through**, the practice coach | Off | Courses about explaining: the learner says an answer out loud and is pushed like in an interview. |
 
-**The practice coach.** A "Talk it through" button in the corner of the practice page (above the Python button when
-both are on) opens the voice sheet the lesson tutor uses (`components/voice/voice-tutor.tsx`, `docs/lesson-tutor.md`):
+Beside the two switches, **Code practice in** (Python | TypeScript, `course.practiceLanguage`,
+`setCoursePracticeLanguage`) picks the scratchbook's language and that of new code tasks ("Languages").
+
+**Placing them** (2026-11-22). One widget is open at a time, on a phone and on a computer, so they never sit over each
+other: opening one closes the other (the scratchbook keeps its code in the browser, the coach its conversation on the
+server, picked up when it opens again), and dictating an answer still closes the coach (`components/practice/widgets.ts`).
+Closed, the two buttons stack in the bottom right corner, the coach's above the scratchbook's. The open one is named on
+the page's root element, and the other's button moves clear of it (`app/globals.css`, `.practice-widget-button`): on a
+computer it sits in the practice's own corner, left of the docked scratchbook or of the coach's sheet, as a round icon
+(its name stays its label and tooltip); on a phone it sits above the scratchbook's sheet, or hides behind the coach's.
+On a phone both sheets take the lower 62% of the screen (the coach's "practice" placement in
+`components/voice/voice-tutor.tsx`; the lesson tutor's sheet is as before), and the page gets that room plus the
+buttons' at the bottom, so the end of a task can always be scrolled clear of them. On a computer the practice moves left
+for either.
+
+Tried on 2026-11-22 locally with the TypeScript course, in a headless Chromium at 375 × 812 and 1440 × 900: both
+widgets on, only the scratchbook, only the coach and neither, each with nothing open and with each widget open (16
+states). At the end of the scroll the task, the buttons, the scratchbook and the coach's sheet never overlapped, nothing
+scrolled sideways, opening one widget closed the other, and the dictation event closed the coach.
+
+**The practice coach.** A "Talk it through" button in the corner of the practice page (above the scratchbook's button
+when both are on) opens the voice sheet the lesson tutor uses (`components/voice/voice-tutor.tsx`, `docs/lesson-tutor.md`):
 the orb listens hands-free, the reply is shown as it's written and read aloud, then it listens again. It also works
 typed. On a computer the practice moves left to make room. Pressing Dictate on an explain task closes it, so two
 microphones never run at once.
@@ -604,6 +625,67 @@ costs US$0.045 per 1,000 characters against ElevenLabs credits. Per learner per 
 `practice-coach`); reading aloud and the microphone have no daily limit of ours (`docs/voice.md`, "Costs"). The
 conversation is kept and can be continued or read again (`docs/voice-context.md`). In the spend ledger:
 `practice-coach.listen` and `practice-coach.speak` (`docs/voice-spend.md`).
+
+## Languages
+
+Built 2026-11-22, for the private TypeScript and NestJS course. A course's code practice is in **Python** (every course
+so far, and the default) or **TypeScript**, chosen in Admin → Courses ("Code practice in", `course.practiceLanguage`,
+migration `course_practice_language`; `lib/practice/language.ts`). It decides the scratchbook's language and the
+language new code tasks are written in. A task keeps the language it was written in (`content.language`, left out for
+Python), so switching a course back and forth loses nothing, and every answer is graded as its task was proven.
+
+**What the TypeScript course asks for.** Modules 00 to 09 (written so far) are plain TypeScript: predict what code
+prints or what type something has, fix the compiler's error, write a function from scratch, with Node 26 running the
+`.ts` file (it strips the types) and `tsc` 7 checking it with the course's strict tsconfig. The practice does the same:
+one file, the course's compiler settings, Node's built-in modules. It doesn't cover what needs more than one file and
+Node: npm packages (Express, Zod, Vitest, NestJS, TypeORM), an HTTP server, a database, `tsconfig` files and the shell.
+Skills about those (the course's modules 10 to 25 mostly) are drafted as not runnable and get questions, explanations and
+the coach, as the SRE course's do.
+
+**The sandbox** (`infra/lab/grader/ts-sandbox`, image `lab-ts-sandbox`): Node.js 26.13.1, TypeScript 7.0.2 and
+@types/node 26.6.6, the versions the course's lessons were checked with. The existing grader runs a TypeScript answer
+in it when the request says `language: "typescript"`, with everything else as for Python: a throwaway container, no
+network, read-only but `/tmp`, 256 MB, one CPU, 64 processes, the time limit and gVisor. No new service, port or route.
+
+**A run** (`infra/lab/grader/harness-ts.mjs`): the course's two jobs, in its order. `tsc` checks the answer and the
+task's tests together (strict, Node's types, `lib: esnext`, `module: nodenext`, `erasableSyntaxOnly`, every file a module),
+then Node runs them. The tests come after the code in the same module and use its names directly, as in Python; they
+are `test("name", () => { assert.equal(…) })` calls, with `test` and `assert` (node:assert/strict) already there, so the
+learner's line numbers stay their own. With tests, a compile error is a check of its own, listed first ("compiles with
+no errors (tsc)") with each error's line and TS code, and an answer passes only when it compiles and every test passes.
+That lets a task check types too: a test with `// @ts-expect-error` before a line fails when that line compiles (an
+impossible state that should be refused). Without tests (a snippet, the scratchbook), a compile error is the run's error
+and the output is still shown. The result carries `diagnostics` (tsc's errors) besides the Python fields. About 0.3 s a
+run on a PC; `pnpm grader:check --typescript` checks right, wrong and hostile answers (on 2026-11-22, against the
+grader on Docker Desktop, all 14 TypeScript checks passed and the 15 Python ones as before).
+
+**Writing and proving.** The writer gets the instructions of the course's language (`systemPrompt(language)` in
+`lib/practice/tasks.ts`: Python's are word for word what they were). For TypeScript: one ES module, Node's built-in
+modules only, strict, no `enum`, `namespace` or parameter properties, tests as `test(…)` calls, `@ts-expect-error` for
+what must not compile, `console.log` of strings and numbers (objects through `JSON.stringify`). The proofs are Python's:
+a predict snippet must compile and print the key, a code task's reference must compile and pass at least two tests while
+the starter and a wrong solution fail, a debug task's buggy code must fail (a compiler error counts) and its fix pass.
+Drafting a lesson (`draftPrompt`) tells the model what a TypeScript task can practise, so `runnable` means "one
+TypeScript file can practise it"; the missing-prerequisite diagnosis proposes JavaScript background instead of Python.
+The admin page names the course's language ("TypeScript code tasks").
+
+**The scratchbook in TypeScript.** A "TypeScript" button; the editor checks the code as it's typed (Monaco's own
+TypeScript, set strict and without the browser's globals: `lib/monaco-typescript.ts`) and shows types on hover. Run sends
+it to the sandbox: the console shows tsc's errors (amber, with the line marked in the editor) or "tsc: no errors", then
+what Node printed, or the error it hit (red). The editor's checks help; the sandbox's tsc is the judge, as the course says
+of the playground and the project. Its AI is told about TypeScript and the two jobs. The Python Compass's cards are
+Python's, so they don't show. Its code is kept apart from the course's Python code in the browser.
+
+**On the practice page**, a code task's editor is in the task's language, and a failed run lists the compiler's errors in
+full under the compile check.
+
+Tried on 2026-11-22 locally, with the course imported from its folder (111 lessons) and the grader on Docker Desktop:
+Opus drafted lesson 04.03's skills (4: the "why" skill not runnable, three runnable) and Sonnet wrote a predict, a code
+and a debug task, each proven on the first try in 9 to 15 s (the code task's tests included a `@ts-expect-error` check
+that a mixed object can't compile). On the page, the predict task was answered right; the code task with optional
+properties instead of a union ran but failed the compile check (the `@ts-expect-error` lines compiled), then the union
+passed all 6 checks and was recorded with 3 attempts. The scratchbook showed TS2322 on line 2 and Node's `105` for
+lesson 00.03's example. The Python course's scratchbook still answered `→ 15` through the changed grader.
 
 ## Roadmap
 

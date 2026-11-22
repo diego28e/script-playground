@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowUpRight, AudioLines, Globe, Lock, SquareTerminal, X } from "lucide-react";
-import { addCourseAccess, removeCourseAccess, setCoursePracticeWidget, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
+import { addCourseAccess, removeCourseAccess, setCoursePracticeLanguage, setCoursePracticeWidget, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
+import { LANGUAGE, PRACTICE_LANGUAGES } from "@/lib/practice/language";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { DotLoader } from "@/components/ui/dot-loader";
@@ -236,9 +237,38 @@ function CourseCard({ course }: { course: AdminCourse }) {
       <div className="mt-5 border-t border-border pt-5">
         <h4 className="text-sm font-medium">Practice widgets</h4>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">What learners get beside this course&apos;s practice. A change shows the next time the practice page loads.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium">Code practice in</span>
+          <div className="inline-flex rounded-full border border-border bg-background p-0.5">
+            {PRACTICE_LANGUAGES.map((language) => (
+              <button
+                key={language}
+                type="button"
+                aria-pressed={course.practiceLanguage === language}
+                disabled={Boolean(busy)}
+                onClick={() => {
+                  if (language === course.practiceLanguage || busy) return;
+                  void run("language", () => setCoursePracticeLanguage(course.id, language)).then((ok) => ok && toast.success(`Code practice for ${course.title}: ${LANGUAGE[language].label}.`));
+                }}
+                className={cn(
+                  "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  course.practiceLanguage === language ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {LANGUAGE[language].label}
+              </button>
+            ))}
+          </div>
+          {busy === "language" && <DotLoader />}
+          <span className="text-xs text-muted-foreground">The scratchbook&apos;s language, and new code tasks&apos;. Tasks already written keep theirs.</span>
+        </div>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          {WIDGETS.map(({ widget, field, label, about, icon: Icon }) => {
+          {WIDGETS.map(({ widget, field, label: named, about: described, icon: Icon }) => {
             const on = course[field];
+            // The scratchbook runs the course's language.
+            const codeLabel = LANGUAGE[course.practiceLanguage].label;
+            const label = named.replace("Python", codeLabel);
+            const about = described.replace("Python", codeLabel);
             return (
               <li key={widget} className="flex items-start gap-3 rounded-lg border border-border px-4 py-3">
                 <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

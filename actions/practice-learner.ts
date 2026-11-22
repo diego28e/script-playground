@@ -12,6 +12,7 @@ import { pendingTutorRequests, tutorRequestedSkills } from "@/lib/practice/tutor
 import { askHint, MAX_HINTS } from "@/lib/practice/hints";
 import { answerTask, loadLearner, localDay, practiceDue, practiceStreak, progressMap, todaysSession, tryCode, type Answer, type Feedback, type LearnerGraph, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
+import { practiceLanguage } from "@/lib/practice/language";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 import { listenGrant, voiceConfigured, type ListenGrant } from "@/lib/voice/deepgram";
 import { recordListen } from "@/lib/voice/allowance";
@@ -43,6 +44,8 @@ function learnerTask(id: string, content: TaskContent) {
     optionsEs: content.form === "choice" ? content.optionsEs : undefined,
     optionsEn: content.form === "choice" ? content.optionsEn : undefined,
     starter: content.form === "code" || content.form === "debug" ? content.code : undefined,
+    // The language its code is in, for the editor (lib/practice/language.ts).
+    language: practiceLanguage(content.language),
   };
 }
 

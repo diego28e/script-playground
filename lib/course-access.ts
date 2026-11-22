@@ -28,6 +28,14 @@ export function courseVisibleTo(viewer: Viewer | null | undefined): Prisma.Cours
   return { OR: [{ visibility: "PUBLIC" }, ...listed] };
 }
 
+/**
+ * The repository a course was imported from, as a learner's pages may link to it: none for a private course. Its
+ * repository is private too, so "View on GitHub" and links to its files would lead nowhere and only name it.
+ */
+export function sourceForLearners(course: { visibility: "PUBLIC" | "PRIVATE"; sourceRepoUrl: string | null; sourceRef: string | null }) {
+  return course.visibility === "PRIVATE" ? { sourceRepoUrl: null, sourceRef: null } : { sourceRepoUrl: course.sourceRepoUrl, sourceRef: course.sourceRef };
+}
+
 /** The viewer for a user id, where there is no request to read a session from (the lab's sign-in, the tutor). */
 export async function viewerById(userId: string): Promise<Viewer | null> {
   return prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, emailVerified: true, role: true } });

@@ -1,0 +1,10 @@
+{
+  "name": "lab-ts-sandbox",
+  "private": true,
+  "description": "What a TypeScript practice answer runs with (infra/lab/grader/ts-sandbox): the TypeScript course's compiler and Node's types, pinned to the versions its lessons were checked with.",
+  "type": "module",
+  "dependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  }
+}

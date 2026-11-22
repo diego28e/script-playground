@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { courseVisibleTo } from "@/lib/course-access";
+import { courseVisibleTo, sourceForLearners } from "@/lib/course-access";
 import { currentViewer } from "@/lib/viewer";
 
 // Who is asking is read from the session here, never taken as an argument: these are server actions, so an argument
@@ -120,7 +120,8 @@ export async function getCourseBySlug(slug: string) {
       rows.forEach((row) => (progress[row.lessonId] = row.status));
     }
 
-    return { success: true, data: { ...course, enrolled, progress } };
+    // A private course's pages never link to its repository (docs/private-courses.md).
+    return { success: true, data: { ...course, ...sourceForLearners(course), enrolled, progress } };
   } catch (error) {
     console.error("Failed to fetch course:", error);
     return { success: false, error: "Failed to fetch course" };

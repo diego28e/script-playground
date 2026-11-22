@@ -56,6 +56,8 @@ services:
     env_file: grader/.env
     environment:
       GRADER_IMAGE: ${LAB_IMAGE}
+      # TypeScript answers (grader/ts-sandbox, docs/practice.md "Languages"); empty: Python only.
+      GRADER_TS_IMAGE: ${GRADER_TS_IMAGE:-}
       GRADER_RUNTIME: ${GRADER_RUNTIME:-runsc}
       PORT: "8080"
     ports:

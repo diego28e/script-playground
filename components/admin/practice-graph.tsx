@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowRight, Check, CheckCheck, ListChecks, Pencil, Plus, Search, Sparkles, Square, Trash2, Undo2, Upload, X } from "lucide-react";
@@ -27,6 +27,10 @@ import { SkillTasks } from "@/components/admin/practice-tasks";
 import { Input } from "@/components/ui/input";
 import { DotLoader } from "@/components/ui/dot-loader";
 import { cn } from "@/lib/utils";
+import { LANGUAGE, practiceLanguage } from "@/lib/practice/language";
+
+/** The course's code practice language, as its skills' labels name it (Admin → Courses; docs/practice.md, "Languages"). */
+const CodeLanguageLabel = createContext("Python");
 
 // The practice graph's review tool (/admin/practice, docs/practice.md). Master-detail: the course's lessons on the
 // left, the chosen lesson on the right, each scrolling on its own. Skills read as text first; one opens for editing
@@ -93,6 +97,7 @@ function CourseReview({
   onCourse: (id: string) => void;
 }) {
   const lessons = useMemo(() => course.modules.flatMap((courseModule) => courseModule.lessons), [course]);
+  const codeLabel = LANGUAGE[practiceLanguage(course.practiceLanguage)].label;
   const counts = useMemo(() => {
     const result = { all: lessons.length, todo: 0, review: 0, approved: 0 };
     for (const lesson of lessons) result[stateOf(lesson)] += 1;
@@ -172,16 +177,16 @@ function CourseReview({
     });
   };
 
-  // Skills set to get Python code tasks. A course that isn't about Python wants none: one click turns them all off.
+  // Skills set to get code tasks, in the course's language. A course that isn't about code wants none: one click turns them all off.
   const allSkills = lessons.reduce((sum, lesson) => sum + lesson.practiceSkills.length, 0);
   const codeSkills = lessons.reduce((sum, lesson) => sum + lesson.practiceSkills.filter((skill) => skill.runnable).length, 0);
   const [turningOff, startTurnOff] = useTransition();
   const noCodeTasks = async () => {
     const ok = await confirm({
-      title: "Turn Python code tasks off for the whole course?",
+      title: `Turn ${codeLabel} code tasks off for the whole course?`,
       detail: `${course.title}: ${codeSkills} of ${allSkills} skills`,
       description:
-        "For a course that isn't about Python. Each of these skills then gets questions and spoken explanations and no code to write or run. Approvals stay as they are, any skill can be switched back on its own, and learners see the change once you publish a version.",
+        `For a course that isn't about ${codeLabel}. Each of these skills then gets questions and spoken explanations and no code to write or run. Approvals stay as they are, any skill can be switched back on its own, and learners see the change once you publish a version.`,
       confirmLabel: "Turn off for all",
     });
     if (!ok) return;
@@ -226,6 +231,7 @@ function CourseReview({
   return (
     // The models an admin can pick for a task's AI edit (components/admin/practice-task-editor.tsx).
     <TaskModelsContext.Provider value={models}>
+    <CodeLanguageLabel.Provider value={codeLabel}>
     <div className="space-y-5">
       {dialog}
       {/* The course at a glance, and what applies to all of it. */}
@@ -263,7 +269,7 @@ function CourseReview({
           {allSkills > 0 && (
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
               <span>
-                <span className="font-medium text-foreground">{codeSkills}</span> of {allSkills} skills get Python code tasks; the rest get questions and spoken
+                <span className="font-medium text-foreground">{codeSkills}</span> of {allSkills} skills get {codeLabel} code tasks; the rest get questions and spoken
                 explanations.
               </span>
               {codeSkills > 0 && (
@@ -355,6 +361,7 @@ function CourseReview({
         )}
       </div>
     </div>
+    </CodeLanguageLabel.Provider>
     </TaskModelsContext.Provider>
   );
 }
@@ -650,6 +657,7 @@ function SkillView({
   stages: string[] | undefined;
   taskCounts: Record<string, number>;
 }) {
+  const codeLabel = useContext(CodeLanguageLabel);
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const run = (action: () => Promise<{ success: boolean; error?: string }>) =>
@@ -683,7 +691,7 @@ function SkillView({
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
             <code className="text-xs">{skill.key}</code>
             <span>{skill.knowledge === "PROCEDURAL" ? "Doing" : "Knowing"}</span>
-            <span>{skill.runnable ? "Python code tasks and questions" : "Questions and spoken explanations (no code)"}</span>
+            <span>{skill.runnable ? `${codeLabel} code tasks and questions` : "Questions and spoken explanations (no code)"}</span>
             {skill._count.requiredBy > 0 && <span>Unlocks {skill._count.requiredBy} later</span>}
           </p>
           {skill.criteriaHint && <p className="text-sm text-muted-foreground">Grader hint: {skill.criteriaHint}</p>}
@@ -829,6 +837,7 @@ const fieldsOf = (skill: Skill): SkillInput => ({
 });
 
 function SkillEditor({ skill, onClose }: { skill: Skill; onClose: () => void }) {
+  const codeLabel = useContext(CodeLanguageLabel);
   const [form, setForm] = useState<SkillInput>(() => fieldsOf(skill));
   const [pending, start] = useTransition();
   const set = <K extends keyof SkillInput>(field: K, value: SkillInput[K]) => setForm((current) => ({ ...current, [field]: value }));
@@ -887,9 +896,9 @@ function SkillEditor({ skill, onClose }: { skill: Skill; onClose: () => void }) 
         </div>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={form.runnable} onChange={(event) => set("runnable", event.target.checked)} className="h-4 w-4" />
-          Python code tasks can practise it
+          {codeLabel} code tasks can practise it
         </label>
-        <span className="text-xs text-muted-foreground">Off for anything that isn&apos;t Python: it gets questions and spoken explanations.</span>
+        <span className="text-xs text-muted-foreground">Off for anything that isn&apos;t {codeLabel}: it gets questions and spoken explanations.</span>
       </div>
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={save} disabled={pending}>

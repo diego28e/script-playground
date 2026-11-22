@@ -1,14 +1,43 @@
 // Checks a grader (infra/lab/grader) end to end: right, wrong and hostile answers must come back as expected. Uses
 // GRADER_URL and GRADER_SECRET from .env.local / .env, so it checks the grader those point at.
 //
-//   pnpm grader:check
+//   pnpm grader:check                 Python answers
+//   pnpm grader:check --typescript    and TypeScript answers too (the grader needs GRADER_TS_IMAGE, infra/lab/README.md)
 import "./load-env";
 import { gradeCode } from "@/lib/practice/grader";
+import type { PracticeLanguage } from "@/lib/practice/language";
 
 const add = "def add(a, b):\n    return a + b\n";
 const addTests = "def test_small():\n    assert add(2, 3) == 5\n\ndef test_negative():\n    assert add(-1, -1) == -2, 'add(-1, -1) should be -2'\n";
 
-const cases: [string, { code: string; tests?: string; timeoutMs?: number }, string[]][] = [
+type Case = [string, { code: string; tests?: string; timeoutMs?: number; language?: PracticeLanguage }, string[]];
+
+// TypeScript (infra/lab/grader/harness-ts.mjs): tsc checks, Node runs; with tests, a compile error fails like a test.
+const tsAdd = "function add(a: number, b: number): number {\n  return a + b;\n}\n";
+const tsAddTests = 'test("small", () => {\n  assert.equal(add(2, 3), 5);\n});\ntest("negative", () => {\n  assert.equal(add(-1, -1), -2, "add(-1, -1) should be -2");\n});\n';
+const ts = (name: string, input: Case[1], expected: string[]): Case => [`TypeScript: ${name}`, { ...input, language: "typescript" }, expected];
+const typescriptCases: Case[] = [
+  ts("right answer", { code: tsAdd, tests: tsAddTests }, ["passed"]),
+  ts("wrong answer", { code: "function add(a: number, b: number): number {\n  return a - b;\n}\n", tests: tsAddTests }, ["failed"]),
+  ts("type error fails the compile check", { code: "function add(a: number, b: number): number {\n  return `${a + b}`;\n}\n", tests: tsAddTests }, ["failed"]),
+  ts("type error in a plain run", { code: 'let count: number = 10;\ncount = count + "5";\nconsole.log(count);\n' }, ["error"]),
+  ts("enum (not erasable)", { code: "enum Color { Red }\nconsole.log(Color.Red);\n" }, ["error"]),
+  ts(
+    "type-level test that must not compile",
+    { code: 'type Status = "paid" | "failed";\nfunction label(s: Status): string {\n  return s;\n}\n', tests: 'test("rejects others", () => {\n  // @ts-expect-error not a Status\n  label("refunded");\n});\n' },
+    ["passed"],
+  ),
+  ts("printed output", { code: "for (let i = 0; i < 3; i++) console.log(i * i);\n" }, ["passed"]),
+  ts("fake result line", { code: 'process.stdout.write("\\nabc{\\"ok\\": true}\\n");\nthrow new Error("nope");\n', tests: tsAddTests }, ["error"]),
+  ts("infinite loop", { code: "while (true) {}\n", timeoutMs: 6000 }, ["timeout"]),
+  ts("memory bomb", { code: "const blocks: Uint8Array[] = [];\nwhile (true) blocks.push(new Uint8Array(50 * 1024 * 1024).fill(1));\n", timeoutMs: 15000 }, ["oom", "error", "crashed"]),
+  ts("network", { code: 'await fetch("http://example.com", { signal: AbortSignal.timeout(3000) });\n' }, ["error"]),
+  ts("write outside /tmp", { code: 'import { writeFileSync } from "node:fs";\nwriteFileSync("/etc/hacked", "x");\n' }, ["error"]),
+  ts("hidden tests not in the environment", { code: 'const leaked = Object.keys(process.env).filter((key) => key.startsWith("GRADER"));\nif (leaked.length) throw new Error(leaked.join(", "));\n' }, ["passed"]),
+  ts("still working after the others", { code: tsAdd, tests: tsAddTests }, ["passed"]),
+];
+
+const cases: Case[] = [
   ["right answer", { code: add, tests: addTests }, ["passed"]],
   ["wrong answer", { code: "def add(a, b):\n    return a - b\n", tests: addTests }, ["failed"]],
   ["syntax error", { code: "def add(a, b)\n    return a + b\n", tests: addTests }, ["error"]],
@@ -33,7 +62,7 @@ const cases: [string, { code: string; tests?: string; timeoutMs?: number }, stri
 async function main() {
   console.log(`Grader: ${process.env.GRADER_URL ?? "(GRADER_URL not set)"}`);
   let failures = 0;
-  for (const [name, input, expected] of cases) {
+  for (const [name, input, expected] of [...cases, ...(process.argv.includes("--typescript") ? typescriptCases : [])]) {
     const result = await gradeCode(input);
     const good = expected.includes(result.status);
     if (!good) failures += 1;

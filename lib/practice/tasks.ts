@@ -9,6 +9,7 @@ import { practice } from "@/lib/practice/config";
 import type { PublishedGraph } from "@/lib/practice/graph";
 import { gradeCode, type GradeOutcome } from "@/lib/practice/grader";
 import { gradeExplanation } from "@/lib/practice/explain";
+import { COMPILE_CHECK, LANGUAGE, PRACTICE_LANGUAGES, practiceLanguage, type PracticeLanguage } from "@/lib/practice/language";
 
 // Practice tasks (docs/practice.md, "Tasks"): a model writes one task for one skill at one stage; the platform proves it
 // (code runs on the grader: the reference passes and wrong code fails; a question is answered blind by a second
@@ -19,7 +20,7 @@ import { gradeExplanation } from "@/lib/practice/explain";
 export const FORMS = ["choice", "fill", "predict", "code", "debug", "explain"] as const;
 export type TaskForm = (typeof FORMS)[number];
 
-// The task-writing model, unless the admin picks another: fast, and good at Python and tests.
+// The task-writing model, unless the admin picks another: fast, and good at code and tests.
 export const DEFAULT_TASK_MODEL = "claude-sonnet-5-5";
 
 /** What each stage of the two ladders asks of the learner. */
@@ -34,22 +35,64 @@ const STAGES: Record<string, string> = {
   transfer: "TRANSFER: apply the skill in a new context, different from the lesson's, without hints.",
 };
 
-const FORM_RULES: Record<TaskForm, string> = {
+/** The forms that are the same whatever the course's language. */
+const FORM_RULES: Record<Exclude<TaskForm, "predict" | "code" | "debug">, string> = {
   choice:
     "choice: a question with exactly 4 options and one correct answer. Distractors come from real misconceptions, are about as long as the answer, and are clearly wrong to someone who has the skill. Fill options (es and en, same order) and answerIndex (0-based). No 'all/none of the above'.",
   fill:
     "fill: the prompt shows exactly one blank written as ____ (in a sentence or in a code block). answers lists 1 to 4 accepted answers, each short (a word, a name, a value or a tiny expression); comparison ignores case, spaces at the ends and surrounding backticks or quotes.",
-  predict:
-    "predict: code is a Python snippet of at most 20 lines that prints something deterministic (no randomness, time, network, set or dict-order tricks, object ids). expectedOutput is exactly what it prints; wrongOutput is the most likely wrong prediction. The prompt asks what it prints and shows nothing of the output.",
-  code:
-    "code: code is the starter the learner edits (imports, a function signature with a docstring, and `raise NotImplementedError`). tests holds 2 to 5 functions named test_* that use plain assert with a short English message, are deterministic, print nothing and run in under 5 seconds. solution is a correct full replacement of the starter; wrongSolution is a plausible wrong one (a typical mistake) that fails at least one test. recipeEs and recipeEn are the same 3 to 7 steps (one string each, in the same order in both languages) a learner can follow to write the solution themselves, like a teacher's recipe: what to compute, in what order, and what to call each result. Plain words only: no code, no function calls, no operators or expressions; a step may name a variable, parameter or function in backticks (`max_budget`), never show how to write it. Precise enough to follow, leaving every bit of Python to the learner.",
-  debug:
-    "debug: code is a short program (at most 25 lines) with exactly one realistic bug. tests holds 2 to 5 functions named test_* (plain assert, short English message) that fail on the bug and pass when it is fixed. solution is the fixed program. The prompt says what the code should do and that it has a bug, without saying where.",
   explain:
     "explain: the learner explains an idea aloud (or types it), as they would to a colleague or in a job interview, in 30 seconds to 2 minutes. The prompt asks ONE open question: why something is so, what happens when…, how two things differ, or when to choose one over the other, in a concrete situation where possible. It never lists what to cover. pointsEs/pointsEn are the same 3 to 5 points a good answer makes (one short sentence each, in the same order): ideas, not wording, each checkable on its own, together enough to answer well. Only what an expert answering THIS question unprompted would say: an answer is checked by having an expert answer the question without seeing the points, and it must make most of them. Make the question ask for anything more. misconceptionsEs/misconceptionsEn are the same 1 to 3 wrong ideas learners commonly hold about it, each as a learner would state it. modelAnswerEs/modelAnswerEn: a good spoken answer of 60 to 150 words in plain sentences (no lists, headings or code blocks) that makes every point. The explanation says why these points are the ones that matter. At the RECALL stage, keep it to one idea the lesson taught (what it is, or why it is so), answerable in 30 to 60 seconds, with 3 points.",
 };
 
-export const SYSTEM_PROMPT = `You write practice tasks for an online course, for spaced practice after each lesson; THE COURSE says what it teaches. Learners practise on a web page: they answer questions there, explain ideas aloud or in writing, and, in programming courses, write code that runs in a sandbox with Python 3.12 and the course's packages (langchain, langchain-core, langgraph and their usual dependencies), with NO network and NO API keys.
+/**
+ * What the writer is told about code, per language (lib/practice/language.ts): what the sandbox runs, the rules for
+ * code and tests, the three forms that hold code, and an example. Python's words are the ones tasks were always
+ * written with.
+ */
+const CODE: Record<PracticeLanguage, { sandbox: string; rules: string; predict: string; code: string; debug: string; example: string }> = {
+  python: {
+    sandbox: "Python 3.12 and the course's packages (langchain, langchain-core, langgraph and their usual dependencies), with NO network and NO API keys",
+    rules: `- Never require the network, an API key, a real model, a GPU or files outside /tmp. Where a chat model is needed in code, use LangChain's fake models (from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel).
+- Tests run after the code, in the same namespace: they use its names directly. Never write \`import solution\` or \`from solution import …\`.
+- A run has 30 seconds including imports (importing langchain takes a few seconds in the sandbox): keep code and tests light, with no loops that wait, sleep or retry.
+- Write against the package versions listed under THE SANDBOX when given: APIs change between versions (in recent langchain-core, for example, a message's .text is a TextAccessor, not a str).
+- Code is valid Python 3.12, deterministic, and uses English names.`,
+    predict:
+      "predict: code is a Python snippet of at most 20 lines that prints something deterministic (no randomness, time, network, set or dict-order tricks, object ids). expectedOutput is exactly what it prints; wrongOutput is the most likely wrong prediction. The prompt asks what it prints and shows nothing of the output.",
+    code:
+      "code: code is the starter the learner edits (imports, a function signature with a docstring, and `raise NotImplementedError`). tests holds 2 to 5 functions named test_* that use plain assert with a short English message, are deterministic, print nothing and run in under 5 seconds. solution is a correct full replacement of the starter; wrongSolution is a plausible wrong one (a typical mistake) that fails at least one test. recipeEs and recipeEn are the same 3 to 7 steps (one string each, in the same order in both languages) a learner can follow to write the solution themselves, like a teacher's recipe: what to compute, in what order, and what to call each result. Plain words only: no code, no function calls, no operators or expressions; a step may name a variable, parameter or function in backticks (`max_budget`), never show how to write it. Precise enough to follow, leaving every bit of Python to the learner.",
+    debug:
+      "debug: code is a short program (at most 25 lines) with exactly one realistic bug. tests holds 2 to 5 functions named test_* (plain assert, short English message) that fail on the bug and pass when it is fixed. solution is the fixed program. The prompt says what the code should do and that it has a bug, without saying where.",
+    example: `{"form": "predict", "difficulty": 0, "expectedSeconds": 60, "promptEs": "¿Qué imprime este código?\\n\\n\`\`\`python\\nprint(sorted([3, 1, 2])[0])\\n\`\`\`", "promptEn": "What does this code print?\\n\\n\`\`\`python\\nprint(sorted([3, 1, 2])[0])\\n\`\`\`", "code": "print(sorted([3, 1, 2])[0])", "expectedOutput": "1", "wrongOutput": "3", "explanationEs": "…", "explanationEn": "…"}`,
+  },
+  typescript: {
+    sandbox: "Node.js 26 and TypeScript 7 (`tsc` checks the code in strict mode, then Node runs the .ts file itself by stripping its types), with Node's built-in modules only: NO npm packages, NO network and NO API keys",
+    rules: `- One file, an ES module. It may import Node's built-in modules (\`import { readFile } from "node:fs/promises"\`) and nothing else: no npm packages, no other files, no network, no API keys, no files outside /tmp.
+- The compiler is the course's: strict (no implicit \`any\`, \`null\` and \`undefined\` checked, \`catch (error)\` is \`unknown\`), Node's types, modern JavaScript without the browser's (no \`document\` or \`window\`), and only syntax Node can strip: never \`enum\`, \`namespace\`, parameter properties (\`constructor(private x: number)\`) or \`import x = require()\`.
+- \`tsc\` checks the code and the tests together, and ANY compiler error fails the run: the reference solution and the tests must compile with no error at all, and so must a code task's starter.
+- Tests are added after the code, in the same module: they use its names directly, so the code needs no \`export\` and the tests never import it. Two things are there already, with nothing to import: \`test(name, fn)\` and \`assert\` (Node's node:assert/strict: \`assert.equal\`, \`assert.deepEqual\`, \`assert.throws\`, \`assert.rejects\`…). Write each test as \`test("short English name", () => { assert.equal(actual, expected, "short English message"); });\`; \`fn\` may be async.
+- To test that something must NOT compile (a wrong argument, an impossible state), put \`// @ts-expect-error <what must not compile, in a few English words>\` on the line just before it, inside a test: the run fails when that line compiles.
+- A run has 30 seconds, most of it spare: keep code and tests light, with no loops that wait, sleep or retry, and no timer longer than 50 ms.
+- Write against the versions listed under THE SANDBOX when given.
+- Code is valid TypeScript, deterministic (no \`Math.random\`, dates, time or object ids), and uses English names. What a snippet prints is what Node prints: \`console.log\` of a string, number or boolean is safe; print an object or an array with \`JSON.stringify\`, since Node's own layout of them is easy to get wrong.`,
+    predict:
+      "predict: code is a TypeScript snippet of at most 20 lines that compiles with no error and prints something deterministic with `console.log`. expectedOutput is exactly what Node prints when it runs; wrongOutput is the most likely wrong prediction. The prompt asks what it prints and shows nothing of the output.",
+    code:
+      "code: code is the starter the learner edits (any imports, the types the task gives, and a function signature with a `/** … */` comment whose body is `throw new Error(\"Not implemented\");`); it compiles. tests holds 2 to 5 `test(\"…\", () => { … })` calls that use `assert` with a short English message, are deterministic, print nothing and run in under 5 seconds. solution is a correct full replacement of the starter; wrongSolution is a plausible wrong one (a typical mistake) that fails at least one test, or doesn't compile. recipeEs and recipeEn are the same 3 to 7 steps (one string each, in the same order in both languages) a learner can follow to write the solution themselves, like a teacher's recipe: what to compute, in what order, and what to call each result. Plain words only: no code, no function calls, no operators or expressions; a step may name a variable, parameter, function or type in backticks (`maxBudget`), never show how to write it. Precise enough to follow, leaving every bit of TypeScript to the learner.",
+    debug:
+      "debug: code is a short program (at most 25 lines) with exactly one realistic bug: either it gives a wrong result when it runs, or it has a mistake `tsc` reports (then it doesn't compile until it is fixed). tests holds 2 to 5 `test(\"…\", () => { … })` calls (`assert`, short English message) that fail on the bug and pass when it is fixed; for a compiler error, the failed compile is the failure, and the tests check the fixed code's behaviour. solution is the fixed program. The prompt says what the code should do and that it has a bug, without saying where.",
+    example: `{"form": "predict", "difficulty": 0, "expectedSeconds": 60, "promptEs": "¿Qué imprime este código?\\n\\n\`\`\`ts\\nconst sorted: number[] = [3, 1, 2].sort((a, b) => a - b);\\nconsole.log(sorted[0]);\\n\`\`\`", "promptEn": "What does this code print?\\n\\n\`\`\`ts\\nconst sorted: number[] = [3, 1, 2].sort((a, b) => a - b);\\nconsole.log(sorted[0]);\\n\`\`\`", "code": "const sorted: number[] = [3, 1, 2].sort((a, b) => a - b);\\nconsole.log(sorted[0]);", "expectedOutput": "1", "wrongOutput": "3", "explanationEs": "…", "explanationEn": "…"}`,
+  },
+};
+
+/** One form's rules, in the course's language where the form holds code. */
+const formRule = (form: TaskForm, language: PracticeLanguage) => (form === "predict" || form === "code" || form === "debug" ? CODE[language][form] : FORM_RULES[form]);
+
+/** The writer's instructions for a course whose code practice is in `language`. */
+export function systemPrompt(language: PracticeLanguage): string {
+  const code = CODE[language];
+  return `You write practice tasks for an online course, for spaced practice after each lesson; THE COURSE says what it teaches. Learners practise on a web page: they answer questions there, explain ideas aloud or in writing, and, in programming courses, write code that runs in a sandbox with ${code.sandbox}.
 
 Write ONE task, for the skill and stage given, in the form given.
 
@@ -63,20 +106,19 @@ RULES
 - Don't repeat the tasks listed under EXISTING TASKS; vary the situation, not just the names.
 
 CODE (predict, code and debug tasks)
-- Never require the network, an API key, a real model, a GPU or files outside /tmp. Where a chat model is needed in code, use LangChain's fake models (from langchain_core.language_models.fake_chat_models import FakeListChatModel, GenericFakeChatModel).
-- Tests run after the code, in the same namespace: they use its names directly. Never write \`import solution\` or \`from solution import …\`.
-- A run has 30 seconds including imports (importing langchain takes a few seconds in the sandbox): keep code and tests light, with no loops that wait, sleep or retry.
-- Write against the package versions listed under THE SANDBOX when given: APIs change between versions (in recent langchain-core, for example, a message's .text is a TextAccessor, not a str).
-- Code is valid Python 3.12, deterministic, and uses English names.
+${code.rules}
 
 FORMS
-${FORMS.map((form) => `- ${FORM_RULES[form]}`).join("\n")}
+${FORMS.map((form) => `- ${formRule(form, language)}`).join("\n")}
 
 Answer with one JSON object, for example (the content is only an illustration):
-{"form": "predict", "difficulty": 0, "expectedSeconds": 60, "promptEs": "¿Qué imprime este código?\\n\\n\`\`\`python\\nprint(sorted([3, 1, 2])[0])\\n\`\`\`", "promptEn": "What does this code print?\\n\\n\`\`\`python\\nprint(sorted([3, 1, 2])[0])\\n\`\`\`", "code": "print(sorted([3, 1, 2])[0])", "expectedOutput": "1", "wrongOutput": "3", "explanationEs": "…", "explanationEn": "…"}`;
+${code.example}`;
+}
 
 const TaskSchema = z.object({
   form: z.enum(FORMS),
+  // The language its code is in (lib/practice/language.ts); left out for Python, the language of every older task.
+  language: z.enum(PRACTICE_LANGUAGES).optional(),
   difficulty: z.number().min(-3).max(3),
   expectedSeconds: z.number().int().min(10).max(900),
   promptEs: z.string().min(10),
@@ -165,6 +207,16 @@ export const RESPONSE_SCHEMA: Schema = {
   ],
 };
 
+/**
+ * A task with its language set as stored: named for TypeScript, left out for Python, so a Python task is stored exactly
+ * as one was before there were other languages.
+ */
+function withLanguage(task: TaskContent, language: PracticeLanguage): TaskContent {
+  const { language: _ignored, ...rest } = task;
+  void _ignored;
+  return language === "python" ? rest : { ...rest, language };
+}
+
 /** The fields of each form, beside the ones every task has. */
 const FORM_FIELDS: Record<TaskForm, (keyof TaskContent)[]> = {
   choice: ["optionsEs", "optionsEn", "answerIndex"],
@@ -241,16 +293,20 @@ export function rubricProblem(task: Pick<TaskContent, "pointsEs" | "pointsEn" | 
  * plain sentence. It may name things in backticks (a variable, a parameter, a function) but never show code: no code
  * block, no backticked call, operator or expression, and no line of the solution.
  */
-export function recipeProblem(task: Pick<TaskContent, "recipeEs" | "recipeEn" | "solution">): string | null {
+export function recipeProblem(task: Pick<TaskContent, "recipeEs" | "recipeEn" | "solution"> & Partial<Pick<TaskContent, "code" | "language">>): string | null {
   const es = task.recipeEs ?? [];
   const en = task.recipeEn ?? [];
   if (!es.length || !en.length) return "code without a recipe (recipeEs and recipeEn)";
   if (es.length !== en.length) return "the recipe has a different number of steps in Spanish and English";
   if (en.length < 3 || en.length > 7) return "the recipe needs 3 to 7 steps";
+  const tidy = (line: string) => line.trim().replace(/\s+/g, " ");
+  const typescript = practiceLanguage(task.language) === "typescript";
+  // TypeScript: comments, imports and the lines the starter already shows say nothing about the solution.
+  const given = typescript ? new Set((task.code ?? "").split("\n").map(tidy)) : new Set<string>();
   const solutionLines = (task.solution ?? "")
     .split("\n")
-    .map((line) => line.trim().replace(/\s+/g, " "))
-    .filter((line) => line.length >= 12 && !/^(#|def |"""|'''|from |import )/.test(line));
+    .map(tidy)
+    .filter((line) => line.length >= 12 && !(typescript ? /^(\/\/|\/\*|\*|import |export \{)/ : /^(#|def |"""|'''|from |import )/).test(line) && !given.has(line));
   for (const step of [...es, ...en]) {
     if (step.length > 280) return "a recipe step is longer than 280 characters";
     if (step.includes("```")) return "a recipe step holds a code block";
@@ -327,11 +383,12 @@ const PROOF_TIMEOUT_MS = 30_000;
  * `deadline`: a grader that answers later would get the whole request killed (lib/request-budget.ts).
  */
 async function proveByRunning(task: TaskContent, deadline: number): Promise<Proof> {
+  const language = practiceLanguage(task.language);
   const left = deadline - Date.now();
   if (left < 1_500) return { ok: false, reason: "no time left to run it on the grader (the writing took too long); try again" };
   const signal = AbortSignal.timeout(left);
   if (task.form === "predict") {
-    const run = await gradeCode({ code: task.code!, timeoutMs: PROOF_TIMEOUT_MS }, { signal });
+    const run = await gradeCode({ code: task.code!, timeoutMs: PROOF_TIMEOUT_MS, language }, { signal });
     if (run.status === "unavailable") return { ok: false, reason: `grader unavailable: ${run.message}` };
     if (run.status !== "passed") return { ok: false, reason: `the snippet didn't run cleanly (${whyRun(run)})`, detail: runDetail("The snippet", run), fixable: true };
     if (!sameOutput(run.stdout, task.expectedOutput!)) {
@@ -346,12 +403,17 @@ async function proveByRunning(task: TaskContent, deadline: number): Promise<Proo
     return { ok: true, proof: { kind: "executable", at: Date.now(), referencePassed: true, wrongSolutionsFailed: 1, runner: "academia-grader" }, note: `printed the key in ${run.wallMs} ms` };
   }
   const wrongs = task.form === "code" ? [task.code!, task.wrongSolution!] : [task.code!];
-  const [reference, ...others] = await Promise.all([task.solution!, ...wrongs].map((code) => gradeCode({ code, tests: task.tests!, timeoutMs: PROOF_TIMEOUT_MS }, { signal })));
+  const [reference, ...others] = await Promise.all([task.solution!, ...wrongs].map((code) => gradeCode({ code, tests: task.tests!, timeoutMs: PROOF_TIMEOUT_MS, language }, { signal })));
   if (reference.status === "unavailable") return { ok: false, reason: `grader unavailable: ${reference.message}` };
   if (reference.status !== "passed") {
     return { ok: false, reason: `the reference solution doesn't pass (${whyRun(reference)})`, detail: runDetail("The reference solution with the tests", reference), fixable: true };
   }
-  if (reference.tests.length < 2) return { ok: false, reason: "fewer than 2 tests ran", detail: `Only ${reference.tests.length} test function(s) named test_* ran: write 2 to 5.`, fixable: true };
+  // A TypeScript run adds its compile check to the task's own tests: it isn't one of them.
+  const ran = reference.tests.filter((test) => test.name !== COMPILE_CHECK).length;
+  if (ran < 2) {
+    const what = language === "typescript" ? 'test("…", …) call(s)' : "test function(s) named test_*";
+    return { ok: false, reason: "fewer than 2 tests ran", detail: `Only ${ran} ${what} ran: write 2 to 5.`, fixable: true };
+  }
   if (others.some((run) => run.status === "unavailable")) return { ok: false, reason: "grader unavailable while checking the wrong versions" };
   const passing = others.map((run, index) => ({ run, name: task.form === "debug" ? "the buggy code" : index === 0 ? "the starter" : "the wrong solution" })).filter(({ run }) => run.status === "passed");
   const caught = others.length - passing.length;
@@ -363,31 +425,45 @@ async function proveByRunning(task: TaskContent, deadline: number): Promise<Proo
       fixable: true,
     };
   }
-  return { ok: true, proof: { kind: "executable", at: Date.now(), referencePassed: true, wrongSolutionsFailed: caught, runner: "academia-grader" }, note: `reference passed ${reference.tests.length} tests; ${caught} wrong version(s) failed` };
+  return { ok: true, proof: { kind: "executable", at: Date.now(), referencePassed: true, wrongSolutionsFailed: caught, runner: "academia-grader" }, note: `reference passed ${ran} tests${language === "typescript" ? " and compiled" : ""}; ${caught} wrong version(s) failed` };
 }
 
 // What the sandbox really has, read from the grader: the writer is told, so it writes against these versions.
-const FACTS_CODE = `import sys, importlib.metadata as metadata
+const PYTHON_FACTS = `import sys, importlib.metadata as metadata
 print("Python", sys.version.split()[0])
 for name in ["langchain", "langchain-core", "langgraph", "langsmith", "langchain-text-splitters", "langchain-community", "pydantic"]:
     try:
         print(name, metadata.version(name))
     except metadata.PackageNotFoundError:
         pass`;
+// The TypeScript sandbox (infra/lab/grader/ts-sandbox) says where its packages are.
+const TYPESCRIPT_FACTS = `import { readFileSync } from "node:fs";
+console.log("Node.js", process.versions.node);
+for (const name of ["typescript", "@types/node"]) {
+  try {
+    const found: { version: string } = JSON.parse(readFileSync(\`\${process.env.TS_SANDBOX_ROOT ?? "/opt/ts-sandbox"}/node_modules/\${name}/package.json\`, "utf8"));
+    console.log(name, found.version);
+  } catch {
+    // Not there: nothing to say about it.
+  }
+}`;
+const FACTS_CODE: Record<PracticeLanguage, string> = { python: PYTHON_FACTS, typescript: TYPESCRIPT_FACTS };
 const FACTS_TTL_MS = 6 * 60 * 60 * 1000;
-let sandboxCache: { text: string; at: number } | null = null;
+const sandboxCache = new Map<PracticeLanguage, { text: string; at: number }>();
 
 /**
- * The sandbox's Python and package versions, as lines ("langchain-core 1.0.4"). Read once per process and kept for six
- * hours; `fetch: false` only uses what's kept (a request on Amplify can't spare the seconds).
+ * The sandbox's language and package versions, as lines ("langchain-core 1.0.4", "typescript 7.0.2"). Read once per
+ * process and language and kept for six hours; `fetch: false` only uses what's kept (a request on Amplify can't spare
+ * the seconds).
  */
-export async function sandboxFacts({ fetch }: { fetch: boolean }): Promise<string> {
-  if (sandboxCache && Date.now() - sandboxCache.at < FACTS_TTL_MS) return sandboxCache.text;
+export async function sandboxFacts({ fetch, language = "python" }: { fetch: boolean; language?: PracticeLanguage }): Promise<string> {
+  const kept = sandboxCache.get(language);
+  if (kept && Date.now() - kept.at < FACTS_TTL_MS) return kept.text;
   if (!fetch) return "";
-  const run = await gradeCode({ code: FACTS_CODE, timeoutMs: PROOF_TIMEOUT_MS }, { signal: AbortSignal.timeout(40_000) });
+  const run = await gradeCode({ code: FACTS_CODE[language], timeoutMs: PROOF_TIMEOUT_MS, language }, { signal: AbortSignal.timeout(40_000) });
   if (run.status !== "passed" || !run.stdout.trim()) return "";
-  sandboxCache = { text: run.stdout.trim(), at: Date.now() };
-  return sandboxCache.text;
+  sandboxCache.set(language, { text: run.stdout.trim(), at: Date.now() });
+  return run.stdout.trim();
 }
 
 const CheckSchema: Schema = {
@@ -572,8 +648,9 @@ async function skillFor(courseId: string, skillKey: string) {
   if (!node || !meta) return { error: "This skill isn't in the published graph yet: approve its lesson and publish." } as const;
   // Items are checked against a graph that has the skill: a found one joins the published graph for the check.
   const checkGraph = found ? { ...published.graph, skills: [...published.graph.skills, node] } : published.graph;
-  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { title: true, summary: true } });
-  return { node, meta, found, checkGraph, subject: courseSubject(course) } as const;
+  const course = await prisma.course.findUnique({ where: { id: courseId }, select: { title: true, summary: true, practiceLanguage: true } });
+  // New code tasks are written in the course's language (Admin → Courses); a task keeps the one it was written in.
+  return { node, meta, found, checkGraph, subject: courseSubject(course), language: practiceLanguage(course?.practiceLanguage) } as const;
 }
 
 /** The course, as a model is told what it's about: its title, and its summary when it has one. */
@@ -583,19 +660,21 @@ export function courseSubject(course: { title: string; summary: string | null } 
 }
 
 /** What a model is told about the skill, stage and form, before it writes or edits a task. */
-async function taskContext(skill: Exclude<Awaited<ReturnType<typeof skillFor>>, { error: string }>, stage: string, form: TaskForm) {
+async function taskContext(skill: Exclude<Awaited<ReturnType<typeof skillFor>>, { error: string }>, stage: string, form: TaskForm, language: PracticeLanguage) {
   const { node, meta, found } = skill;
+  const plain = language === "python" ? "Plain Python" : `Plain ${LANGUAGE[language].label}`;
+  const inPlain = language === "python" ? "in plain Python" : `in plain ${LANGUAGE[language].label}`;
   const lesson = await prisma.lesson.findUnique({ where: { id: meta.lessonId }, select: { code: true, title: true, objectives: true } });
   const ladder = Object.keys(node.forms ?? {});
   return [
     `# THE COURSE\n${skill.subject}`,
     `# Skill: ${node.label} (key ${node.id})\n${node.description ?? ""}\nKind: ${node.knowledge}. Ladder: ${ladder.join(" → ")}.${node.criteriaHint ? `\nWhat shows the skill: ${node.criteriaHint}` : ""}`,
     `# Stage: ${stage}\n${STAGES[stage] ?? stage}`,
-    `# Form: ${form}\n${FORM_RULES[form]}`,
+    `# Form: ${form}\n${formRule(form, language)}`,
     found?.tutor
-      ? `# A skill a learner asked their tutor to practise\nIt came up while working on "${found.forLabel}" (a detour, or the learner asking for more practice). The tutor's challenge looked like this: ${found.context ?? "(not kept)"}\nWrite the task in the same spirit: a small realistic scenario (calling AI models, rate limits, costs, tokens, audio, data) with concrete numbers, where this skill is the heart of the solution. Plain Python; the course's libraries only if the skill is about them.`
+      ? `# A skill a learner asked their tutor to practise\nIt came up while working on "${found.forLabel}" (a detour, or the learner asking for more practice). The tutor's challenge looked like this: ${found.context ?? "(not kept)"}\nWrite the task in the same spirit: a small realistic scenario (calling AI models, rate limits, costs, tokens, audio, data) with concrete numbers, where this skill is the heart of the solution. ${plain}; the course's libraries only if the skill is about them.`
       : found
-        ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, in plain Python where possible, without the course's libraries unless the skill is about them.`
+        ? `# Background skill\nThe course doesn't teach this skill: it's a prerequisite found because a learner kept failing "${found.forLabel}". Practise the basic idea itself, ${inPlain} where possible, without the course's libraries unless the skill is about them.`
         : "",
     lesson ? `# ${found ? "Where the learner met the gap: lesson" : "From lesson"} ${lesson.code ?? ""}: ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
   ].filter(Boolean);
@@ -740,9 +819,10 @@ export async function generateTask(input: {
   });
   // The form this stage's pool has least of, unless one was asked for.
   const form = input.form && forms.includes(input.form) ? input.form : [...forms].sort((a, b) => existing.filter((task) => task.form === a).length - existing.filter((task) => task.form === b).length)[0];
-  const facts = await sandboxFacts({ fetch: Boolean(input.thorough) });
+  const { language } = skill;
+  const facts = await sandboxFacts({ fetch: Boolean(input.thorough), language });
   const context = [
-    ...(await taskContext(skill, input.stage, form)),
+    ...(await taskContext(skill, input.stage, form, language)),
     ...(facts ? [`# THE SANDBOX (the versions code runs with)\n${facts}`] : []),
     `# EXISTING TASKS (don't repeat)\n${existing.map((task) => `- (${task.form}) ${String((task.content as TaskContent).promptEn).replace(/\s+/g, " ").slice(0, 160)}`).join("\n") || "(none yet)"}`,
   ].join("\n\n");
@@ -761,7 +841,7 @@ export async function generateTask(input: {
     deadline: writeDeadline,
     contents: [{ role: "user", parts: [{ text: context }, { text: `Write the ${form} task as the JSON object.` }] }],
     config: {
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: systemPrompt(language),
       responseMimeType: "application/json",
       responseSchema: schemaFor(form),
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
@@ -776,7 +856,7 @@ export async function generateTask(input: {
   } catch {
     return { ok: false, form, model: written.model, error: `${written.model} didn't answer with a valid task.` };
   }
-  task = { ...task, form };
+  task = withLanguage({ ...task, form }, language);
   // Models tend to put the right option first: shuffle, the same way in both languages, and move the key with it.
   if (form === "choice" && task.optionsEs?.length === 4 && task.optionsEn?.length === 4 && task.answerIndex !== undefined) {
     const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
@@ -786,7 +866,7 @@ export async function generateTask(input: {
     ? {
         max: 2,
         fix: (current: TaskContent, failure: Extract<Proof, { ok: false }>) =>
-          repairTask({ context, form, task: current, failure, userId: input.userId, model: chosen, deadline: input.deadline }),
+          repairTask({ context, form, language, task: current, failure, userId: input.userId, model: chosen, deadline: input.deadline }),
       }
     : undefined;
   return proveAndStore({ ...input, form, task, model: written.model, traceId: written.traceId, checkGraph: skill.checkGraph, subject: skill.subject, keepRejected: true, repair });
@@ -799,6 +879,7 @@ export async function generateTask(input: {
 async function repairTask(input: {
   context: string;
   form: TaskForm;
+  language: PracticeLanguage;
   task: TaskContent;
   failure: Extract<Proof, { ok: false }>;
   userId: string;
@@ -831,7 +912,7 @@ async function repairTask(input: {
       },
     ],
     config: {
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: systemPrompt(input.language),
       responseMimeType: "application/json",
       responseSchema: schemaFor(input.form),
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
@@ -840,7 +921,7 @@ async function repairTask(input: {
   });
   if (!written.ok) return null;
   try {
-    return { task: { ...TaskSchema.parse(JSON.parse(written.text)), form: input.form }, model: written.model };
+    return { task: withLanguage({ ...TaskSchema.parse(JSON.parse(written.text)), form: input.form }, input.language), model: written.model };
   } catch {
     return null;
   }
@@ -858,9 +939,10 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
   const skill = await skillFor(row.courseId, row.skillKey);
   if ("error" in skill) return { ok: false, error: skill.error ?? "This skill isn't published yet." };
   const form = row.form as TaskForm;
-  const facts = await sandboxFacts({ fetch: false });
+  const language = practiceLanguage((row.content as unknown as TaskContent).language);
+  const facts = await sandboxFacts({ fetch: false, language });
   const context = [
-    ...(await taskContext(skill, row.stage, form)),
+    ...(await taskContext(skill, row.stage, form, language)),
     ...(facts ? [`# THE SANDBOX (the versions code runs with)\n${facts}`] : []),
     `# THE TASK NOW\n${JSON.stringify(row.content, null, 1)}`,
     `# WHAT THE ADMIN WANTS CHANGED\n${input.instruction}`,
@@ -885,7 +967,7 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
       },
     ],
     config: {
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: systemPrompt(language),
       responseMimeType: "application/json",
       responseSchema: schemaFor(form),
       thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel },
@@ -895,7 +977,7 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
   if (!written.ok) return { ok: false, error: written.reason === "quota" ? "Today's authoring allowance is used up." : "No model could rewrite the task in time. Try again." };
   try {
     const task = TaskSchema.parse(JSON.parse(written.text));
-    return { ok: true, task: { ...task, form }, model: written.model };
+    return { ok: true, task: withLanguage({ ...task, form }, language), model: written.model };
   } catch {
     return { ok: false, error: `${written.model} didn't answer with a valid task.` };
   }
@@ -906,7 +988,7 @@ export async function aiEditTask(input: { taskId: string; instruction: string; m
  * joins the pool as a new task and the old one is retired, so past answers keep pointing at what learners saw.
  */
 export async function saveTaskEdit(input: { taskId: string; task: unknown; editedWith: string | null; userId: string; deadline: number }): Promise<GenerateResult> {
-  const row = await prisma.practiceTask.findUnique({ where: { id: input.taskId }, select: { id: true, courseId: true, skillKey: true, stage: true, form: true, status: true } });
+  const row = await prisma.practiceTask.findUnique({ where: { id: input.taskId }, select: { id: true, courseId: true, skillKey: true, stage: true, form: true, status: true, content: true } });
   if (!row) return { ok: false, error: "That task is gone." };
   if (row.status === "RETIRED") return { ok: false, error: "That task was retired or already replaced by an edit." };
   const parsed = TaskSchema.safeParse(input.task);
@@ -921,7 +1003,7 @@ export async function saveTaskEdit(input: { taskId: string; task: unknown; edite
     skillKey: row.skillKey,
     stage: row.stage,
     form,
-    task: { ...parsed.data, form },
+    task: withLanguage({ ...parsed.data, form }, practiceLanguage((row.content as unknown as TaskContent).language)),
     model: writer === "admin" ? "edited by an admin" : `${writer}, edited`,
     userId: input.userId,
     deadline: input.deadline,

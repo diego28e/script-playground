@@ -428,6 +428,26 @@
 /* The scratchbook's error line (components/practice/scratchbook.tsx): the line a run failed on, in the editor. */
 .scratch-error-line { background: rgba(248, 113, 113, 0.14); }
 .scratch-error-glyph { background: #f87171; width: 3px !important; margin-left: 4px; border-radius: 2px; }
+/* tsc's errors in the TypeScript scratchbook: amber, apart from the red of an error the code hit while it ran. */
+.scratch-compile-line { background: rgba(251, 191, 36, 0.12); }
+
+/* The practice widgets' buttons (docs/practice.md, "Widgets"). One widget is open at a time, and the open one says which
+   on the root (data-practice-widget, with its room in --scratchbook-width, --scratchbook-sheet and --coach-width): the
+   other's button moves clear of it, never over it. Closed, the buttons stack in the bottom right corner. */
+.practice-widget-button { position: fixed; right: 1.25rem; bottom: 1.25rem; }
+.practice-widget-button[data-stack="2"] { bottom: 4.75rem; }
+/* A phone: above the scratchbook's sheet; hidden behind the coach's, which is the learner's focus while it's open. */
+:root[data-practice-widget="scratchbook"] .practice-widget-button { bottom: calc(var(--scratchbook-sheet, 0px) + 1.25rem); }
+:root[data-practice-widget="coach"] .practice-widget-button { display: none; }
+/* While the other widget is open, a button is a round icon (its name stays its label and tooltip), so it takes as little
+   of the practice as it can. */
+:root[data-practice-widget] .practice-widget-button { width: 2.75rem; padding: 0; justify-content: center; }
+:root[data-practice-widget] .practice-widget-button .practice-widget-label { display: none; }
+@media (min-width: 64rem) {
+  /* A computer: in the practice's own corner, left of the docked scratchbook or of the coach's sheet. */
+  :root[data-practice-widget="scratchbook"] .practice-widget-button { bottom: 1.25rem; right: calc(var(--scratchbook-width, 0px) + 1.25rem); }
+  :root[data-practice-widget="coach"] .practice-widget-button { display: inline-flex; bottom: 1.25rem; right: calc(var(--coach-width, 0px) + 1.25rem); }
+}
 
 /* The lesson tutor's orb (lib/voice/orb.ts, components/courses/lesson-tutor.tsx): the shader draws on the canvas;
    without WebGL, a sphere in the same colours that swells with the voice. */

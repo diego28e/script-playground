@@ -171,9 +171,20 @@ type Props = {
   onSeek?: (seconds: number) => void;
   /** Closed; `resume` when the learner chose to go back to what was paused. */
   onClose: (resume: boolean) => void;
+  /**
+   * Where the sheet sits. "default": tall on a phone, floating from 640 px (the lesson tutor). "practice": on a phone as
+   * tall as the scratchbook's sheet (62svh), so the practice scrolls above it; floating from 1024 px, where the practice
+   * moves left to make room (components/practice/practice-coach.tsx).
+   */
+  placement?: "default" | "practice";
 };
 
-export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, scope, onSeek, onClose }: Props) {
+const PLACEMENT = {
+  default: "max-h-[88dvh] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:w-[26rem] sm:rounded-3xl",
+  practice: "h-[62svh] lg:inset-x-auto lg:bottom-4 lg:right-4 lg:h-auto lg:max-h-[calc(100dvh-6rem)] lg:w-[26rem] lg:rounded-3xl",
+};
+
+export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, scope, onSeek, onClose, placement = "default" }: Props) {
   const t = useMemo(() => ({ ...COPY[language], ...copy }), [language, copy]);
   const [phase, setPhase] = useState<Phase>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -596,7 +607,7 @@ export function VoiceTutor({ language, getPass: issuePass, turnContext, copy, sc
       role="dialog"
       aria-modal="false"
       aria-label={t.title}
-      className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88dvh] flex-col rounded-t-3xl bg-[#0f1520] text-white shadow-[0_-20px_60px_-12px_rgba(0,0,0,0.65)] sm:inset-x-auto sm:bottom-4 sm:right-4 sm:w-[26rem] sm:rounded-3xl rise-in"
+      className={cn("fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl bg-[#0f1520] text-white shadow-[0_-20px_60px_-12px_rgba(0,0,0,0.65)] rise-in", PLACEMENT[placement])}
     >
       <div className="flex items-start gap-3 px-5 pt-4">
         <div className="min-w-0 flex-1">
