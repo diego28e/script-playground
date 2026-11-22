@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowUpRight, Check, FlaskConical, Pencil, Plus, Rocket, Save, Sparkles, Wand2, X } from "lucide-react";
-import { draftCompassCard, proveCompassCard, publishCompassCard, saveCompassCard, adoptRealOutputs, type CompassConceptView } from "@/actions/compass";
+import { draftCompassCard, fixCompassCard, proveCompassCard, publishCompassCard, saveCompassCard, adoptRealOutputs, type CompassConceptView } from "@/actions/compass";
 import { COMPASS } from "@/lib/compass/languages";
 import { ConceptCard } from "@/components/compass/concept-card";
 import { Button } from "@/components/ui/button";
@@ -200,7 +200,9 @@ function VersionEditor({
   const { confirm, dialog } = useConfirm();
   const [draft, setDraft] = useState<CardDraft>(card?.draft ?? EMPTY);
   const [language, setLanguage] = useState<"es" | "en">("es");
-  const [busy, setBusy] = useState<"save" | "prove" | "real" | "publish" | null>(null);
+  const [busy, setBusy] = useState<"save" | "prove" | "real" | "publish" | "fix" | null>(null);
+  // Fix with AI starts with the cheapest model: it works from the proof's evidence, not from scratch.
+  const [fixModel, setFixModel] = useState(data.models.find((entry) => entry.id === "deepseek-flash")?.id ?? data.models[0]?.id ?? "");
   const dirty = JSON.stringify(draft) !== JSON.stringify(card?.draft ?? EMPTY);
   const set = <K extends keyof CardDraft>(key: K, value: CardDraft[K]) => setDraft((current) => ({ ...current, [key]: value }));
   const proof = !dirty ? card?.proof : null;
@@ -242,6 +244,19 @@ function VersionEditor({
     setDraft(result.draft);
     toast[result.proof.ok ? "success" : "error"](result.proof.ok ? "Outputs replaced and proven." : "Outputs replaced; something still doesn't behave as the card says.");
     router.refresh();
+  };
+
+  // A model repairs what the proof found wrong, as a new draft version that is proven straight away.
+  const fixWithAi = async () => {
+    if (!card) return;
+    setBusy("fix");
+    const result = await fixCompassCard(card.id, fixModel).catch(() => null);
+    setBusy(null);
+    if (!result?.success) return toast.error(result?.error ?? "The fix didn't come back. Try again.", { duration: 10000 });
+    const what = result.changed.length ? ` Changed: ${result.changed.join(", ")}.` : "";
+    if (result.proof?.ok) toast.success(`Fixed by ${result.model} and proven.${what} Review it, then publish.`, { duration: 10000 });
+    else toast.error(`${result.model} wrote a fix, but it still doesn't prove.${what} Fix again, or edit it.`, { duration: 10000 });
+    onSaved(result.cardId);
   };
 
   const publish = async () => {
@@ -291,6 +306,28 @@ function VersionEditor({
               <p className="text-sm font-medium">{proof.ok ? "Proven on the grader" : "The grader disagrees with the card"}</p>
               <span className="font-mono text-[11px] text-muted-foreground">{new Date(proof.ranAt).toLocaleString()}</span>
               <span className="flex-1" />
+              {!proof.ok && card && card.status !== "PUBLISHED" && card.status !== "RETIRED" && (
+                <>
+                  <select
+                    aria-label="Model for the fix"
+                    value={fixModel}
+                    onChange={(event) => setFixModel(event.target.value)}
+                    disabled={busy !== null}
+                    className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                  >
+                    {data.models.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Tip content="A model reads each failure (the code, what the card says, what really happened) and repairs only those parts, as a new version that is proven at once">
+                    <Button size="sm" onClick={() => void fixWithAi()} disabled={busy !== null} loading={busy === "fix"} loadingLabel="Fixing">
+                      <Wand2 className="mr-1.5 size-4" aria-hidden="true" /> Fix with AI
+                    </Button>
+                  </Tip>
+                </>
+              )}
               {fixable && card?.status === "DRAFT" && (
                 <Tip content="The code is the truth: each output that differed becomes what it really printed">
                   <Button size="sm" variant="outline" onClick={() => void applyRealOutputs()} loading={busy === "real"} loadingLabel="Replacing">

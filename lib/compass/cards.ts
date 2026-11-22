@@ -169,6 +169,8 @@ function draftContext(
 }
 
 export const DEFAULT_CARD_MODEL = "claude-sonnet-5-5";
+/** A repair works from the runtime's evidence: the cheapest model that follows JSON instructions is enough. */
+export const DEFAULT_REPAIR_MODEL = "deepseek-flash";
 
 const CARD_SHAPE = `{"titleEs": "…", "titleEn": "…", "summaryEs": "…", "summaryEn": "…", "explanationEs": "…", "explanationEn": "…", "whenEs": "…", "whenEn": "…",
  "examples": [{"code": "…", "output": "…", "noteEs": "…", "noteEn": "…"}],
@@ -230,6 +232,95 @@ export async function draftCard(input: {
   const dropped = [...card.docs.filter((key) => !docLink(key)), ...card.related.filter((key) => !keys.has(key))];
   card = { ...card, docs: card.docs.filter((key) => docLink(key)), related: card.related.filter((key) => keys.has(key) && key !== input.concept.key) };
   return { ok: true, card, model, dropped };
+}
+
+// --- Repair ---------------------------------------------------------------------------------------------------------
+
+/** Every field a repair may return; it returns only the ones it changed. */
+const RepairSchema = CardSchema.partial();
+
+/** The proof's failures as a model can act on them: the code, what the card claims, what really happened. */
+function failuresOf(card: CardDraft, proof: CardProof, language: CompassLanguage): string {
+  const fence = language === "javascript" ? "ts" : "python";
+  return proof.items
+    .filter((item) => !item.ok)
+    .map((item) => {
+      const part = item.kind === "example" ? card.examples[item.index] : card.mistakes[item.index];
+      const name = `${item.kind === "example" ? "examples" : "mistakes"}[${item.index}]`;
+      const claim =
+        item.kind === "example"
+          ? `The card says it compiles and prints:\n${item.expected || "(nothing)"}`
+          : card.mistakes[item.index]?.raises
+            ? `The card says it fails with: ${item.expected}`
+            : `The card says it runs and prints:\n${item.expected || "(nothing)"}`;
+      const happened = item.error ? `What really happened: ${item.error}${item.actual ? `\nIt printed before that:\n${item.actual}` : ""}` : `What really happened: it printed:\n${item.actual || "(nothing)"}`;
+      return `## ${name}\n\`\`\`${fence}\n${part?.code ?? ""}\n\`\`\`\n${claim}\n${happened}`;
+    })
+    .join("\n\n");
+}
+
+const REPAIR_RULES = `# YOUR TASK: REPAIR THE CARD
+The card above was run, and the parts listed under FAILURES didn't behave as the card says. The runtime is the truth. Repair only those parts, so that every one of them behaves exactly as the card then says:
+- An example must compile with no type error and print exactly its output. If the code is right and shows the point, keep the code and set "output" to exactly what it printed. If the compiler refused it or it threw, rewrite the code so it compiles under the same strict checks and still shows the same point (for example, compare values held in variables instead of literals the checker can see through, or widen a type with an annotation), then work out line by line exactly what the new code prints and put that in "output".
+- A mistake must fail exactly as its "raises" says (the error's name, or the TypeScript code such as TS2322), or, with "raises" empty, print exactly its "output". Make the code fail that way, or, if the failure that really happens teaches the same mistake, change "raises" to it. Its why and fix texts must describe what really happens.
+- If you change an example's or a mistake's code, update the notes, the why and fix texts, and any sentence of the explanation that describes that code, in both languages. Change nothing else: every other text stays exactly as it is.
+- Answer with a JSON object holding ONLY the fields you changed, each one whole: "examples" and "mistakes" as the complete arrays (every item, the unchanged ones copied exactly), and any text field you rewrote. Use the same keys as the card.`;
+
+/**
+ * Repairs a card from its proof (docs/compass.md, "Fix with AI"): a model is shown the card, each failed example or
+ * mistake with its code, what the card claims and what the runtime really did, and returns only the fields it changes.
+ * A fresh draft makes the same mistakes from scratch; a repair works from the evidence, so a cheap model is enough.
+ */
+export async function repairCard(input: {
+  card: CardDraft;
+  proof: CardProof;
+  allConcepts: { key: string }[];
+  conceptKey: string;
+  model?: string;
+  userId: string;
+  deadline: number;
+  language?: CompassLanguage;
+}): Promise<{ ok: true; card: CardDraft; model: string; changed: string[] } | { ok: false; error: string }> {
+  const language = input.language ?? "python";
+  const { docLink } = compassKit(language);
+  if (input.proof.ok || !input.proof.items.some((item) => !item.ok)) return { ok: false, error: "Nothing failed: there's nothing to repair." };
+  const chosen = isAuthoringModel(input.model) ? input.model : DEFAULT_REPAIR_MODEL;
+  const text = [`# THE CARD\n${JSON.stringify(input.card)}`, `# FAILURES (the runtime is the truth)\n${failuresOf(input.card, input.proof, language)}`, REPAIR_RULES].join("\n\n");
+  let patch: z.infer<typeof RepairSchema> | null = null;
+  let model = "";
+  let why = "";
+  for (let attempt = 0; attempt < 2 && !patch; attempt++) {
+    const retry = attempt ? [{ text: `Your last answer couldn't be used: ${why}. Answer again with the changed fields only, as JSON.` }] : [];
+    const result = await generateWithFallback({
+      feature: "compass",
+      pool: "AUTHORING",
+      userId: input.userId,
+      models: authoringChain(chosen),
+      chosenFirst: true,
+      deadline: input.deadline,
+      contents: [{ role: "user", parts: [{ text }, ...retry] }],
+      config: { systemInstruction: language === "javascript" ? JAVASCRIPT_PROMPT : SYSTEM_PROMPT, responseMimeType: "application/json", maxOutputTokens: 4000, temperature: 0.2 },
+    });
+    if (!result.ok) return { ok: false, error: result.reason === "quota" ? "Today's authoring allowance is used up." : "No model could repair the card in time. Try again." };
+    model = result.model;
+    try {
+      patch = RepairSchema.parse(JSON.parse(result.text));
+      if (!Object.keys(patch).length) {
+        why = "it changed nothing";
+        patch = null;
+      }
+    } catch (error) {
+      const issue = error instanceof z.ZodError ? error.issues[0] : null;
+      why = issue ? `${issue.path.join(".")}: ${issue.message}` : "not JSON";
+      console.info(JSON.stringify({ event: "compass.repair_invalid", model, why, attempt: attempt + 1 }));
+    }
+  }
+  if (!patch) return { ok: false, error: `${model} didn't answer with a usable repair (${why}). Try again.` };
+  const merged = CardSchema.safeParse({ ...input.card, ...patch });
+  if (!merged.success) return { ok: false, error: `The repaired card isn't complete: ${merged.error.issues[0]?.path.join(".")} ${merged.error.issues[0]?.message}` };
+  const keys = new Set(input.allConcepts.map((entry) => entry.key));
+  const card = { ...merged.data, docs: merged.data.docs.filter((key) => docLink(key)), related: merged.data.related.filter((key) => keys.has(key) && key !== input.conceptKey) };
+  return { ok: true, card, model, changed: Object.keys(patch) };
 }
 
 // --- Proof ----------------------------------------------------------------------------------------------------------

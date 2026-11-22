@@ -84,6 +84,18 @@ English, `components/compass/concept-card.tsx`, the component the guide's pages 
   a wrong exception is the admin's (or a rewrite's) to fix. The code runs as `__main__`, as it does when a learner
   presses Run or runs it in Jupyter (the grader on its own names it `solution`, so a class would print as
   `<class 'solution.Price'>`).
+- **Fix with AI** (`repairCard`, `fixCompassCard`, built 2026-11-23): when the proof fails, the panel offers a model
+  (DeepSeek V4.1 Flash first: the cheapest) and a button. The model is shown the card, and for each failed example or
+  mistake its code, what the card claims and what the runtime really did (the compiler's or interpreter's own error,
+  or what it printed). It repairs only those parts, keeping each one's point (code the strict checker refuses is
+  rewritten so it compiles and shows the same thing, an output becomes what the code really prints, a mistake's error
+  becomes the one that really happens when it teaches the same thing), updates the texts that describe changed code,
+  and answers with only the fields it changed, merged into the card. The result is a new draft version, "by <model>
+  (fix of vN)", proven at once. Why it works where "New draft with AI" didn't: a fresh draft starts from nothing and
+  repeats the same mistake (comparing object literals with `===`, which strict `tsc` refuses as TS2839); the repair
+  starts from the evidence. Tried on a stand-in for the strict-equality card that failed twice: DeepSeek repaired both
+  failures (the object-literal example, and a NaN mistake that `tsc` refuses as TS2845) in 2.9 s, left the title and
+  explanation untouched, and the new version proved 3 of 3.
 - **Publish**: only a proven version; the version published before is retired. Editing a proven or published version
   saves a new draft version; the published one stays live until the new one is published.
 

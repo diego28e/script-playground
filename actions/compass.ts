@@ -9,7 +9,7 @@ import { AUTHORING_MODELS } from "@/lib/ai/gemini";
 import { syncConcepts } from "@/lib/compass/concepts";
 import { compassKit } from "@/lib/compass/kit";
 import { COMPASS, isCompassLanguage, type CompassLanguage } from "@/lib/compass/languages";
-import { CardSchema, checkDraft, draftCard, fromColumns, proveCard, toColumns, type CardDraft, type CardProof } from "@/lib/compass/cards";
+import { CardSchema, checkDraft, draftCard, fromColumns, proveCard, repairCard, toColumns, type CardDraft, type CardProof } from "@/lib/compass/cards";
 import type { DocLink } from "@/lib/compass/docs";
 import { demandByConcept, missingSearches } from "@/lib/compass/signals";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
@@ -200,6 +200,37 @@ export async function adoptRealOutputs(cardId: string): Promise<Result<{ proof: 
   const proved = await proveCompassCard(cardId);
   // The editor keeps its own copy of the card: it takes this one, or it would count the old outputs as unsaved changes.
   return proved.success ? { ...proved, draft } : proved;
+}
+
+/**
+ * Fix with AI (docs/compass.md): a model repairs what the last proof found wrong in a version, from the code, what the
+ * card claims and what the runtime did. The repair is a new draft version (the one it came from stays as it is), and it
+ * is proven straight away, so the admin sees at once whether it worked.
+ */
+export async function fixCompassCard(cardId: string, model?: string): Promise<Result<{ cardId: string; model: string; changed: string[]; proof: CardProof | null }>> {
+  const session = await requireAdmin();
+  if (!session) return denied;
+  const card = await prisma.compassCard.findUnique({ where: { id: cardId }, include: { concept: { include: { cards: { orderBy: { version: "desc" }, take: 1, select: { version: true } } } } } });
+  if (!card) return { success: false, error: "That card is gone. Reload the page." };
+  const proof = card.proof as CardProof | null;
+  if (!proof || proof.ok) return { success: false, error: "Prove the card first: the fix works from what the proof found." };
+  const language = languageOf(card.concept.language);
+  const all = await prisma.compassConcept.findMany({ where: { language }, select: { key: true } });
+  // Leave time for the proof after the model: Amplify stops a request at 28 s (lib/request-budget.ts).
+  const result = await repairCard({ card: fromColumns(card), proof, allConcepts: all, conceptKey: card.concept.key, model, userId: session.user.id, deadline: Date.now() + REQUEST_BUDGET_MS - 6_000, language });
+  if (!result.ok) return { success: false, error: result.error };
+  const created = await prisma.compassCard.create({
+    data: {
+      conceptId: card.conceptId,
+      version: (card.concept.cards[0]?.version ?? card.version) + 1,
+      status: "DRAFT",
+      author: `${result.model} (fix of v${card.version})`,
+      ...(toColumns(result.card, language) as Omit<Prisma.CompassCardCreateInput, "concept" | "version" | "author">),
+    },
+  });
+  const proved = await proveCompassCard(created.id);
+  refresh(language);
+  return { success: true, cardId: created.id, model: result.model, changed: result.changed, proof: proved.success ? proved.proof : null };
 }
 
 /** Publishes a proven version for learners; the version published before is retired. */
