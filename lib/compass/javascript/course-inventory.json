@@ -1,6 +1,6 @@
 {
  "course": "typescript-nestjs-course",
- "commit": "314c08df68fb15d4ebe1b698e292d96df0fdc344",
+ "commit": "c1d0360b4cd1ce518ced271ac7db5c66739972b5",
  "language": "javascript",
  "notebooks": 113,
  "taughtNotebooks": 113,
@@ -1520,7 +1520,7 @@
     "lesson": "02.02",
     "path": "modules/02-first-types/02-02-arrays-and-readonly-arrays.md",
     "where": "line 92",
-    "line": "export const ALLOWED_ORIGINS: readonly string[] = [\"https://intellectif.com\", \"http://localhost:3000\"];"
+    "line": "export const ALLOWED_ORIGINS: readonly string[] = [\"https://app.example.com\", \"http://localhost:3000\"];"
    },
    "rank": 18
   },
@@ -2117,7 +2117,7 @@
     "lesson": "01.00",
     "path": "modules/01-javascript-you-will-type/01-00-values-and-runtime-types.md",
     "where": "line 102",
-    "line": "console.log(typeof \"Diego\");     // text"
+    "line": "console.log(typeof \"Mateo\");     // text"
    },
    "rank": 30
   },
