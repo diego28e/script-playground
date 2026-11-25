@@ -20,6 +20,7 @@ is a change to `.env`, not a rebuild (see [Opening up](#opening-up)).
 | `tutor/` | The AI tutor in JupyterLab: the panel (`labextension/`, built inside the student image) and the server extension `academia_tutor`, which forwards to the learning service |
 | `learning/` | The learning service's image: the tutor's backend (`services/learning`), built with `pnpm learning:build`; its settings in `learning/.env` |
 | `grader/` | The practice grader: runs learners' code answers in throwaway containers from the student image (Python) or the TypeScript sandbox (`grader/ts-sandbox/`), under gVisor (`grader/server.mjs`, `grader/harness.py`, `grader/harness-ts.mjs`); its secret in `grader/.env` |
+| `pocket-tts/` | The self-hosted voice (`docs/voice.md`, "The free voice"): Kyutai's Pocket TTS, one container per language (`pocket-tts-en`, `pocket-tts-es`), reached only by the learning service on the private `lab-voice` network |
 | `.dockerignore` | Keeps `.env` files, the services' folders and the tutor's local build output out of the student image's build |
 | `nginx/lab.conf` | The host nginx site, with WebSocket support for kernels and terminals |
 | `.env.example` | The platform client, the server limit and the per-student limits |

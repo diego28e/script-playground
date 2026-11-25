@@ -37,6 +37,9 @@ services:
     environment:
       HUB_API_URL: http://jupyterhub:8081/hub/api
       PORT: "8080"
+      # The self-hosted voice (pocket-tts-en and pocket-tts-es below, docs/voice.md "The free voice").
+      POCKET_TTS_EN_URL: http://pocket-tts-en:8000
+      POCKET_TTS_ES_URL: http://pocket-tts-es:8000
     ports:
       - "127.0.0.1:${LEARNING_PORT:-8091}:8080"
     mem_limit: 512m
@@ -44,6 +47,7 @@ services:
       - hub
     networks:
       - jupyterhub
+      - voice
 
   # The practice grader (grader/server.mjs, docs/practice.md): runs learners' code answers in throwaway containers from
   # the student image, with no network and the gVisor runtime. Loopback port only: nginx serves it at /grader/ on the
@@ -92,10 +96,49 @@ services:
     depends_on:
       - grader
 
+  # The self-hosted voice (pocket-tts/Dockerfile, docs/voice.md "The free voice"): Kyutai's Pocket TTS, one container
+  # per language, each using at most 2 of the server's 4 cores while it speaks and idle otherwise. On a network of its
+  # own with the learning service, so learners' Jupyter containers (on the jupyterhub network) can't reach it; no port
+  # is published. The models are kept on the pocket-tts-cache volume, made by the speed test (docker volume create
+  # pocket-tts-cache if it's missing), so a rebuild doesn't download them again.
+  pocket-tts-en:
+    build: pocket-tts
+    image: lab-pocket-tts:4.0.1
+    container_name: pocket-tts-en
+    restart: unless-stopped
+    environment:
+      POCKET_LANGUAGE: english
+      POCKET_QUANTIZE: "0"
+    volumes:
+      - pocket-tts-cache:/root/.cache/huggingface
+    cpus: 2
+    mem_limit: 2g
+    networks:
+      - voice
+
+  pocket-tts-es:
+    build: pocket-tts
+    image: lab-pocket-tts:4.0.1
+    container_name: pocket-tts-es
+    restart: unless-stopped
+    environment:
+      POCKET_LANGUAGE: spanish
+      POCKET_QUANTIZE: "0"
+    volumes:
+      - pocket-tts-cache:/root/.cache/huggingface
+    cpus: 2
+    mem_limit: 2g
+    networks:
+      - voice
+
 networks:
   jupyterhub:
     name: jupyterhub
+  voice:
+    name: lab-voice
 
 volumes:
   hub-data:
   lesson-pieces:
+  pocket-tts-cache:
+    external: true

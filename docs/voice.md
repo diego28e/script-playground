@@ -173,6 +173,34 @@ pauses like a speaker, so the length varies from one run to the next); 1,900 cha
 `speakExplainer`, the coach and the lesson tutor both spoke as Hannah and a Spanish reply as Valentina, each with its
 charge. On the admin page a sample came back in under 6 s and played.
 
+## The free voice: Pocket TTS on the lab server
+
+Built 2026-11-25, as a backup for when Deepgram's credit runs out and as a free choice of its own: Kyutai's Pocket TTS,
+a 100M-parameter text-to-speech model that runs on the CPU, one container per language on the lab server
+(`infra/lab/pocket-tts`, `lib/voice/pocket.ts`).
+
+- **Where it runs:** `pocket-tts-en` (English) and `pocket-tts-es` (Spanish), at most 2 of the server's 4 cores each
+  while speaking, on a private `lab-voice` network with the learning service only (learners' Jupyter containers can't
+  reach it), with no published port. The models are kept on the `pocket-tts-cache` volume. No Hugging Face sign-in is
+  needed for the built-in voices.
+- **Measured on the lab server** (2 cores, 2026-11-25): 1.66 to 1.70 times faster than real time in both languages,
+  each request starting in 100 to 150 ms. Quantized (int8): 1.62 to 1.95 times, starting in 250 to 450 ms; it sounded
+  the same. **Normal mode is used** (your choice); `POCKET_QUANTIZE: "1"` in `infra/lab/compose.yaml` switches.
+- **Measured through our code** (on a PC, 2026-11-25): Alba's first audio in 0.24 to 0.47 s, Lola's in 0.15 to 0.26 s.
+  A voice other than the container's default (Alba, Lola) takes about 2.5 s the first time after the container starts
+  (its voice is prepared), then it is kept.
+- **Choosing it:** Admin → Audio lists the Pocket voices (Alba, Anna, Mary, Eve, Charles, Michael) beside the Flux
+  ones, each with "Hear it" (the sample comes from the lab: the platform asks the learning service's
+  `/v1/lesson/sample` with a one-minute admin pass). Spanish replies are read by Lola when a Pocket voice is chosen.
+- **Fallback, both ways** (`speakExplainer`, `lib/voice/explainer.ts`): a Pocket voice chosen is read by Pocket, and by
+  Deepgram if Pocket fails; a Flux voice chosen is read by Flux, then Aura-2, then Pocket (Alba or Lola) when Deepgram
+  can't (no key, no credit, down). Checked locally with the key removed: the reply was read by Pocket.
+- **Limits:** no speed setting (it reads at its own pace, faster than Flux at 0.9×); one reply at a time per language
+  before it falls behind real time; the microphone still needs Deepgram (Flux, Nova-3), so without Deepgram a learner
+  types. Pocket isn't in the spend ledger: it costs nothing.
+- **Licence:** the weights are CC BY 4.0 (Kyutai); the credit is on Admin → Audio. Kyutai's terms forbid cloning a
+  voice without the speaker's consent.
+
 ## Costs
 
 Recorded in `ai_request` beside every other AI call and in the spend ledger (`lib/voice/allowance.ts`), and **not

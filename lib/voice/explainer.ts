@@ -1,13 +1,16 @@
 import { readSetting } from "@/lib/settings";
 import { LIST_PRICES, recordCharge, WORKLOADS, type Workload } from "@/lib/spend/charges";
 import { SPEAK_SAMPLE_RATE, speakStream, type VoiceLanguage } from "@/lib/voice/deepgram";
-import { DEFAULT_EXPLAINER_VOICE, isExplainerVoice, SPANISH_EXPLAINER_VOICE } from "@/lib/voice/explainer-voices";
+import { DEFAULT_EXPLAINER_VOICE, DEFAULT_POCKET_VOICE, engineOf, isExplainerVoice, pocketName, SPANISH_EXPLAINER_VOICE, SPANISH_POCKET_VOICE } from "@/lib/voice/explainer-voices";
+import { pocketConfigured, speakPocket } from "@/lib/voice/pocket";
 import { DEFAULT_SPEAK_SPEED } from "@/lib/voice/speed";
 
 // The AI explainers' voice (docs/voice.md, "The explainer's voice"): the lesson tutor, the practice coach and the lab's
 // tutor all read their replies aloud through here, in one voice an admin chooses in Admin → Audio. The engine is
 // Deepgram Flux TTS (`/v2/speak`), its current model: it paces and pauses like a person talking, where Aura-2 read
-// evenly and fast. Aura-2 stays as the fallback, so a reply is still read if Flux refuses a request.
+// evenly and fast. Aura-2 stays as the fallback, so a reply is still read if Flux refuses a request. Pocket TTS, which
+// runs on the lab server for free (lib/voice/pocket.ts), is a choice of its own and the last fallback: it reads a reply
+// when Deepgram can't (no key, no credit, down), and Deepgram reads it when a chosen Pocket voice can't.
 //
 // Measured with this project's key on 2026-11-20, raw PCM at 24 kHz, one 656-character passage: the first audio in
 // about 0.3 s (Aura-2: 0.5 s), then about 1.35 times faster than it plays; 40 to 42 s of speech at speed 1 and 46 to
@@ -48,9 +51,38 @@ export async function speakExplainer(
   signal: AbortSignal | undefined,
   context: { workload: SpeakWorkload; speed?: number; userId?: string | null; courseId?: string | null; lessonId?: string | null },
 ): Promise<ReadableStream<Uint8Array>> {
+  const chosen = await explainerVoice();
+  // The engine the admin chose (Admin → Audio). Each falls back to the other, so a reply is read while either works:
+  // Pocket TTS first when it's chosen, else Flux, then Aura-2, then Pocket TTS (when Deepgram refuses, for example
+  // because its credit ran out).
+  if (engineOf(chosen) === "pocket" && pocketConfigured(language)) {
+    try {
+      return await speakPocket(text, language, pocketName(language === "es" ? SPANISH_POCKET_VOICE : chosen), signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      console.error(JSON.stringify({ event: "voice.pocket_failed", voice: chosen, error: String(error).slice(0, 200) }));
+    }
+  }
+  try {
+    return await speakDeepgram(text, language, signal, context, engineOf(chosen) === "flux" ? chosen : DEFAULT_EXPLAINER_VOICE);
+  } catch (error) {
+    if (signal?.aborted || engineOf(chosen) === "pocket" || !pocketConfigured(language)) throw error;
+    console.error(JSON.stringify({ event: "voice.deepgram_failed", error: String(error).slice(0, 200) }));
+    return speakPocket(text, language, pocketName(language === "es" ? SPANISH_POCKET_VOICE : DEFAULT_POCKET_VOICE), signal);
+  }
+}
+
+/** Deepgram's two voices in turn: Flux, then Aura-2 if Flux refuses or doesn't start. Throws if neither reads it. */
+async function speakDeepgram(
+  text: string,
+  language: VoiceLanguage,
+  signal: AbortSignal | undefined,
+  context: { workload: SpeakWorkload; speed?: number; userId?: string | null; courseId?: string | null; lessonId?: string | null },
+  englishVoice: string,
+): Promise<ReadableStream<Uint8Array>> {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) throw new Error("DEEPGRAM_API_KEY is not set");
-  const voice = language === "es" ? SPANISH_EXPLAINER_VOICE : await explainerVoice();
+  const voice = language === "es" ? SPANISH_EXPLAINER_VOICE : englishVoice;
   const charge = { provider: "deepgram" as const, workload: context.workload, runtime: "lab" as const, userId: context.userId, courseId: context.courseId, lessonId: context.lessonId, characters: text.length };
 
   // Only the start is timed: once the audio flows, a long reading takes as long as it takes.

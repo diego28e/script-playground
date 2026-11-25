@@ -9,6 +9,8 @@ import { getTutorSession, recordPractice, runTutorTurn, setTutorMode } from "@/l
 import { LISTEN_MAX_MINUTES, recordListen, recordSpeak } from "@/lib/voice/allowance";
 import { listenGrant, SPEAK_MAX_CHARS, SPEAK_SAMPLE_RATE, voiceConfigured } from "@/lib/voice/deepgram";
 import { speakExplainer } from "@/lib/voice/explainer";
+import { engineOf, isExplainerVoice, pocketName } from "@/lib/voice/explainer-voices";
+import { pocketConfigured, speakPocket } from "@/lib/voice/pocket";
 import { readPass } from "@/lib/lesson-tutor/pass";
 import { runLessonTurn } from "@/lib/lesson-tutor/turn";
 import { canSpeakLesson, lessonVoice, speakLesson, SPEAK_MAX_CHARS as LESSON_SPEAK_MAX_CHARS } from "@/lib/lesson-tutor/speak";
@@ -100,6 +102,28 @@ const LessonSpeakSchema = z.object({
   speed: z.number().min(0.5).max(1.5).optional(),
 });
 
+const SampleSchema = z.object({ voice: z.string().max(60) });
+/** What an admin hears when trying a self-hosted voice (Admin → Audio); the same sentence as Flux's samples there. */
+const SAMPLE_TEXT = "Here's how I'd explain it: first what it is, then how it works, and then why it's built that way.";
+
+/** A WAV header for 16-bit mono PCM at SPEAK_SAMPLE_RATE, so a browser's audio element can play a sample. */
+function wavFile(pcm: Buffer): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(SPEAK_SAMPLE_RATE, 24);
+  header.writeUInt32LE(SPEAK_SAMPLE_RATE * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
 const LESSON_PREFIX = "/v1/lesson/";
 const ORIGINS = (process.env.LESSON_TUTOR_ORIGINS ?? "https://academiadelcodigo.com,https://www.academiadelcodigo.com")
   .split(",")
@@ -134,6 +158,30 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
   if (!pass) return send(response, 401, { ok: false, reason: "unauthenticated", message: "The pass is missing or has expired. Reload the page." });
   if (request.method !== "POST") return send(response, 405, { ok: false, message: "Use POST." });
 
+  // An admin's sample of a self-hosted voice (Admin → Audio): the platform's server asks with a one-minute pass, since
+  // only this service can reach the Pocket TTS containers. A sample pass opens nothing else.
+  if (path === "sample" || pass.kind === "sample") {
+    if (path !== "sample" || pass.kind !== "sample") return send(response, 403, { ok: false, message: "This pass isn't for that." });
+    const parsed = SampleSchema.safeParse(await readJson(request));
+    if (!parsed.success || !isExplainerVoice(parsed.data.voice) || engineOf(parsed.data.voice) !== "pocket") return send(response, 400, { ok: false, message: "That isn't one of the self-hosted voices." });
+    if (!pocketConfigured("en")) return send(response, 503, { ok: false, reason: "unavailable", message: "The self-hosted voice isn't set up on this lab (POCKET_TTS_EN_URL)." });
+    try {
+      const reader = (await speakPocket(SAMPLE_TEXT, "en", pocketName(parsed.data.voice))).getReader();
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const file = wavFile(Buffer.concat(chunks));
+      response.writeHead(200, { "Content-Type": "audio/wav", "Content-Length": String(file.length), "Cache-Control": "no-store" });
+      return response.end(file);
+    } catch (error) {
+      logAi("warn", { event: "learning.sample_failed", voice: parsed.data.voice, error: String(error).slice(0, 300) });
+      return send(response, 502, { ok: false, reason: "unavailable", message: "The self-hosted voice didn't answer. Is its container running?" });
+    }
+  }
+
   if (path === "listen") {
     if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = LessonListenSchema.safeParse(await readJson(request));
@@ -165,7 +213,7 @@ async function handleLesson(request: IncomingMessage, response: ServerResponse, 
     return response.end();
   }
   if (path === "speak") {
-    if (!voiceConfigured() && !process.env.ELEVENLABS_API_KEY) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
+    if (!voiceConfigured() && !process.env.ELEVENLABS_API_KEY && !pocketConfigured("en")) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = LessonSpeakSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
     // No daily cap of ours on Deepgram's voice. The one thing rationed is a lesson's own ElevenLabs voice, when an
@@ -242,7 +290,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     return send(response, 200, { ok: true, grant, maxMinutes: LISTEN_MAX_MINUTES });
   }
   if (request.method === "POST" && url.pathname === "/v1/voice/speak") {
-    if (!voiceConfigured()) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
+    if (!voiceConfigured() && !pocketConfigured("en")) return send(response, 503, { ok: false, reason: "unavailable", message: "Voice isn't set up on this lab." });
     const parsed = SpeakSchema.safeParse(await readJson(request));
     if (!parsed.success) return send(response, 400, { ok: false, message: "text (at most 1,900 characters) and language are required." });
     // The listener stopping (or leaving) closes this response, which stops Deepgram too.
