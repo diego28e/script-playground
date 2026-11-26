@@ -121,6 +121,10 @@ what the learner said. The code is `assemble` and `turnsFor` in `lib/voice/conte
 
 ### 7. Memory across conversations: the learner profile and titles
 
+**The learner's own preferences** (`lib/preferences.ts`, scope `all`; `docs/whiteboard-teaching.md` §2) come first in
+memory, under "How this learner asked to be taught". They're word for word, and they outrank the observed notes below.
+They're read once per conversation, like the profile, for the cache.
+
 **The learner profile** (`lib/voice/profile.ts`, table `learner_profile`) is what carries over from one conversation to
 the next, built 2026-11-23.
 

@@ -4,11 +4,14 @@ What the platform (this repo, `academiadelcodigo.com`) and Didactra (`16-didactr
 `board.academiadelcodigo.com`) say to each other. Both sides build against this page; a change to it is agreed first,
 then made on both sides. The plan is in `docs/whiteboard-plan.md`.
 
-Three exchanges:
+Four exchanges:
 
 1. **The launch:** the platform opens the board for one learner and one session.
 2. **The context:** Didactra's server asks the platform what to teach.
-3. **The events:** Didactra's server tells the platform how the session went.
+3. **The events:** Didactra's server tells the platform how the session went, and the preferences the learner gave.
+4. **The frame's messages:** the board's page and the platform's page, in the browser, for full screen.
+
+How the teacher teaches, and the three layers of rules and preferences these exchanges carry: `docs/whiteboard-teaching.md`.
 
 ## The secret and the signature
 
@@ -48,7 +51,7 @@ The learner presses "Learn on the whiteboard" on a skill, or on a lesson. The pl
    | `u` | the platform's user id |
    | `name` | the learner's first name, to be addressed by |
    | `lang` | `es` or `en`, the page's language |
-   | `role` | `USER` or `ADMIN`. Admins may pick the model and the voice; learners get the defaults. |
+   | `role` | `USER` or `ADMIN`. Learners may pick among the learners' models and voices (`docs/whiteboard-teaching.md` §4 and §5); admins among all. |
    | `e` | when the token expires, in milliseconds |
 
 3. **shows** `https://board.academiadelcodigo.com/launch?t=<token>` in a frame on its board page
@@ -104,7 +107,11 @@ The answer (200, JSON). Text fields are in the session's language, except code a
   "practice": {
     "recent": [{ "when": "2026-11-24", "task": "…", "answer": "…", "expected": "…", "correct": false }]
   },
-  "earlier": ["the summaries of this skill's earlier whiteboard sessions, newest first, at most 3"]
+  "earlier": ["the summaries of this skill's earlier whiteboard sessions, newest first, at most 3"],
+  "preferences": {
+    "all": [{ "id": "pref_1", "text": "Go in small steps and wait for me." }],
+    "board": [{ "id": "pref_2", "text": "Draw a diagram before you explain." }]
+  }
 }
 ```
 
@@ -115,6 +122,9 @@ The answer (200, JSON). Text fields are in the session's language, except code a
 - **`course.code`** is the language the course's code is in: `python` or `typescript`. The tracer runs JS/TS today;
   Python is Didactra's M5.
 - **`practice.recent`** holds at most 5 answers to this skill's tasks, newest first.
+- **`preferences`** are the learner's own instructions, word for word, oldest first: `all` for every teacher, `board`
+  for the whiteboard only. They outrank `learner.profile`, which is what the platform has observed. A preference never
+  overrides a fixed principle (`docs/whiteboard-teaching.md` §2).
 - **The errors:**
 
   | Status | Meaning | What Didactra does |
@@ -152,9 +162,21 @@ is applied once.
     "learnerDid": ["what the learner did or said that showed understanding"],
     "struggles": ["where they hesitated or got it wrong"],
     "readyToPractise": true,
-    "profileNotes": ["how this learner learns, worth keeping (the same kind of note the voice teachers keep)"]
+    "profileNotes": ["how this learner learns, worth keeping (the same kind of note the voice teachers keep)"],
+    "objectives": [
+      { "text": "Run a .ts file and read its type errors", "met": true, "untickedByLearner": false },
+      { "text": "Explain why Node runs code with type errors", "met": false, "untickedByLearner": true }
+    ]
   }
 }
+```
+
+```json
+{ "id": "…", "type": "preference", "at": 1795650300000, "action": "remember", "scope": "board", "text": "Draw a diagram before you explain." }
+```
+
+```json
+{ "id": "…", "type": "preference", "at": 1795650400000, "action": "forget", "preferenceId": "pref_2" }
 ```
 
 - **`usage`** is the session's cumulative total, not a delta. It's sent every 10 minutes or so, and whenever a Didactra
@@ -165,6 +187,14 @@ is applied once.
   - 2 hours have passed with no job on that session (Didactra's retry sweeper sends it).
 
   A job closing is not an end.
+- **`objectives`** are the board's checklist at the end, at most 6: each item's text, whether it was met (ticked and
+  left ticked), and whether the learner unticked it at any point.
+- **`preference`** is sent the moment the teacher saves (`remember`) or removes (`forget`) one, or the learner removes
+  one in Didactra's "How I learn" panel.
+  - `scope` is `all` or `board`. It's a hint: the platform files a line about drawing, the board, a diagram, a trace or
+    a space under `board` whatever it says.
+  - `forget` names the line by `preferenceId` (from the context, or from the answer to its `remember`), or else by
+    `text`, matched without case.
 
 What the platform does:
 - `started` binds Didactra's session id to the row.
@@ -172,14 +202,43 @@ What the platform does:
 - `ended`:
   - stores the summary, which feeds `earlier` next time;
   - when `readyToPractise`, marks the skill as taught, so practice offers its tasks first. It never marks it mastered;
-  - folds `profileNotes` into the learner profile.
+  - folds `profileNotes` into the learner profile;
+  - keeps `objectives`, shown in the lesson panel's "What the board found". An item unticked by the learner counts as
+    something they found hard.
+- `preference` stores or removes the line in the learner's preferences.
 - **The answers:**
 
   | Status | Meaning |
   |---|---|
   | 204 | done |
-  | 409 | an event already applied |
+  | 200 | a `preference` applied: `{ "preferenceId": "…", "scope": "all" or "board" }`, the scope it was filed under. A `forget` of a line that doesn't exist answers 200 too, with `"preferenceId": null`. |
+  | 409 | an event already applied; for a `preference`, with the same body as its first answer |
   | 401 / 404 / 410 | as for the context |
+
+## 4. The frame's messages (full screen)
+
+The platform's board page frames Didactra under its own bar. On a phone that leaves too little room, so the board can
+go full screen.
+
+- **Going in:** the platform's bar has the button (it's the platform's bar, and it works whatever Didactra's version).
+- **While in full screen:** the bar is hidden, so Didactra's page shows the way out, a button in its own toolbar.
+- **The messages:**
+  - **Didactra → platform:** `window.parent.postMessage({ source: "didactra", type: "fullscreen", on: false }, PLATFORM_URL)`
+    when its exit button is pressed, or Escape inside its page. `on: true` is accepted too, for a button of its own to go
+    in.
+  - **Platform → Didactra:** `{ source: "academia", type: "fullscreen", on: true | false }` to the frame, with Didactra's
+    origin, whenever full screen changes, and when the frame loads. That includes leaving without the button: the
+    browser's Back, Escape on the platform's page, the system's full-screen exit. Didactra shows its exit button only
+    while told `on: true`.
+- **Each side checks** the message's `origin` (the platform: `BOARD_URL`'s origin and the frame's own window;
+  Didactra: `PLATFORM_URL`'s origins) and ignores anything else.
+- **What the platform does when on** (`components/courses/board-fullscreen.ts`):
+  - the frame fills the window (`100dvh`) over the site's header, and the bar is hidden. It's the same element, so the
+    lesson never reloads;
+  - the browser's Fullscreen API is asked where it exists (Android, desktop). Safari on iPhone has none for a page, so
+    there the layout alone gives the full screen;
+  - Back leaves full screen before it leaves the page.
+- **Outside the platform** (Didactra on its own), its button uses the Fullscreen API itself.
 
 ## Deepgram tags
 
@@ -208,7 +267,11 @@ They stay in Didactra. The platform links to them with a launch token whose payl
   - the two endpoints;
   - the board page with its frame;
   - the buttons;
-  - spend in Admin → Voice spend.
+  - spend in Admin → Voice spend;
+  - the preferences (their table, the guard for board lines, the `preference` event, `preferences` in the context) and
+    the "How I learn" page;
+  - `objectives` in the lesson panel;
+  - full screen: the button to go in, listening to the frame, the layout, the Fullscreen API, Back.
 - **Didactra (its repo):**
   - `/launch`, the cookie, and identity per learner;
   - sessions stored per user and bound to `sid`;
@@ -217,4 +280,7 @@ They stay in Didactra. The platform links to them with a launch token whose payl
   - CSP for the frame;
   - Spanish and English;
   - Pocket TTS;
-  - a built page.
+  - a built page;
+  - scoped `remember` and `forget`, sent as `preference` events, and "How I learn" showing the platform's preferences;
+  - the checklist's outcomes in `objectives`;
+  - the exit button while in full screen and its messages, and settings panels that are easy to close on a phone.

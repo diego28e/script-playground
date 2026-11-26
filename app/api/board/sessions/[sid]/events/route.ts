@@ -16,6 +16,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ sid
   const body = await request.json().catch(() => null);
   const parsed = BoardEvent.safeParse(body);
   if (!parsed.success) return Response.json({ error: `Not an event: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}` }, { status: 400 });
-  const result = await applyBoardEvent(sid, parsed.data);
-  return result === "applied" ? new Response(null, { status: 204 }) : Response.json({ result }, { status: STATUS[result] });
+  const { outcome, body: answer } = await applyBoardEvent(sid, parsed.data);
+  // A preference answers with its id and the scope it was filed under, and a retry gets the same answer.
+  if (answer) return Response.json(answer, { status: outcome === "applied" ? 200 : STATUS[outcome] });
+  return outcome === "applied" ? new Response(null, { status: 204 }) : Response.json({ result: outcome }, { status: STATUS[outcome] });
 }

@@ -53,6 +53,25 @@ skill being learned, the lesson that teaches it, the learner's profile, and how 
   `adc-whiteboard-speak` in platform lessons, `adc-whiteboard-dev` for its development and tests. They're counted by
   workload and never flagged as unknown.
 
+- **How the teacher teaches:** `docs/whiteboard-teaching.md`. Fixed principles, defaults, and the learner's own
+  preferences. The opening with its checklist. One step at a time, and the ending.
+- **Preferences** (`lib/preferences.ts`, table `learner_preference`): the learner's own instructions for how to teach
+  them, word for word, never rewritten by a model.
+  - `all`: read by every teacher. The voice teachers get them above their observed notes (`lib/voice/context.ts`,
+    "How this learner asked to be taught").
+  - `board`: read only by the whiteboard.
+  - **Where they come from:** Didactra sends them as `preference` events. The learner can also add or remove them on
+    **How I learn** (`/how-i-learn`, in the account menu and linked from the voice sheet).
+  - **Board lines stay on the board:** a line about drawing, the board, a diagram, a trace or a space is filed as
+    `board` whatever scope it came with (`fileScope`), so a voice teacher never gets one.
+  - **How I learn** also shows what the teachers observed (the profile's notes), which the learner can forget.
+- **The checklist's outcomes:** the `ended` summary carries `objectives`. "What the board found" shows each one as done
+  or not yet, marking the ones the learner unticked. An unticked one counts as something they found hard, in their
+  profile.
+- **Full screen** (`components/courses/board-fullscreen.ts`, contract §4): the bar's button fills the window with the
+  board, over the site's header. The Fullscreen API is used where the browser has it; on an iPhone, the layout alone
+  does it. Didactra's page shows the way out. Back and Escape leave too.
+
 ## Who sees it
 
 Admins only for now (`boardAllowed` in `lib/board/offer.ts`), and only where `BOARD_URL` and `BOARD_SECRET` are set.
@@ -71,6 +90,10 @@ The tables come with the migration `20261126120000_board_sessions`.
 
 ## Checking it
 
-- `pnpm board:check` (`scripts/board-check.ts`): the tokens, signed and refused; the events Didactra may send; how a
-  practice state and a summary are told to the teacher. No database, no model.
+- `pnpm board:check` (`scripts/board-check.ts`), with no database and no model:
+  - the tokens, signed and refused;
+  - the events Didactra may send, preferences and objectives included;
+  - how a practice state and a summary are told to the teacher;
+  - which preference lines are the board's;
+  - where the voice teachers read the preferences.
 - End to end: the board page with Didactra running on your PC (`BOARD_URL=http://localhost:4330`).

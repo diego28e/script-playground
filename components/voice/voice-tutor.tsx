@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, History, Mic, MicOff, Play, Plus, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { deleteVoiceConversation, forgetVoiceProfile, getVoiceConversation, getVoiceHistory, getVoiceProfile, type VoiceScope } from "@/actions/voice-conversations";
 import { clock } from "@/components/courses/video-player/player-state";
@@ -40,6 +41,7 @@ const COPY = {
     noHistory: "Aún no hay conversaciones guardadas aquí.",
     remembered: "Lo que el profesor recuerda de ti",
     rememberedNone: "Aún nada. El profesor toma notas de cómo te gusta aprender y de lo que dominas a medida que conversáis, y las usa en cada conversación de este curso.",
+    howILearn: "Todo, y lo que pediste, en Cómo aprendo",
     rememberedNote: "Notas que escribe un modelo a partir de tus conversaciones. Borrar una conversación no las borra; olvidarlas, sí.",
     forget: "Olvidarlo",
     forgetConfirm: "¿Olvidar todo esto?",
@@ -78,6 +80,7 @@ const COPY = {
     noHistory: "No saved conversations here yet.",
     remembered: "What the teacher remembers about you",
     rememberedNone: "Nothing yet. As you talk, the teacher notes how you like to learn and what you've mastered, and uses it in every conversation in this course.",
+    howILearn: "All of it, and what you asked for, in How I learn",
     rememberedNote: "Notes a model writes from your conversations. Deleting a conversation doesn't remove them; forgetting does.",
     forget: "Forget it",
     forgetConfirm: "Forget all of this?",
@@ -921,6 +924,9 @@ function Remembered({ scope, t }: { scope: VoiceScope; t: (typeof COPY)["en"] })
       ) : (
         <p className="mt-2 text-xs leading-relaxed text-white/55">{t.rememberedNone}</p>
       )}
+      <Link href="/how-i-learn" className="mt-2 inline-block text-xs font-medium text-signal underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+        {t.howILearn} →
+      </Link>
     </details>
   );
 }

@@ -2,10 +2,12 @@ import type { PracticeState } from "@intellectif/lk-practice";
 import { prisma } from "@/lib/prisma";
 import { lessonText } from "@/lib/lesson-text";
 import { readProfile } from "@/lib/voice/profile";
+import { preferencesOf, type Preferences } from "@/lib/preferences";
 
 // What the whiteboard teacher is told about a session (docs/whiteboard-contract.md, "The context"): the skill, the part
 // of the lesson that teaches it, its prerequisites and what comes next with the learner's state in each, the learner's
-// profile, their recent practice on the skill, and what earlier whiteboard sessions on it found.
+// profile, their recent practice on the skill, what earlier whiteboard sessions on it found, and their own preferences
+// for how to teach them, word for word (lib/preferences.ts).
 
 const LESSON_CHARS = 12_000;
 const PROFILE_CHARS = 4_000;
@@ -15,7 +17,8 @@ const FIELD_CHARS = 600;
 
 export type SkillStateName = "new" | "learning" | "reviewing" | "secure";
 
-export type BoardSummary = { taught: string[]; learnerDid: string[]; struggles: string[]; readyToPractise: boolean; profileNotes: string[] };
+export type BoardObjective = { text: string; met: boolean; untickedByLearner: boolean };
+export type BoardSummary = { taught: string[]; learnerDid: string[]; struggles: string[]; readyToPractise: boolean; profileNotes: string[]; objectives?: BoardObjective[] };
 
 export type BoardContext = {
   session: { id: string; kind: "skill" | "lesson"; language: "es" | "en"; resume: boolean };
@@ -34,6 +37,7 @@ export type BoardContext = {
   learner: { name: string; profile: string };
   practice: { recent: { when: string; task: string; answer: string; expected: string; correct: boolean }[] };
   earlier: string[];
+  preferences: Preferences;
 };
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
@@ -111,7 +115,7 @@ export async function boardContext(sid: string): Promise<{ context: BoardContext
   if (!session) return null;
   const language = session.language === "es" ? "es" : "en";
 
-  const [text, profile, learner, skill, earlier] = await Promise.all([
+  const [text, profile, learner, skill, earlier, preferences] = await Promise.all([
     lessonText(session.course, session.lesson, LESSON_CHARS),
     readProfile(session.userId, session.courseId, language),
     prisma.practiceLearner.findFirst({ where: { userId: session.userId, courseId: session.courseId }, select: { id: true, state: true } }),
@@ -137,6 +141,7 @@ export async function boardContext(sid: string): Promise<{ context: BoardContext
       take: EARLIER_SESSIONS,
       select: { summary: true },
     }),
+    preferencesOf(session.userId),
   ]);
   const state = (learner?.state ?? null) as PracticeState | null;
   const label = (entry: { labelEs: string; labelEn: string }) => (language === "es" ? entry.labelEs : entry.labelEn);
@@ -177,6 +182,7 @@ export async function boardContext(sid: string): Promise<{ context: BoardContext
         }),
       },
       earlier: earlier.map((row) => summaryText(row.summary, language)).filter((line): line is string => Boolean(line)),
+      preferences,
     },
   };
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Check, ChevronDown, PenLine } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Circle, PenLine, Undo2 } from "lucide-react";
 import type { BoardDone, BoardOffer } from "@/lib/board/offer";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,10 @@ const COPY = {
     lesson: "Aprender esta lección en la pizarra",
     done: (date: string) => `Hecha en la pizarra · ${date}`,
     found: "Lo que encontró la pizarra",
+    checklist: "Lo que ibas a poder hacer",
+    met: "Logrado",
+    notMet: "Aún no",
+    unticked: "lo desmarcaste: va a tu práctica",
     taught: "Se explicó",
     showed: "Mostraste",
     struggles: "Te costó",
@@ -38,6 +42,10 @@ const COPY = {
     lesson: "Learn this lesson on the whiteboard",
     done: (date: string) => `Done on the board · ${date}`,
     found: "What the board found",
+    checklist: "What you set out to do",
+    met: "Done",
+    notMet: "Not yet",
+    unticked: "you unticked it: it goes to your practice",
     taught: "Explained",
     showed: "You showed",
     struggles: "You found hard",
@@ -98,6 +106,31 @@ function Found({ done, language, id, boardHref, practiceHref }: { done: BoardDon
       <p className="text-xs font-medium text-muted-foreground">
         {t.found} · {t.minutes(done.minutes)}
       </p>
+      {done.objectives.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium text-muted-foreground">{t.checklist}</p>
+          <ul className="mt-1 space-y-1">
+            {done.objectives.map((objective, index) => (
+              <li key={index} className="flex items-start gap-2 text-sm leading-relaxed">
+                {objective.met ? (
+                  <Check className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-label={t.met} />
+                ) : (
+                  <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label={t.notMet} />
+                )}
+                <span className="min-w-0">
+                  {objective.text}
+                  {objective.untickedByLearner && (
+                    <span className="ml-1.5 inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+                      <Undo2 className="size-3" aria-hidden="true" />
+                      {t.unticked}
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <dl className="mt-2 space-y-2">
         {part(t.taught, done.taught)}
         {part(t.showed, done.learnerDid)}

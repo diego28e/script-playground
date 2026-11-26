@@ -36,6 +36,8 @@ model User {
   learnerProfiles    LearnerProfile[]
   // Lessons taken on the whiteboard (docs/whiteboard.md).
   boardSessions      BoardSession[]
+  // The learner's own instructions for how to teach them (docs/whiteboard-teaching.md §2).
+  preferences        LearnerPreference[]
 
   @@map("user")
 }
@@ -1533,9 +1535,30 @@ model BoardSessionEvent {
   sessionId String
   eventId   String
   type      String
+  // What the platform answered, for an event that answers with a body (a preference): sent again for a retry.
+  result    Json?
   createdAt DateTime     @default(now())
   session   BoardSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, eventId])
   @@map("board_session_event")
+}
+
+// One of the learner's own instructions for how to teach them, kept word for word: never rewritten by a model
+// (docs/whiteboard-teaching.md §2). Unlike the learner profile's notes (what the teachers observed), these are what the
+// learner asked for, and they outrank the notes. "all": every teacher reads it; "board": only the whiteboard's.
+model LearnerPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  scope     String
+  text      String
+  // Who saved it: "board" (the whiteboard's teacher), "learner" (on the How I learn page), later "voice".
+  source    String
+  // The whiteboard session it was said in, when it came from one.
+  sessionId String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scope, createdAt])
+  @@map("learner_preference")
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assemble, compactionCut, fitSummary, summaryRequest, SUMMARY_SYSTEM, titleOf, turnsFor, type ContextSizes, type StoredMessage } from "@/lib/voice/context";
 import { appendMessage, earlierTitles, markLastReplyInterrupted, openConversation, openMessages, saveSummary, type Scope } from "@/lib/voice/conversations";
 import { learnFromConversation, learnFromLeftConversations, readProfile } from "@/lib/voice/profile";
+import { teacherPreferences } from "@/lib/preferences";
 
 // One turn of a stored conversation with a voice teacher (docs/voice-context.md): the lesson tutor and the practice
 // coach both go through here. The caller brings what only it knows (who the model is, what it teaches from, what is
@@ -26,6 +27,18 @@ export type VoiceTurnResult =
  */
 const profiles = new Map<string, { at: number; value: Promise<string | null> }>();
 const PROFILE_KEEP_MS = 6 * 60 * 60_000;
+
+/** The learner's own instructions, read once a conversation like the profile, for the same reason (the cache). */
+const preferenceCache = new Map<string, { at: number; value: Promise<string[] | null> }>();
+
+function preferencesFor(conversationId: string, read: () => Promise<string[] | null>): Promise<string[] | null> {
+  const hit = preferenceCache.get(conversationId);
+  if (hit && Date.now() - hit.at < PROFILE_KEEP_MS) return hit.value;
+  const value = read();
+  preferenceCache.set(conversationId, { at: Date.now(), value });
+  if (preferenceCache.size > 500) preferenceCache.delete(preferenceCache.keys().next().value as string);
+  return value;
+}
 
 function profileFor(conversationId: string, read: () => Promise<string | null>): Promise<string | null> {
   const hit = profiles.get(conversationId);
@@ -67,14 +80,15 @@ export async function runVoiceTurn(input: {
   // The stored turns the summary doesn't cover, and the titles of earlier conversations here: read before this turn's
   // own message is stored, so the new message is only ever sent once, as the question.
   // The learner profile too: what the teachers know about this learner from earlier conversations.
-  const [open, digest, profile] = await Promise.all([
+  const [open, digest, profile, preferences] = await Promise.all([
     conversation.isNew ? Promise.resolve([] as StoredMessage[]) : openMessages(conversation.id, conversation.summarySeq),
     earlierTitles(scope, conversation.id),
     profileFor(conversation.id, () => readProfile(scope.userId, scope.courseId, language).catch(() => null)),
+    preferencesFor(conversation.id, () => teacherPreferences(scope.userId).catch(() => null)),
   ]);
   await appendMessage(conversation.id, "learner", input.question, "ok", input.learnerMeta, conversation.isNew ? titleOf(input.question) : undefined);
 
-  const { system, sizes } = assemble({ role: input.role, grounding: input.grounding, profile, summary: conversation.summary, digest }, language);
+  const { system, sizes } = assemble({ role: input.role, grounding: input.grounding, profile, preferences, summary: conversation.summary, digest }, language);
   const turns = turnsFor(open, conversation.summarySeq, input.question, language, input.situation);
   const context: ContextSizes = { ...sizes, turns: turns.chars, situation: turns.situationChars, total: system.length + turns.chars + turns.situationChars };
 

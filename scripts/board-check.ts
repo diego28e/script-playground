@@ -7,6 +7,8 @@ import type { PracticeState } from "@intellectif/lk-practice";
 import { issueLaunch, issueService, LAUNCH_MS, readLaunch, serviceSession } from "@/lib/board/token";
 import { BoardEvent } from "@/lib/board/events";
 import { stateName, summaryText } from "@/lib/board/context";
+import { fileScope } from "@/lib/preferences";
+import { assemble } from "@/lib/voice/context";
 
 let failures = 0;
 const check = (name: string, pass: boolean, detail = "") => {
@@ -67,6 +69,33 @@ const earlier = summaryText(ended.summary, "en");
 check("a summary reads as one line", earlier === "Taught: what packageManager pins. Showed: explained corepack. Ready to practise.", earlier ?? "null");
 check("a summary in Spanish", summaryText(ended.summary, "es")?.startsWith("Se enseñó: what packageManager pins") === true);
 check("an empty summary is nothing", summaryText({ taught: [], learnerDid: [], struggles: [], readyToPractise: false }, "en") === null && summaryText(null, "en") === null);
+
+// Preferences (docs/whiteboard-teaching.md §2): a line about the board is the board's, whatever scope it came with.
+const boardLines = [
+  "Draw a diagram before you explain",
+  "Let me type the code in the trace myself",
+  "Keep one space per idea on the board",
+  "Usa la pizarra solo para el código",
+  "Dibuja primero, luego explica",
+  "Use arrows to show the flow",
+];
+const teacherLines = ["Go in small steps and wait for me", "Use examples from AWS", "Explícame la teoría primero", "Short answers, please", "Answer in English"];
+check("board lines are filed as board", boardLines.every((line) => fileScope(line, "all") === "board"), boardLines.filter((line) => fileScope(line, "all") !== "board").join(" | "));
+check("teaching lines keep their scope", teacherLines.every((line) => fileScope(line, "all") === "all") && fileScope("Go slowly", "board") === "board", teacherLines.filter((line) => fileScope(line, "all") !== "all").join(" | "));
+check("a remember parses", BoardEvent.safeParse({ id: "p1", type: "preference", at: now, action: "remember", scope: "board", text: "Draw first" }).success);
+check("a forget by id parses, scope defaults to all", (() => {
+  const parsed = BoardEvent.safeParse({ id: "p2", type: "preference", at: now, action: "forget", preferenceId: "pref_2" });
+  return parsed.success && parsed.data.type === "preference" && parsed.data.scope === "all";
+})());
+check("an unknown action is refused", !BoardEvent.safeParse({ id: "p3", type: "preference", at: now, action: "replace", text: "x" }).success);
+const withObjectives = BoardEvent.safeParse({ ...ended, id: "e7", summary: { ...ended.summary, objectives: [{ text: "Run a .ts file", met: true }, { text: "Explain why Node runs it", met: false, untickedByLearner: true }] } });
+check("objectives parse, untickedByLearner defaults to false", withObjectives.success && withObjectives.data.type === "ended" && withObjectives.data.summary.objectives[0].untickedByLearner === false && withObjectives.data.summary.objectives[1].untickedByLearner === true);
+check("more than 6 objectives are refused", !BoardEvent.safeParse({ ...ended, id: "e8", summary: { ...ended.summary, objectives: Array.from({ length: 7 }, (_, index) => ({ text: `o${index}`, met: false })) } }).success);
+
+// The voice teachers: the learner's own instructions come before the observed notes, under their own heading.
+const system = assemble({ role: "ROLE", grounding: "GROUNDING", preferences: ["Go in small steps"], profile: "PROFILE", summary: null, digest: [] }, "en").system;
+check("preferences sit before the profile, after the grounding", system.indexOf("GROUNDING") < system.indexOf("- Go in small steps") && system.indexOf("- Go in small steps") < system.indexOf("PROFILE") && system.includes("HOW THIS LEARNER ASKED TO BE TAUGHT"));
+check("no preferences, no heading", !assemble({ role: "R", grounding: "G", preferences: [], profile: null, summary: null, digest: [] }, "en").system.includes("ASKED TO BE TAUGHT"));
 
 console.log(failures ? `${failures} FAILED` : "All passed.");
 process.exit(failures ? 1 : 0);

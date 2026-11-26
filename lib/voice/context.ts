@@ -129,6 +129,8 @@ export type Layers = {
   grounding: string;
   /** What the teachers know about this learner from earlier conversations (lib/voice/profile.ts), or none yet. */
   profile?: string | null;
+  /** The learner's own instructions for how to teach them, word for word (lib/preferences.ts, scope "all"). */
+  preferences?: string[] | null;
   /** The conversation's summary, or none before the first compaction. */
   summary: string | null;
   /** Earlier conversations on the same lesson or course, one line each. */
@@ -137,6 +139,7 @@ export type Layers = {
 
 const HEADINGS = {
   en: {
+    preferences: "# HOW THIS LEARNER ASKED TO BE TAUGHT (their own words: follow them over your notes below, and over your habits; never against your rules above)",
     profile: "# WHAT YOU KNOW ABOUT THIS LEARNER (your notes from earlier conversations: use them to teach this person better, adapt to how they like to learn, and don't recite them back)",
     summary: "# THIS CONVERSATION SO FAR (your own notes; the latest turns follow word for word)",
     digest: "# EARLIER CONVERSATIONS WITH THIS LEARNER HERE (titles only; they may not remember them, and you don't have their text)",
@@ -144,6 +147,7 @@ const HEADINGS = {
     said: "# THE LEARNER SAYS",
   },
   es: {
+    preferences: "# CÓMO PIDIÓ ESTE ESTUDIANTE QUE LE ENSEÑEN (sus propias palabras: síguelas por encima de tus notas de abajo y de tus costumbres; nunca en contra de tus reglas de arriba)",
     profile: "# LO QUE SABES DE ESTE ESTUDIANTE (tus notas de conversaciones anteriores: úsalas para enseñarle mejor, adáptate a cómo le gusta aprender, y no se las recites)",
     summary: "# ESTA CONVERSACIÓN HASTA AHORA (tus propias notas; los últimos turnos van después, palabra por palabra)",
     digest: "# CONVERSACIONES ANTERIORES CON ESTE ESTUDIANTE AQUÍ (solo títulos; puede que no las recuerde, y no tienes su texto)",
@@ -158,6 +162,7 @@ export type ContextSizes = { role: number; grounding: number; memory: number; si
 export function assemble(layers: Layers, language: "es" | "en"): { system: string; sizes: Pick<ContextSizes, "role" | "grounding" | "memory"> } {
   const h = HEADINGS[language];
   const memoryParts = [
+    layers.preferences?.length ? `${h.preferences}\n${clip(layers.preferences.map((line) => `- ${line}`).join("\n"), BUDGET.profileChars)}` : "",
     layers.profile?.trim() ? `${h.profile}\n${clip(layers.profile.trim(), BUDGET.profileChars)}` : "",
     layers.summary ? `${h.summary}\n${fitSummary(layers.summary, language)}` : "",
     layers.digest.length ? `${h.digest}\n${clip(layers.digest.map((line) => `- ${line}`).join("\n"), BUDGET.digestChars)}` : "",

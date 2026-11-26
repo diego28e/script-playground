@@ -7,7 +7,17 @@ import { stateName, type SkillStateName } from "@/lib/board/context";
 // learner's state in each, or one for the whole lesson while its skills aren't approved yet.
 
 /** The newest board the teacher finished on a skill (or the lesson): when, which session, and what it found. */
-export type BoardDone = { sessionId: string; at: string; minutes: number; taught: string[]; learnerDid: string[]; struggles: string[]; readyToPractise: boolean };
+export type BoardDone = {
+  sessionId: string;
+  at: string;
+  minutes: number;
+  taught: string[];
+  learnerDid: string[];
+  struggles: string[];
+  readyToPractise: boolean;
+  /** The board's checklist at the end (docs/whiteboard-teaching.md §3); empty for boards from before it. */
+  objectives: { text: string; met: boolean; untickedByLearner: boolean }[];
+};
 export type BoardSkill = { key: string; labelEs: string; labelEn: string; state: SkillStateName; open: boolean; sessions: number; done: BoardDone | null };
 export type BoardOffer = { skills: BoardSkill[]; lessonOpen: boolean; lessonSessions: number; lessonDone: BoardDone | null };
 
@@ -51,6 +61,10 @@ export async function boardOffer(userId: string, courseId: string, lessonId: str
       learnerDid: lines(summary.learnerDid),
       struggles: lines(summary.struggles),
       readyToPractise: summary.readyToPractise === true,
+      objectives: (Array.isArray(summary.objectives) ? summary.objectives : [])
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && typeof (item as Record<string, unknown>).text === "string")
+        .slice(0, 6)
+        .map((item) => ({ text: item.text as string, met: item.met === true, untickedByLearner: item.untickedByLearner === true })),
     };
   };
   const state = (learner?.state ?? null) as PracticeState | null;
