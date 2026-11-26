@@ -6,8 +6,12 @@ import { stateName, type SkillStateName } from "@/lib/board/context";
 // What the lesson page offers on the whiteboard (docs/whiteboard.md): a board per skill of the lesson, with the
 // learner's state in each, or one for the whole lesson while its skills aren't approved yet.
 
-export type BoardSkill = { key: string; labelEs: string; labelEn: string; state: SkillStateName; open: boolean; sessions: number };
-export type BoardOffer = { skills: BoardSkill[]; lessonOpen: boolean; lessonSessions: number };
+/** The newest board the teacher finished on a skill (or the lesson): when, which session, and what it found. */
+export type BoardDone = { sessionId: string; at: string; minutes: number; taught: string[]; learnerDid: string[]; struggles: string[]; readyToPractise: boolean };
+export type BoardSkill = { key: string; labelEs: string; labelEn: string; state: SkillStateName; open: boolean; sessions: number; done: BoardDone | null };
+export type BoardOffer = { skills: BoardSkill[]; lessonOpen: boolean; lessonSessions: number; lessonDone: BoardDone | null };
+
+const lines = (value: unknown) => (Array.isArray(value) ? value.filter((line): line is string => typeof line === "string").slice(0, 8) : []);
 
 /** Whether this viewer may use the whiteboard: set up here, and admins only for now (docs/whiteboard-plan.md §7). */
 export function boardAllowed(viewer: { role?: string | null } | null): boolean {
@@ -22,17 +26,40 @@ export async function lessonSkills(lessonId: string) {
 }
 
 export async function boardOffer(userId: string, courseId: string, lessonId: string): Promise<BoardOffer> {
-  const [skills, learner, sessions] = await Promise.all([
+  const [skills, learner, sessions, ended] = await Promise.all([
     lessonSkills(lessonId),
     prisma.practiceLearner.findFirst({ where: { userId, courseId }, select: { state: true } }),
     prisma.boardSession.groupBy({ by: ["skillKey", "status"], where: { userId, lessonId }, _count: { _all: true } }),
+    // Finished boards: ended by the teacher with its summary (a board closed with "New board" has none until Didactra
+    // sends it). Newest first; the first of each skill is the one shown.
+    prisma.boardSession.findMany({
+      where: { userId, lessonId, status: "ENDED" },
+      orderBy: { endedAt: "desc" },
+      take: 100,
+      select: { id: true, skillKey: true, endedAt: true, minutes: true, summary: true },
+    }),
   ]);
+  const done = (key: string | null): BoardDone | null => {
+    const row = ended.find((entry) => entry.skillKey === key && entry.summary && typeof entry.summary === "object");
+    if (!row) return null;
+    const summary = row.summary as Record<string, unknown>;
+    return {
+      sessionId: row.id,
+      at: (row.endedAt ?? new Date()).toISOString(),
+      minutes: row.minutes,
+      taught: lines(summary.taught),
+      learnerDid: lines(summary.learnerDid),
+      struggles: lines(summary.struggles),
+      readyToPractise: summary.readyToPractise === true,
+    };
+  };
   const state = (learner?.state ?? null) as PracticeState | null;
   const count = (key: string | null, status?: "OPEN") => sessions.filter((row) => row.skillKey === key && (!status || row.status === status)).reduce((sum, row) => sum + row._count._all, 0);
   return {
-    skills: skills.map((skill) => ({ ...skill, state: stateName(state, skill.key), open: count(skill.key, "OPEN") > 0, sessions: count(skill.key) })),
+    skills: skills.map((skill) => ({ ...skill, state: stateName(state, skill.key), open: count(skill.key, "OPEN") > 0, sessions: count(skill.key), done: done(skill.key) })),
     lessonOpen: count(null, "OPEN") > 0,
     lessonSessions: count(null),
+    lessonDone: done(null),
   };
 }
 

@@ -13,6 +13,10 @@ skill being learned, the lesson that teaches it, the learner's profile, and how 
   draft is approved), each with the learner's state (`new`, `learning`, `reviewing`, `secure`, read from lk-practice's
   state) and **Open** or **Continue**. The first skill not yet secure is marked **Next**. A lesson whose skills aren't
   approved yet gets one board for the whole lesson.
+- **Done on the board.** A skill whose board the teacher finished (ended with its summary) shows "Done on the board ·
+  date" beside its practice state. Pressed, it opens what that board found: how long, what was explained, what the
+  learner showed, what was hard, and, when ready to practise, a link to practice; and "See the board" opens that
+  session's replay and transcript. The practice state stays practice's own: the mark never changes it.
 - **The board page** (`/courses/<course>/<module>/<lesson>/board`):
   - Didactra fills the screen under a bar with the lesson, a skill switcher and **New board**.
   - `?skill=` opens that skill's open session, or a new one. `?session=` opens one of the learner's own sessions.

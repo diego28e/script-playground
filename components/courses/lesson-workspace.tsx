@@ -326,7 +326,7 @@ export function LessonWorkspace({ data, signedIn, reading, videos, audio, board,
                     </div>
                     {inLab && <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted-foreground">{notebookTab ? t.labHintTabs : t.labHint}</p>}
                     {audio && <LessonAudio key={audio.key} track={audio} lessonId={lesson.id} lessonTitle={lesson.title.replaceAll("`", "")} language={language} />}
-                    {board && <LessonBoard offer={board} lessonHref={here} language={language} />}
+                    {board && <LessonBoard offer={board} lessonHref={here} practiceHref={`/practice/${course.slug}`} language={language} />}
                     {notebookTab && (
                         <div role="tablist" aria-label={t.tabs} className="mt-6 inline-flex rounded-full bg-muted p-1">
                             {(["lesson", "notebook"] as const).map((id) => (
