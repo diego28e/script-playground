@@ -10,6 +10,7 @@ import { saveVideoState, type VideoState } from "@/actions/lessons";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { LK_STRINGS_ES } from "@/lib/lk-strings-es";
 import { VideoPlayer } from "@/components/courses/video-player/video-player";
+import type { PlayerStop } from "@/lib/lesson-stops/shared";
 
 const COPY = {
     es: {
@@ -34,6 +35,8 @@ type Props = {
     onFinished?: () => void;
     /** How far through the video the playhead is, 0 to 1, as it moves (the lesson's video stepper shows it). */
     onPlayhead?: (fraction: number) => void;
+    /** Where a plain video pauses for a hands-on step (docs/lesson-stops.md). */
+    stops?: PlayerStop[];
 };
 
 const EMPTY: VideoState = { responses: {}, submitted: [], scores: {} };
@@ -136,7 +139,7 @@ function usePlayerBox(replay: boolean) {
 const BOX =
     "lk-scope mx-auto w-full overflow-hidden rounded-2xl data-[portrait]:max-w-[min(100%,max(18rem,min(24rem,calc((100svh-9rem)*9/16))))]";
 
-export function LessonVideo({ video, lessonId, videoId, title, language, tracking, initialState, onFinished, onPlayhead }: Props) {
+export function LessonVideo({ video, lessonId, videoId, title, language, tracking, initialState, onFinished, onPlayhead, stops }: Props) {
     const t = COPY[language];
     const { initial, update } = useVideoState(lessonId, videoId, tracking, initialState, t.saveError);
     const onProgress = (progress: MediaProgress) => update((current) => ({ ...current, progress }), 4000);
@@ -163,6 +166,7 @@ export function LessonVideo({ video, lessonId, videoId, title, language, trackin
             <div ref={boxRef} className={BOX} data-portrait={portrait || undefined}>
                 <PlainVideo
                     media={video.media}
+                    stops={stops}
                     portrait={portrait}
                     initial={initial}
                     language={language}
@@ -228,8 +232,10 @@ function PlainVideo({
     language,
     onProgress,
     onEnded,
+    stops,
 }: {
     media: Extract<LessonVideoData, { kind: "plain" }>["media"];
+    stops?: PlayerStop[];
     portrait: boolean;
     initial: VideoState;
     language: "es" | "en";
@@ -248,6 +254,7 @@ function PlainVideo({
             furthestBefore={initial.progress?.furthest ?? 0}
             onProgress={({ at, furthest }) => onProgress({ progressVersion: "1.0", at, furthest })}
             onEnded={onEnded}
+            stops={stops}
         />
     );
 }

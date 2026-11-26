@@ -103,7 +103,7 @@ export function chainStartingAt(chain: ReadonlyArray<ModelEntry>, model: string 
   return index <= 0 ? chain : [...chain.slice(index), ...chain.slice(0, index)];
 }
 
-export type AiFeature = "explain" | "ask" | "translate" | "tutor" | "graph" | "diagnose" | "hint" | "compass" | "narrate" | "lesson-tutor" | "grade" | "practice-coach" | "voice-summary" | "voice-profile";
+export type AiFeature = "explain" | "ask" | "translate" | "tutor" | "graph" | "diagnose" | "hint" | "compass" | "narrate" | "lesson-tutor" | "grade" | "practice-coach" | "voice-summary" | "voice-profile" | "lesson-stops";
 
 export type AiResult =
   | { ok: true; text: string; functionCalls: FunctionCall[]; model: string; traceId: string; tokens?: Tokens }

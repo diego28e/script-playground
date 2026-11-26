@@ -194,6 +194,9 @@ starts it again. Only the paragraph being said re-renders as the words go by.
 **Ask the teacher**: "Ask", on the bar and on the small bar, pauses the lesson and opens the lesson tutor
 (`docs/lesson-tutor.md`).
 
+**Hands-on stops**: when the course has them on, the audio pauses where the learner has a step to do and shows it,
+with its commands to copy; the hand on the bar turns the pauses off (`docs/lesson-stops.md`).
+
 ## Using it (Admin → Audio)
 
 1. Choose the course, the model and the voice ("Hear it" first), and keep "Teacher's delivery" on for ElevenLabs.

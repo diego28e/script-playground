@@ -95,6 +95,8 @@ player (`components/courses/video-player/`), drawn after the OCW platform's revi
 - **Transcript** under the video: the line being spoken is marked and followed, any line jumps there, and a search
   finds where something was said. The seek bar shows the line spoken under the pointer.
 - **Keyboard:** Space/K, J/L, arrows, 0–9, < >, M, C, T, P, F, and ? for the list.
+- **Hands-on stops:** when the course has them on, the video pauses where the learner has a step to do and shows it
+  over the frame, with its commands to copy; the hand on the bar turns the pauses off (`docs/lesson-stops.md`).
 - Speed, volume, the caption language and the transcript are remembered in the browser for every lesson video.
 - The bar hides while playing and comes back with the pointer, a tap or keyboard focus; the big play button shows
   only before the first play and after the end, so a paused frame (code to read) stays clear. On a phone the bar keeps

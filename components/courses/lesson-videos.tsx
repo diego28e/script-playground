@@ -8,6 +8,7 @@ import { LessonVideo } from "@/components/courses/lesson-video";
 import { Tip } from "@/components/ui/tip";
 import type { LessonVideo as LessonVideoData } from "@/lib/lesson-video";
 import { cn } from "@/lib/utils";
+import type { PlayerStop } from "@/lib/lesson-stops/shared";
 
 // A lesson's videos (docs/lesson-videos.md): one per skill as a rule, in teaching order. One video plays alone.
 // Several get a small stepper ABOVE the player, kept apart from the lesson's own previous / next below the page: a
@@ -21,6 +22,8 @@ export type PlayableVideo = {
   title: { es: string | null; en: string | null };
   durationSeconds: number | null;
   video: LessonVideoData;
+  /** Where it pauses for a hands-on step (docs/lesson-stops.md); empty when the course doesn't pause. */
+  stops?: PlayerStop[];
 };
 
 const COPY = {
@@ -103,6 +106,7 @@ export function LessonVideos({ videos, lessonId, lessonTitle, language, tracking
       initialState={initialStates[video.id] ?? null}
       onFinished={() => finish(video.id)}
       onPlayhead={videos.length > 1 ? onPlayhead : undefined}
+      stops={video.stops}
     />
   );
   if (videos.length === 1) return player;

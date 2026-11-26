@@ -27,6 +27,8 @@ import { PlayerMenu } from "./player-menu";
 import { Scrubber } from "./scrubber";
 import { TranscriptPanel } from "./transcript-panel";
 import { clock, cueIndexAt, rateLabel, SPEEDS, usePlayerPrefs, useTrackCues } from "./player-state";
+import { StopCard, StopsIcon, stopsHint, stopsLabel, useLessonStops } from "@/components/courses/lesson-stops";
+import type { PlayerStop } from "@/lib/lesson-stops/shared";
 
 // The platform's player for lesson videos without quizzes (an interactive video plays in lk-react's own player).
 // Drawn after the reviewer player of the OCW platform, made for learners:
@@ -162,7 +164,11 @@ type Props = {
   /** Where the learner is, every few seconds while playing and at once on pause, seek and end. */
   onProgress?: (progress: { at: number; furthest: number }) => void;
   onEnded?: () => void;
+  /** Where it pauses for a hands-on step on the learner's computer (docs/lesson-stops.md). */
+  stops?: PlayerStop[];
 };
+
+const NO_STOPS: PlayerStop[] = [];
 
 const SKIP_SECONDS = 10;
 const CHROME_HIDE_MS = 2500;
@@ -198,9 +204,10 @@ function BarButton({ label, hint, onClick, active, disabled, children }: { label
   );
 }
 
-export function VideoPlayer({ src, poster, tracks = [], title, language, portrait = false, startAt = 0, furthestBefore = 0, onProgress, onEnded }: Props) {
+export function VideoPlayer({ src, poster, tracks = [], title, language, portrait = false, startAt = 0, furthestBefore = 0, onProgress, onEnded, stops: stopList = NO_STOPS }: Props) {
   const t = COPY[language];
   const videoRef = useRef<HTMLVideoElement>(null);
+  const stops = useLessonStops(stopList, useCallback(() => videoRef.current, []));
   const shellRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const furthest = useRef(furthestBefore);
@@ -357,7 +364,7 @@ export function VideoPlayer({ src, poster, tracks = [], title, language, portrai
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setChromeVisible(false), CHROME_HIDE_MS);
   }, []);
-  const chrome = chromeVisible || !playing || scrubbing || menu !== null || shortcutsOpen || focusInside || Boolean(error);
+  const chrome = chromeVisible || !playing || scrubbing || menu !== null || shortcutsOpen || focusInside || Boolean(error) || Boolean(stops.active);
 
   /* ── Keyboard ── */
 
@@ -506,6 +513,7 @@ export function VideoPlayer({ src, poster, tracks = [], title, language, portrai
             setPlaying(true);
             setStarted(true);
             setEnded(false);
+            stops.dismiss();
             reveal();
           }}
           onPause={() => {
@@ -523,6 +531,7 @@ export function VideoPlayer({ src, poster, tracks = [], title, language, portrai
           onTimeUpdate={(event) => {
             // A seek from outside the bar (a media key, the picture-in-picture window) while paused.
             if (!playing && !scrubbing) setCurrent(event.currentTarget.currentTime);
+            stops.onTime(event.currentTarget.currentTime);
             report();
           }}
           onLoadedMetadata={(event) => {
@@ -606,6 +615,22 @@ export function VideoPlayer({ src, poster, tracks = [], title, language, portrai
           >
             {ended ? <RotateCcw className="size-5 @md:size-6" aria-hidden="true" /> : <Play className="ml-1 size-5 @md:size-7" fill="currentColor" aria-hidden="true" />}
           </button>
+        )}
+
+        {stops.active && !error && (
+          // The step over the paused frame, above the bar so the learner can still seek or turn the pauses off.
+          <div className="absolute inset-x-0 top-0 bottom-14 z-30 flex items-center justify-center overflow-y-auto bg-black/60 p-3 backdrop-blur-[2px]">
+            <StopCard
+              stop={stops.active}
+              language={language}
+              className="max-h-full w-full max-w-lg overflow-y-auto"
+              onContinue={stops.resume}
+              onTurnOff={() => {
+                stops.toggle();
+                stops.resume();
+              }}
+            />
+          </div>
         )}
 
         {shortcutsOpen && (
@@ -728,6 +753,11 @@ export function VideoPlayer({ src, poster, tracks = [], title, language, portrai
                     <PictureInPicture2 className="size-4" />
                   </BarButton>
                 </span>
+              )}
+              {stopList.length > 0 && (
+                <BarButton label={stopsLabel(language)} hint={stopsHint(stops.on, stopList.length, language)} onClick={stops.toggle} active={stops.on}>
+                  <StopsIcon on={stops.on} />
+                </BarButton>
               )}
               <span className="hidden @md:contents">
                 <BarButton label={t.shortcuts} hint={`${t.shortcuts} (?)`} onClick={() => setShortcutsOpen((open) => !open)} active={shortcutsOpen}>

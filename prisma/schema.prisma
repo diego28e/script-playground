@@ -146,6 +146,9 @@ model Course {
   // The language of the course's code practice (lib/practice/language.ts): "python" or "typescript". It picks the
   // scratchbook's language and the one new code tasks are written in; a task keeps the language it was written in.
   practiceLanguage String                   @default("python")
+  // Audio and video lessons pause where the learner has a step to do on their own computer (docs/lesson-stops.md),
+  // switched in Admin → Stops. Off until the course's stops have been generated and reviewed.
+  lessonStops      Boolean                  @default(false)
   sourceRepoUrl    String?
   // The commit the course was last imported from.
   sourceRef        String?
@@ -320,10 +323,37 @@ model Lesson {
   practiceDraft    PracticeLessonDraft?
   // The lesson told as audio by a teacher (docs/lesson-audio.md).
   audio            LessonAudio?
+  stops            LessonStop[]
 
   @@unique([moduleId, slug])
   @@index([moduleId, position])
   @@map("lesson")
+}
+
+// A moment in a lesson's audio or one of its videos where the learner has something to do on their own computer
+// (docs/lesson-stops.md): the player pauses there and shows the step, with its exact commands, until they continue.
+// Written by a model from the recording's timed transcript and the lesson's text, reviewed in Admin → Stops.
+model LessonStop {
+  id         String   @id @default(cuid())
+  lessonId   String
+  // Which recording: "audio" (the lesson's audio) or "video:<LessonVideoPart id>".
+  media      String
+  // Seconds into the recording: just after the sentence that gives the instruction.
+  at         Float
+  titleEs    String
+  titleEn    String
+  stepEs     String
+  stepEn     String
+  // The exact commands, each as the lesson writes it (checked against the lesson's text when generated).
+  commands   String[] @default([])
+  // The model that wrote it, or "admin" for one added or edited by hand.
+  author     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lesson     Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId, media, at])
+  @@map("lesson_stop")
 }
 
 enum LessonVideoSource {

@@ -10,6 +10,8 @@ import { clock, rateLabel, SPEEDS, usePlayerPrefs } from "@/components/courses/v
 import { LessonTranscript } from "@/components/courses/lesson-transcript";
 import { LessonTutor } from "@/components/courses/lesson-tutor";
 import { unlockSound } from "@/lib/voice/browser";
+import { StopCard, StopsIcon, stopsHint, stopsLabel, useLessonStops } from "@/components/courses/lesson-stops";
+import type { PlayerStop } from "@/lib/lesson-stops/shared";
 
 // The lesson told by a teacher (docs/lesson-audio.md): an audio version of the whole lesson, for listening away from the
 // screen or alongside the page. It looks like the video player's bar and shares its speed setting. It remembers where
@@ -29,6 +31,8 @@ export type LessonAudioTrack = {
   tutor: boolean;
   /** Changes when the audio is voiced again, so the player starts afresh. */
   key: string;
+  /** Where it pauses for a hands-on step (docs/lesson-stops.md); empty when the course doesn't pause. */
+  stops?: PlayerStop[];
 };
 
 const COPY = {
@@ -122,6 +126,8 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
   const [miniClosed, setMiniClosed] = useState(false);
   const [tutorOpen, setTutorOpen] = useState(false);
   const lastSaved = useRef(0);
+  const stops = useLessonStops(track.stops ?? [], useCallback(() => audioRef.current, []));
+  const stopCues = (track.stops ?? []).map((stop) => ({ start: stop.at, end: stop.at + 0.5, text: language === "es" ? stop.titleEs : stop.titleEn }));
 
   // Where the learner left it, read after mounting (the server has no storage).
   useEffect(() => {
@@ -249,7 +255,7 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
         </div>
 
         <div className="px-4 pb-3 pt-3 sm:px-5">
-          <Scrubber current={current} duration={duration} buffered={buffered} cues={[]} label={t.seek} onSeek={seek} onScrubChange={() => undefined} />
+          <Scrubber current={current} duration={duration} buffered={buffered} cues={stopCues} label={t.seek} onSeek={seek} onScrubChange={() => undefined} />
           <div className="mt-1.5 flex items-center gap-1">
             <span className="font-mono text-xs tabular-nums text-white/70">
               {clock(current)} / {clock(duration)}
@@ -279,6 +285,13 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
               open={speedOpen}
               onOpenChange={setSpeedOpen}
             />
+            {(track.stops?.length ?? 0) > 0 && (
+              <Tip content={stopsHint(stops.on, track.stops?.length ?? 0, language)}>
+                <button type="button" onClick={stops.toggle} aria-pressed={stops.on} aria-label={stopsLabel(language)} className={roundButton}>
+                  <StopsIcon on={stops.on} />
+                </button>
+              </Tip>
+            )}
             {hasTranscript && (
               <Tip content={transcriptOpen ? t.hideTranscript : t.showTranscript}>
                 <button
@@ -294,6 +307,26 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
             )}
           </div>
           {failed && <p className="mt-2 text-xs text-red-300">{t.failed}</p>}
+          {stops.active && (
+            <StopCard
+              stop={stops.active}
+              language={language}
+              className="mt-3"
+              onContinue={stops.resume}
+              onAsk={
+                track.tutor
+                  ? () => {
+                      stops.dismiss();
+                      openTutor();
+                    }
+                  : undefined
+              }
+              onTurnOff={() => {
+                stops.toggle();
+                stops.resume();
+              }}
+            />
+          )}
         </div>
 
         {transcriptOpen && track.transcript && (
@@ -315,6 +348,7 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
           onPlay={() => {
             setPlaying(true);
             setFailed(false);
+            stops.dismiss();
           }}
           onPause={(event) => {
             setPlaying(false);
@@ -328,6 +362,7 @@ export function LessonAudio({ track, lessonId, lessonTitle, language }: { track:
           onTimeUpdate={(event) => {
             const audio = event.currentTarget;
             setCurrent(audio.currentTime);
+            stops.onTime(audio.currentTime);
             if (audio.buffered.length) setBuffered(audio.buffered.end(audio.buffered.length - 1));
             if (Math.abs(audio.currentTime - lastSaved.current) > 5) {
               lastSaved.current = audio.currentTime;
