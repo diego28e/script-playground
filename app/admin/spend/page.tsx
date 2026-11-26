@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, CircleOff } from "lucide-react";
-import { buildSpendReport, type ElevenCredits, type ProviderSection, type SpendReport, type SpendRow } from "@/lib/spend/report";
+import { buildSpendReport, monthRange, type ElevenCredits, type ProviderSection, type SpendReport, type SpendRow } from "@/lib/spend/report";
+import { prisma } from "@/lib/prisma";
 import { SpendMonth } from "@/components/admin/spend-month";
 import { Tip } from "@/components/ui/tip";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,8 @@ const KEY_COLORS = ["bg-foreground/75", "bg-sky-500/75", "bg-amber-500/75", "bg-
 const NAME = { elevenlabs: "ElevenLabs", deepgram: "Deepgram" } as const;
 
 export default async function SpendPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
-  const report = await buildSpendReport((await searchParams).month);
+  const month = (await searchParams).month;
+  const [report, board] = await Promise.all([buildSpendReport(month), whiteboardMonth(month)]);
   return (
     <div className="flex h-full flex-1 flex-col gap-6 px-2 pb-12 md:px-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -73,6 +75,13 @@ export default async function SpendPage({ searchParams }: { searchParams: Promis
         note="What each kind of work cost. Credits: ElevenLabs, each call's own figure. Billed: ElevenLabs shared out at the month's billed rate; Deepgram from its own log, by request or tag."
       >
         <Table rows={report.byWorkload.map((row) => ({ ...row, label: `${row.label} · ${NAME[row.provider]}` }))} />
+      </Section>
+
+      <Section
+        title="Whiteboard"
+        note="Lessons with Didactra's teacher this month (docs/whiteboard.md), by learner: the minutes and the cost Didactra reported (its model and voice, at list price). Its Deepgram calls are also in the tables above, by tag."
+      >
+        <Whiteboard rows={board} />
       </Section>
 
       <Section title="By day" note="Billed by each provider, by day (UTC), with ElevenLabs' credits.">
@@ -298,6 +307,60 @@ function Provider({ section, credits: creditFigures }: { section: ProviderSectio
         </div>
       )}
     </section>
+  );
+}
+
+type BoardRow = { user: string; sessions: number; minutes: number; costUsd: number };
+
+/** The month's whiteboard sessions by learner, as Didactra reported them. */
+async function whiteboardMonth(month?: string | null): Promise<BoardRow[]> {
+  const { start, end } = monthRange(month);
+  const rows = await prisma.boardSession.groupBy({
+    by: ["userId"],
+    where: { createdAt: { gte: start, lt: end } },
+    _count: { _all: true },
+    _sum: { minutes: true, costUsd: true },
+  });
+  const users = await prisma.user.findMany({ where: { id: { in: rows.map((row) => row.userId) } }, select: { id: true, name: true, email: true } });
+  const name = (id: string) => {
+    const user = users.find((entry) => entry.id === id);
+    return user?.name || user?.email || id;
+  };
+  return rows
+    .map((row) => ({ user: name(row.userId), sessions: row._count._all, minutes: row._sum.minutes ?? 0, costUsd: row._sum.costUsd ?? 0 }))
+    .sort((a, b) => b.costUsd - a.costUsd);
+}
+
+function Whiteboard({ rows }: { rows: BoardRow[] }) {
+  if (!rows.length) return <p className="text-sm text-muted-foreground">Nothing this month.</p>;
+  const total = rows.reduce((sum, row) => ({ sessions: sum.sessions + row.sessions, minutes: sum.minutes + row.minutes, costUsd: sum.costUsd + row.costUsd }), { sessions: 0, minutes: 0, costUsd: 0 });
+  return (
+    <table className="w-full min-w-[30rem] text-sm tabular-nums">
+      <thead>
+        <tr className="text-left text-xs text-muted-foreground">
+          <th className="py-1.5 pr-3 font-medium">Learner</th>
+          <th className="py-1.5 pr-3 text-right font-medium">Sessions</th>
+          <th className="py-1.5 pr-3 text-right font-medium">Time</th>
+          <th className="py-1.5 text-right font-medium">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.user} className="border-t border-border">
+            <td className="py-1.5 pr-3">{row.user}</td>
+            <td className="py-1.5 pr-3 text-right">{count(row.sessions)}</td>
+            <td className="py-1.5 pr-3 text-right">{minutes(row.minutes * 60)}</td>
+            <td className="py-1.5 text-right">{usd(row.costUsd)}</td>
+          </tr>
+        ))}
+        <tr className="border-t border-border font-medium">
+          <td className="py-1.5 pr-3">All</td>
+          <td className="py-1.5 pr-3 text-right">{count(total.sessions)}</td>
+          <td className="py-1.5 pr-3 text-right">{minutes(total.minutes * 60)}</td>
+          <td className="py-1.5 text-right">{usd(total.costUsd)}</td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 

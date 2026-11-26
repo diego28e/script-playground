@@ -14,6 +14,7 @@
     "practice-worker:dev": "tsx services/practice-worker/dev.ts",
     "grader:check": "tsx scripts/grader-check.ts",
     "voice:context:check": "tsx scripts/voice-context-check.ts",
+    "board:check": "tsx scripts/board-check.ts",
     "voice:context:measure": "tsx scripts/voice-context-measure.ts"
   },
   "dependencies": {

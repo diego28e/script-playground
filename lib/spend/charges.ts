@@ -26,6 +26,12 @@ export const WORKLOADS = {
   "practice.listen": { label: "Practice: explanations dictated", tag: "adc-practice-listen" },
   "practice-coach.listen": { label: "Practice coach: microphone", tag: "adc-practice-coach-listen" },
   "practice-coach.speak": { label: "Practice coach: replies read aloud", tag: "adc-practice-coach-speak" },
+  // Didactra's teacher on the whiteboard (docs/whiteboard-contract.md), when it uses the platform's Deepgram project: it
+  // tags its own calls, and they are counted here by tag (it writes no charges of its own).
+  "whiteboard.listen": { label: "Whiteboard: microphone", tag: "adc-whiteboard-listen" },
+  "whiteboard.speak": { label: "Whiteboard: the teacher's voice", tag: "adc-whiteboard-speak" },
+  // Didactra outside the platform: its development lessons on a PC and its measurement tools.
+  "whiteboard.dev": { label: "Whiteboard: development and tests", tag: "adc-whiteboard-dev" },
 } as const;
 export type Workload = keyof typeof WORKLOADS;
 

@@ -158,6 +158,54 @@ export async function learnFromConversation(conversationId: string, language: "e
 }
 
 /**
+ * Learns from what a whiteboard session found (docs/whiteboard.md): its summary takes the place of a stretch of
+ * conversation, and both rows are written again the same way. Never throws.
+ */
+export async function learnFromBoardSummary(
+  userId: string,
+  courseId: string,
+  language: "es" | "en",
+  summary: { learnerDid: string[]; struggles: string[]; profileNotes: string[] },
+  models: ReadonlyArray<ModelEntry>,
+): Promise<boolean> {
+  const es = language === "es";
+  const lines = [
+    ...summary.profileNotes.map((line) => `- ${line}`),
+    ...summary.learnerDid.map((line) => `- ${es ? "Mostró" : "Showed"}: ${line}`),
+    ...summary.struggles.map((line) => `- ${es ? "Le costó" : "Struggled with"}: ${line}`),
+  ];
+  if (!lines.length) return false;
+  try {
+    const [previous, courseTitle] = await Promise.all([
+      readProfile(userId, courseId, language).then((text) => text ?? ""),
+      prisma.course.findUnique({ where: { id: courseId }, select: { title: true } }).then((row) => row?.title ?? ""),
+    ]);
+    const stretch = `# ${es ? "EL TRAMO NUEVO: el resumen de una lección en la pizarra con el profesor" : "THE NEW STRETCH: the summary of a whiteboard lesson with the teacher"}\n${clip(lines.join("\n"), 3_000)}`;
+    const request = [`# ${es ? "CURSO" : "COURSE"}\n${courseTitle}`, `# ${es ? "NOTAS HASTA AHORA" : "NOTES SO FAR"}\n${previous.trim() || (es ? "(ninguna: primera vez)" : "(none: the first time)")}`, stretch].join("\n\n");
+    const result = await generateWithFallback({
+      feature: "voice-profile",
+      pool: "TUTOR",
+      models,
+      userId,
+      contents: [{ role: "user", parts: [{ text: request }] }],
+      config: { systemInstruction: SYSTEM[language], thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 1100, temperature: 0.2 },
+    });
+    if (!result.ok || !result.text.trim()) return false;
+    const { general, course } = splitNote(result.text, language);
+    const save = (scope: string, notes: string) =>
+      notes.trim()
+        ? prisma.learnerProfile.upsert({ where: { userId_scope: { userId, scope } }, create: { userId, scope, notes, updates: 1 }, update: { notes, updates: { increment: 1 } } })
+        : null;
+    await Promise.all([save(PROFILE_SCOPE_ALL, general), save(courseId, course)]);
+    logAi("info", { event: "voice.profile_board", userId, courseId, lines: lines.length, model: result.model });
+    return true;
+  } catch (error) {
+    logAi("warn", { event: "voice.profile_board_failed", userId, error: String(error).slice(0, 300) });
+    return false;
+  }
+}
+
+/**
  * When a learner starts a new conversation: the ones they left with something the profile hasn't learned from yet (a
  * short conversation never reaches PROFILE_BATCH) are learned from now, at most three, oldest first.
  */

@@ -31,6 +31,8 @@ import type { OutlinePreference } from "@/lib/outline-preference";
 import { LessonPythonSection } from "@/components/compass/lesson-python";
 import { LessonVideos, type PlayableVideo } from "@/components/courses/lesson-videos";
 import { LessonAudio, type LessonAudioTrack } from "@/components/courses/lesson-audio";
+import { LessonBoard } from "@/components/courses/lesson-board";
+import type { BoardOffer } from "@/lib/board/offer";
 import { labNotebookUrl, lessonPath, sourceFileUrl } from "@/lib/lab";
 import { cn } from "@/lib/utils";
 
@@ -128,6 +130,8 @@ type Props = {
     videos: PlayableVideo[];
     /** The lesson told by a teacher, signed, or null (docs/lesson-audio.md). */
     audio: LessonAudioTrack | null;
+    /** What the whiteboard offers for this lesson (docs/whiteboard.md); null when it isn't available. */
+    board: BoardOffer | null;
     /** The outline's saved width and whether it's folded (lesson-outline.tsx), read from a cookie by the page. */
     outline: OutlinePreference;
 };
@@ -143,7 +147,7 @@ const INLINE_MARKDOWN = {
 };
 const CODE_SPANS = "[&_code]:rounded-md [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em]";
 
-export function LessonWorkspace({ data, signedIn, reading, videos, audio, outline }: Props) {
+export function LessonWorkspace({ data, signedIn, reading, videos, audio, board, outline }: Props) {
     const { language } = useLanguage();
     const t = COPY[language];
     const router = useRouter();
@@ -322,6 +326,7 @@ export function LessonWorkspace({ data, signedIn, reading, videos, audio, outlin
                     </div>
                     {inLab && <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted-foreground">{notebookTab ? t.labHintTabs : t.labHint}</p>}
                     {audio && <LessonAudio key={audio.key} track={audio} lessonId={lesson.id} lessonTitle={lesson.title.replaceAll("`", "")} language={language} />}
+                    {board && <LessonBoard offer={board} lessonHref={here} language={language} />}
                     {notebookTab && (
                         <div role="tablist" aria-label={t.tabs} className="mt-6 inline-flex rounded-full bg-muted p-1">
                             {(["lesson", "notebook"] as const).map((id) => (

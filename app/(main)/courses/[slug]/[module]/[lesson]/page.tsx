@@ -14,6 +14,7 @@ import type { LessonAudioTrack } from "@/components/courses/lesson-audio";
 import { readTimings, transcriptWords } from "@/lib/lesson-audio/words";
 import { lessonPlayerStops } from "@/lib/lesson-stops/read";
 import { AUDIO_MEDIA, videoMedia } from "@/lib/lesson-stops/shared";
+import { boardAllowed, boardOffer } from "@/lib/board/offer";
 
 export const runtime = "nodejs";
 
@@ -91,8 +92,12 @@ export default async function LessonPage({ params }: Props) {
         );
     }
 
+    // Learning on the whiteboard (docs/whiteboard.md): admins only for now, where it is set up.
+    const viewer = await currentViewer();
+    const board = boardAllowed(viewer) && viewer ? await boardOffer(viewer.id, data.course.id, lesson.id) : null;
+
     // The outline's width and fold, as the learner left them: rendered so from the start, with no jump.
     const outline = readOutlinePreference((await cookies()).get(OUTLINE_COOKIE)?.value);
 
-    return <LessonWorkspace data={data} signedIn={Boolean(await currentViewer())} reading={reading} videos={videos} audio={audio} outline={outline} />;
+    return <LessonWorkspace data={data} signedIn={Boolean(await currentViewer())} reading={reading} videos={videos} audio={audio} board={board} outline={outline} />;
 }

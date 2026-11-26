@@ -34,6 +34,8 @@ model User {
   // Conversations with the voice teachers (docs/voice-context.md).
   voiceConversations VoiceConversation[]
   learnerProfiles    LearnerProfile[]
+  // Lessons taken on the whiteboard (docs/whiteboard.md).
+  boardSessions      BoardSession[]
 
   @@map("user")
 }
@@ -166,6 +168,8 @@ model Course {
   discoveredEdges  PracticeDiscoveredEdge[]
   // Bulk practice work the server's worker carries out (docs/practice.md, "Jobs").
   practiceJobs     PracticeJob[]
+  // Lessons taken on the whiteboard (docs/whiteboard.md).
+  boardSessions    BoardSession[]
 
   @@map("course")
 }
@@ -324,6 +328,7 @@ model Lesson {
   // The lesson told as audio by a teacher (docs/lesson-audio.md).
   audio            LessonAudio?
   stops            LessonStop[]
+  boardSessions    BoardSession[]
 
   @@unique([moduleId, slug])
   @@index([moduleId, position])
@@ -1480,4 +1485,57 @@ model PracticeJobItem {
 
   @@index([jobId, status, position])
   @@map("practice_job_item")
+}
+
+// A whiteboard session (docs/whiteboard.md): one learner learning one skill, or one lesson with no skills yet, with
+// Didactra, the teacher that talks and draws (docs/whiteboard-contract.md). Didactra keeps the board, the transcript and
+// the replay; the platform keeps who, what, how long, what it cost, and the summary.
+model BoardSession {
+  id              String               @id @default(cuid())
+  userId          String
+  courseId        String
+  lessonId        String
+  // The skill's key (PracticeSkill.key); null for a session on a whole lesson.
+  skillKey        String?
+  // "es" or "en".
+  language        String
+  // Didactra's own id for its session (12 hex), from its "started" event.
+  didactraSession String?
+  status          BoardSessionStatus   @default(OPEN)
+  minutes         Float                @default(0)
+  costUsd         Float                @default(0)
+  model           String?
+  voice           String?
+  // The "ended" event's summary: taught, learnerDid, struggles, readyToPractise, profileNotes.
+  summary         Json?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course          Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lesson          Lesson               @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  events          BoardSessionEvent[]
+
+  @@index([userId, lessonId, skillKey, createdAt])
+  @@index([courseId, createdAt])
+  @@map("board_session")
+}
+
+enum BoardSessionStatus {
+  OPEN
+  ENDED
+}
+
+// An event Didactra sent about a session, kept by its id so a retried event is applied once.
+model BoardSessionEvent {
+  id        String       @id @default(cuid())
+  sessionId String
+  eventId   String
+  type      String
+  createdAt DateTime     @default(now())
+  session   BoardSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, eventId])
+  @@map("board_session_event")
 }
