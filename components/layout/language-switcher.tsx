@@ -16,9 +16,10 @@ export function LanguageSwitcher() {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-9 w-9">
-                    <Languages className="h-4 w-4" />
-                    <span className="sr-only">Toggle language</span>
+                {/* 40px on phones, for the thumb; 36px beside the header's links. */}
+                <Button variant="ghost" size="icon" className="size-10 md:size-9">
+                    <Languages className="h-4 w-4" aria-hidden="true" />
+                    <span className="sr-only">{language === "es" ? "Cambiar idioma" : "Change language"}</span>
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">

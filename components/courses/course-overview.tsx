@@ -1,9 +1,10 @@
 "use client";
 
 import { useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import { ArrowRight, BookOpen, Check, ChevronDown, CircleDashed, ExternalLink, FolderKanban, Lock, NotebookPen, PlayCircle, Repeat } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, CircleDashed, ExternalLink, FolderKanban, Lock, NotebookPen, PlayCircle, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import type { LessonKind } from "@prisma/client";
 import { enrollInCourse, type getCourseBySlug } from "@/actions/courses";
@@ -18,6 +19,7 @@ type CourseLesson = CourseDetail["modules"][number]["lessons"][number];
 const COPY = {
     es: {
         eyebrow: "Curso",
+        allCourses: "Todos los cursos",
         private: "Privado: solo lo ven las personas invitadas",
         language: { en: "en inglés", es: "en español" } as Record<string, string>,
         modules: "módulos",
@@ -43,6 +45,7 @@ const COPY = {
     },
     en: {
         eyebrow: "Course",
+        allCourses: "All courses",
         private: "Private: only the people invited see it",
         language: { en: "in English", es: "in Spanish" } as Record<string, string>,
         modules: "modules",
@@ -127,6 +130,14 @@ export function CourseOverview({ course, signedIn }: { course: CourseDetail; sig
                     <rect width="100%" height="100%" fill="url(#course-grid)" />
                 </svg>
                 <div className="container relative mx-auto px-4 py-14 md:py-20">
+                    {/* The way back to the catalog, on every screen: phones have no header links. */}
+                    <Link
+                        href="/courses"
+                        className="-ml-1 mb-6 inline-flex min-h-10 items-center gap-2 rounded-lg px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                        <ArrowLeft className="size-4" aria-hidden="true" />
+                        {t.allCourses}
+                    </Link>
                     <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
                         {t.eyebrow} · {t.language[course.language] ?? course.language}
                     </p>

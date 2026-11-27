@@ -72,7 +72,7 @@ export function ThemeToggle() {
         type="button"
         onClick={toggle}
         aria-label={label}
-        className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex size-10 items-center md:size-9 justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Icon key={target} className="theme-icon size-4" aria-hidden="true" />
       </button>

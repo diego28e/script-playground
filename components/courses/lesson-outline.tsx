@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Check, CircleDashed, GripVertical, ListTree, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleDashed, GripVertical, ListTree, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { openSiteMenu } from "@/components/layout/site-menu-store";
 import type { LessonStatus } from "@/actions/lessons";
 import { Tip } from "@/components/ui/tip";
 import { InlineCode } from "@/components/courses/inline-code";
@@ -14,7 +15,8 @@ import { cn } from "@/lib/utils";
 // The course outline beside a lesson: on wide screens a sidebar on the page's left edge, which the learner can resize
 // (drag its edge, or the arrow keys on it) and collapse to a slim rail (its button, Ctrl/⌘+B, or dragging it narrow);
 // the choice is remembered in a cookie the page reads, so it renders at the right width with no jump. On narrower
-// screens, a folded outline above the lesson. The Notebook tab starts with the rail, for the notebook's room.
+// screens, a button above the lesson opens the outline in the site menu (components/layout/site-menu.tsx). The
+// Notebook tab starts with the rail, for the notebook's room.
 
 /** Dragged this far below the minimum, the sidebar folds to the rail. */
 const COLLAPSE_BELOW = OUTLINE_WIDTH.min - 72;
@@ -44,7 +46,7 @@ type TreeProps = {
 };
 
 /** The course title, its progress, and the modules with their lessons; the current module open. */
-function OutlineTree({ data, progress, currentHref, t }: TreeProps) {
+export function OutlineTree({ data, progress, currentHref, t }: TreeProps) {
     const { course } = data;
     return (
         <ol className="flex flex-col gap-0.5">
@@ -102,7 +104,7 @@ function OutlineTree({ data, progress, currentHref, t }: TreeProps) {
     );
 }
 
-function CourseHeading({ data, progress }: { data: LessonWorkspaceData; progress: Record<string, LessonStatus> }) {
+export function CourseHeading({ data, progress }: { data: LessonWorkspaceData; progress: Record<string, LessonStatus> }) {
     const { course } = data;
     const total = data.position.total;
     const done = Object.values(progress).filter((value) => value === "COMPLETED").length;
@@ -128,21 +130,25 @@ function CourseHeading({ data, progress }: { data: LessonWorkspaceData; progress
     );
 }
 
-/** Below the wide layout: the outline folded above the lesson. */
-export function MobileOutline(props: TreeProps) {
+/**
+ * Below the wide layout: a button above the lesson that opens the site menu at "This course" (the outline, the
+ * course's progress, every module and lesson). The same view opens from the header's menu, wherever the learner is.
+ */
+export function MobileOutline({ data, t }: TreeProps) {
     return (
-        <details className="mb-8 rounded-2xl border border-border bg-card p-2 shadow-[var(--shadow-tile)] lg:hidden">
-            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                <ListTree className="size-4 text-muted-foreground" aria-hidden="true" />
-                {props.t.outline}
-            </summary>
-            <div className="flex flex-col gap-3 px-2 pt-2">
-                <CourseHeading data={props.data} progress={props.progress} />
-                <nav aria-label={props.t.outline} className="-mx-2">
-                    <OutlineTree {...props} />
-                </nav>
-            </div>
-        </details>
+        <button
+            type="button"
+            onClick={() => openSiteMenu("course")}
+            aria-haspopup="dialog"
+            className="mb-8 flex min-h-12 w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-2.5 text-left shadow-[var(--shadow-tile)] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+        >
+            <ListTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="text-sm font-medium">{t.outline}</span>
+            <span className="ml-auto font-mono text-[11px] text-muted-foreground tabular-nums">
+                {String(data.position.index).padStart(2, "0")}/{data.position.total}
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </button>
     );
 }
 

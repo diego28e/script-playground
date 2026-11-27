@@ -27,6 +27,7 @@ import { Tip } from "@/components/ui/tip";
 import { InlineCode } from "@/components/courses/inline-code";
 import { LabFrame } from "@/components/courses/lab-frame";
 import { LessonSidebar, MobileOutline } from "@/components/courses/lesson-outline";
+import { setMenuCourse } from "@/components/layout/site-menu-store";
 import type { OutlinePreference } from "@/lib/outline-preference";
 import { LessonPythonSection } from "@/components/compass/lesson-python";
 import { LessonVideos, type PlayableVideo } from "@/components/courses/lesson-videos";
@@ -73,6 +74,7 @@ const COPY = {
         previous: "Anterior",
         next: "Siguiente",
         backToCourse: "Volver al curso",
+        courses: "Cursos",
         unavailable: "Este tipo de lección todavía no se puede abrir aquí.",
         status: { COMPLETED: "Completada", IN_PROGRESS: "En curso" } as Record<LessonStatus, string>,
     },
@@ -108,6 +110,7 @@ const COPY = {
         previous: "Previous",
         next: "Next",
         backToCourse: "Back to the course",
+        courses: "Courses",
         unavailable: "This kind of lesson can't be opened here yet.",
         status: { COMPLETED: "Completed", IN_PROGRESS: "In progress" } as Record<LessonStatus, string>,
     },
@@ -205,6 +208,13 @@ export function LessonWorkspace({ data, signedIn, reading, videos, audio, board,
     const Icon = KIND_ICONS[lesson.kind];
     const here = lessonPath(course.slug, data.module.slug, lesson.slug);
 
+    // The site menu on phones and tablets shows this course's outline under "This course" (site-menu.tsx), kept in
+    // step with the progress shown here; it forgets the course when the learner leaves the lesson.
+    useEffect(() => {
+        setMenuCourse({ data, progress: { ...data.progress, ...changed }, currentHref: here, t });
+    }, [data, changed, here, t]);
+    useEffect(() => () => setMenuCourse(null), []);
+
     // The Notebook tab (docs/notebook-embed.md): the lesson's notebook, in the learner's own lab, right here. Only for
     // enrolled learners, who are the ones the lab lets in. The tab is kept in the address (?tab=notebook); the frame
     // loads the first time the tab opens and then stays, so switching back and forth doesn't restart JupyterLab.
@@ -259,6 +269,10 @@ export function LessonWorkspace({ data, signedIn, reading, videos, audio, board,
             <article className="min-w-0">
                 <header className="border-b border-border pb-8">
                     <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                        <Link href="/courses" className="rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                            {t.courses}
+                        </Link>
+                        <span aria-hidden="true">/</span>
                         <Link href={`/courses/${course.slug}`} className="rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                             {course.title}
                         </Link>

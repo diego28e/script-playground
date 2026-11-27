@@ -7,7 +7,7 @@ export default async function VideosPage() {
     const data = await listVideoLessons();
 
     return (
-        <div className="h-full flex-1 flex-col space-y-8 p-8 md:flex">
+        <div className="h-full flex-1 flex-col space-y-8 px-2 py-6 sm:p-8 md:flex">
             <div>
                 <h2 className="text-2xl font-bold tracking-tight">Videos</h2>
                 <p className="max-w-2xl text-muted-foreground">

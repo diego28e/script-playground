@@ -366,6 +366,19 @@
   .tip-content[data-side] { animation: none; }
 }
 
+/* The site menu on phones and tablets (components/layout/site-menu.tsx): the panel slides in from the right edge and
+   settles; the page behind dims. Radix keeps it mounted until the exit animation ends. */
+@keyframes site-menu-in { from { transform: translateX(100%); } }
+@keyframes site-menu-out { to { transform: translateX(100%); } }
+.site-menu[data-state="open"] { animation: site-menu-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.site-menu[data-state="closed"] { animation: site-menu-out 200ms cubic-bezier(0.4, 0, 1, 1) both; }
+.site-menu-overlay[data-state="open"] { animation: action-dialog-fade-in 240ms ease-out both; }
+.site-menu-overlay[data-state="closed"] { animation: action-dialog-fade-out 200ms ease-in both; }
+@media (prefers-reduced-motion: reduce) {
+  .site-menu[data-state],
+  .site-menu-overlay[data-state] { animation: none; }
+}
+
 /* A scroll area inside the page (the lesson outline): a thin bar in the palette, not the system's grey one. */
 .scrollbar-quiet {
   scrollbar-width: thin;

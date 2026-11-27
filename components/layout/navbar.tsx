@@ -10,7 +10,8 @@ import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { useLanguage } from "@/components/providers/language-provider";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ShimmerButton } from "@/components/ui/shimmer-button";
-import { PracticeNavLink } from "@/components/practice/practice-nav-link";
+import { PracticeNavLink, usePracticeDue } from "@/components/practice/practice-nav-link";
+import { SiteMenu, SiteMenuButton } from "@/components/layout/site-menu";
 import { cn } from "@/lib/utils";
 import { LAB_URL } from "@/lib/lab";
 
@@ -29,6 +30,10 @@ export function Navbar() {
     const t = COPY[language];
     const signedIn = Boolean(session && !error);
     const fullWidth = /^\/courses\/[^/]+\/[^/]+\/[^/]+/.test(pathname);
+    const due = usePracticeDue(pathname, signedIn);
+    const user = signedIn && session
+        ? { name: session.user.name ?? "", email: session.user.email, image: session.user.image ?? null, admin: (session.user as { role?: string }).role === "ADMIN" }
+        : null;
 
     return (
         <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-xl">
@@ -37,12 +42,12 @@ export function Navbar() {
                 <div className="flex items-center gap-6">
                     <Link href="/" className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <BrandMark />
-                        {/* On phones the mark stands alone; the name needs the room the actions use. */}
-                        <span className="sr-only text-[15px] font-semibold tracking-tight whitespace-nowrap text-foreground sm:not-sr-only">
+                        {/* Below wide screens the mark stands alone; the name needs the room the links use. */}
+                        <span className="sr-only text-[15px] font-semibold tracking-tight whitespace-nowrap text-foreground lg:not-sr-only">
                             Academia del Código
                         </span>
                     </Link>
-                    <nav className="hidden items-center gap-1 sm:flex" aria-label="Principal">
+                    <nav className="hidden items-center gap-1 md:flex" aria-label="Principal">
                         <Link
                             href="/courses"
                             aria-current={pathname.startsWith("/courses") ? "page" : undefined}
@@ -67,7 +72,7 @@ export function Navbar() {
                                 >
                                     {t.challenges}
                                 </Link>
-                                <PracticeNavLink label={t.practice} className={NAV_LINK} active={pathname.startsWith("/practice")} pathname={pathname} />
+                                <PracticeNavLink label={t.practice} className={NAV_LINK} active={pathname.startsWith("/practice")} due={due} />
                                 <a href={LAB_URL} target="_blank" rel="noopener noreferrer" className={cn(NAV_LINK, "inline-flex items-center gap-1.5")}>
                                     {t.lab}
                                     <ExternalLink className="size-3.5" aria-hidden="true" />
@@ -79,15 +84,16 @@ export function Navbar() {
                 <div className="flex items-center gap-1">
                     <LanguageSwitcher />
                     <ThemeToggle />
+                    {/* On phones and small tablets the account and the section links live in the menu (site-menu.tsx). */}
                     {isPending ? (
-                        <div className="ml-2 size-8 animate-pulse rounded-full bg-muted" />
+                        <div className="ml-2 hidden size-8 animate-pulse rounded-full bg-muted md:block" />
                     ) : signedIn ? (
-                        <div className="ml-2">
+                        <div className="ml-2 hidden md:block">
                             <UserDropdown />
                         </div>
                     ) : (
                         <>
-                            <Link href="/login" className={NAV_LINK}>
+                            <Link href="/login" className={cn(NAV_LINK, "hidden md:inline-flex")}>
                                 {t.signIn}
                             </Link>
                             <ShimmerButton href="/courses" tone="ink" size="sm" onHover className="ml-1 whitespace-nowrap">
@@ -95,8 +101,12 @@ export function Navbar() {
                             </ShimmerButton>
                         </>
                     )}
+                    <div className="md:hidden">
+                        <SiteMenuButton language={language} due={due} />
+                    </div>
                 </div>
             </div>
+            <SiteMenu language={language} pathname={pathname} signedIn={signedIn} user={user} due={due} />
         </header>
     );
 }
