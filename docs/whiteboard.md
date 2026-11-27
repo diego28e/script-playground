@@ -67,7 +67,18 @@ skill being learned, the lesson that teaches it, the learner's profile, and how 
   - **How I learn** also shows what the teachers observed (the profile's notes), which the learner can forget.
 - **The checklist's outcomes:** the `ended` summary carries `objectives`. "What the board found" shows each one as done
   or not yet, marking the ones the learner unticked. An unticked one counts as something they found hard, in their
-  profile.
+  profile, and goes to their practice.
+- **Into spaced practice** (contract §3, `practice`): besides the board's own skill when it's ready, the board sends up
+  to 6 narrow things to the learner's practice: what it picked at the end (hardest first, each with the board's
+  challenge), what the learner unticked, and what they asked for during the lesson ("add this to my practice").
+  - Each is a `PracticeRequest` (its `sessionId` is the board's), resolved on the next practice visit by the lab tutor's
+    resolver (`lib/practice/tutor-requests.ts`, docs/practice.md "Practice from the tutor"): a course skill when one is
+    that same narrow thing, else a found skill made for it, anchored to a skill of the lesson. Tasks are written from
+    the board's challenge, the first time they're needed, and spaced practice schedules them from the next day.
+  - A lesson whose skills aren't approved has nothing to anchor a new skill to, so its requests are set aside ("didn't
+    fit this course") unless they match a course skill.
+  - "What the board found" lists them: waiting for the next practice visit, then by the skill they became. Their
+    tasks show "From your tutor".
 - **Full screen** (`components/courses/board-fullscreen.ts`, contract §4): the bar's button fills the window with the
   board, over the site's header. The Fullscreen API is used where the browser has it; on an iPhone, the layout alone
   does it. Didactra's page shows the way out. Back and Escape leave too.
@@ -95,5 +106,6 @@ The tables come with the migration `20261126120000_board_sessions`.
   - the events Didactra may send, preferences and objectives included;
   - how a practice state and a summary are told to the teacher;
   - which preference lines are the board's;
+  - the practice picks and the `practice` event, and how the resolver reads a board's request;
   - where the voice teachers read the preferences.
 - End to end: the board page with Didactra running on your PC (`BOARD_URL=http://localhost:4330`).

@@ -463,6 +463,10 @@ asks for more practice or challenges on something (the tutor's `offer_practice` 
 stores a practice request: the skill in the tutor's words, the lesson, how it came (`PASSED` or `SKIPPED` a detour,
 `REQUESTED` more practice) and the last six messages, which hold the detour's explanation and the challenge.
 
+**On the whiteboard** (docs/whiteboard.md, "Into spaced practice"), the board sends the same requests: what it picked
+at the end with its challenge, what the learner unticked on its checklist, and what they asked for during the lesson.
+The resolver reads the board's account and challenge instead of the lab's messages.
+
 **Resolved on the next practice visit** (`lib/practice/tutor-requests.ts`), one request per call of the page's
 background step, once. Before, a request was matched by shared words to a skill of its lesson: "finding binding
 capacity constraints with min" went to `compute-free-tier-capacity`, the lesson's arithmetic, not the `min()` syntax the
@@ -470,7 +474,8 @@ learner wanted, and a request with no words in common was dropped. Now Claude So
 conversation with the course's skills and the found ones, and answers:
 
 - a course skill or found skill, when it is that same narrow skill (not a broader one that uses it): practised as is;
-- otherwise a new narrow skill ("use `min()` to find the binding limit among several capacities"), with labels and a
+- otherwise a new narrow skill ("use `min()` to find the binding limit among several capacities"; in a TypeScript
+  course, its instructions speak of TypeScript), with labels and a
   description in both languages, its kind, whether plain Python practises it, what a right answer shows, the lesson
   skill it is part of (the anchor), and a few sentences on what the tutor's challenge looked like.
 

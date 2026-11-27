@@ -206,3 +206,34 @@ All written into `docs/whiteboard-contract.md` on 2026-11-26.
 - A preferences form (decided against).
 - The voice teachers saving preferences themselves: they read them for now.
 - Fading by profile (shorter worked examples as knowledge grows) and the hint ladder: `docs/teaching-method.md` §10.
+
+## 10. After the first round (2026-11-26)
+
+Built by Didactra (commit `6d420b2`, its `docs/teaching-round.md`) and deployed as it was, on your decision. The fixes
+can come later.
+
+**Checks:** held-out set `6b85687cf7bd297f`, frozen beforehand, run once; scenarios passed out of 19. One run moves
+by about 3 either way.
+
+| Model | Passed | Learners |
+|---|---|---|
+| Sonnet 5.5 | 13 | yes, the default |
+| Qwen4-Max | 14 | yes |
+| DeepSeek V4.1 Flash | 16 | no: one factually wrong statement (about `git switch -c`) |
+| Haiku 5.5 | 12 | no |
+| DeepSeek V4 Pro | 11 | no |
+
+**Known misses, to fix next** (every model):
+- **It answers before running.** After a wrong prediction, it gives the right answer before running the code, instead
+  of run, then compare (the default in §2).
+- **It saved a principle as a preference.** Sonnet once saved "you lead" as a preference, which §2 forbids. Leading is
+  a fixed principle.
+- **One word missing.** Once, the first word of a sentence was missing from what came back as heard through
+  ElevenLabs ("Tu equipo" became "equipo"), and so from its caption. Whether the voice dropped it too is to be checked by
+  listening.
+- **"Let's see" in nearly every reply** (your observation, 2026-11-26): Didactra's instant acknowledgment played a
+  random pre-recorded clip at the start of each reply (`apps/agent/src/tutor/acks.ts`). Two of the five English clips
+  and three of the five Spanish ones are a "let's see", and the prompt's rule to open with a short acknowledgment
+  doubled it. **Decided:** the clips are off by default, to try lessons without them. The cost is about 1.5 s more silence
+  before the first word: about 1.0 s with a clip, about 2.7 s to the real answer, as Didactra measured it. The opening
+  line must carry content, never be filler. Sent to the Didactra session.

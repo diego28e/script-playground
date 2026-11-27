@@ -9,6 +9,7 @@ import { BoardEvent } from "@/lib/board/events";
 import { stateName, summaryText } from "@/lib/board/context";
 import { fileScope } from "@/lib/preferences";
 import { assemble } from "@/lib/voice/context";
+import { requestConversation, requestOrigin, resolvePrompt } from "@/lib/practice/tutor-requests";
 
 let failures = 0;
 const check = (name: string, pass: boolean, detail = "") => {
@@ -91,6 +92,24 @@ check("an unknown action is refused", !BoardEvent.safeParse({ id: "p3", type: "p
 const withObjectives = BoardEvent.safeParse({ ...ended, id: "e7", summary: { ...ended.summary, objectives: [{ text: "Run a .ts file", met: true }, { text: "Explain why Node runs it", met: false, untickedByLearner: true }] } });
 check("objectives parse, untickedByLearner defaults to false", withObjectives.success && withObjectives.data.type === "ended" && withObjectives.data.summary.objectives[0].untickedByLearner === false && withObjectives.data.summary.objectives[1].untickedByLearner === true);
 check("more than 6 objectives are refused", !BoardEvent.safeParse({ ...ended, id: "e8", summary: { ...ended.summary, objectives: Array.from({ length: 7 }, (_, index) => ({ text: `o${index}`, met: false })) } }).success);
+
+// Practice from the board: picks in the summary, and the learner asking during the lesson.
+const picks = BoardEvent.safeParse({
+  ...ended,
+  id: "e9",
+  summary: { ...ended.summary, practice: [{ skill: "narrow a union with typeof before using it", why: "struggled", happened: "Called .toUpperCase() on string | number.", challenge: "Format an id that is a string or a number." }, { skill: "read a tsc error's first line" }] },
+});
+check("practice picks parse, why defaults to new", picks.success && picks.data.type === "ended" && picks.data.summary.practice.length === 2 && picks.data.summary.practice[1].why === "new");
+check("a summary without picks has none", minimal.success && minimal.data.type === "ended" && minimal.data.summary.practice.length === 0);
+check("more than 5 picks are refused", !BoardEvent.safeParse({ ...ended, id: "e10", summary: { ...ended.summary, practice: Array.from({ length: 6 }, (_, index) => ({ skill: `skill ${index}` })) } }).success);
+const asked = BoardEvent.safeParse({ id: "q1", type: "practice", at: now, skill: "use Array.prototype.reduce to sum", challenge: "Sum the cart's prices." });
+check("a practice event parses, why defaults to asked", asked.success && asked.data.type === "practice" && asked.data.why === "asked");
+check("a practice event needs its skill", !BoardEvent.safeParse({ id: "q2", type: "practice", at: now }).success && !BoardEvent.safeParse({ id: "q3", type: "practice", at: now, skill: "x" }).success);
+const boardDetail = { source: "whiteboard" as const, why: "struggled" as const, happened: "Called .toUpperCase() on string | number.", challenge: "Format an id.", boardSkill: "narrowing" };
+check("the resolver reads the board's challenge", requestConversation(boardDetail).includes("# The board's challenge\nFormat an id.") && !requestConversation(boardDetail).includes("conversation (oldest first)"));
+check("the resolver says it came from the board", requestOrigin("REQUESTED", boardDetail).startsWith("on the whiteboard: something the learner found hard") && requestOrigin("REQUESTED", {}) === "the learner asked for more practice on it");
+check("the resolver keeps the lab's conversation", requestConversation({ messages: [{ role: "user", content: "hi" }] }) === "# The conversation (oldest first)\n## user\nhi");
+check("the resolver speaks the course's language", resolvePrompt("typescript").includes("(TypeScript and Node.js for the backend)") && resolvePrompt("typescript").includes("one TypeScript file") && !resolvePrompt("typescript").includes("Python") && resolvePrompt("python").includes("plain offline Python"));
 
 // The voice teachers: the learner's own instructions come before the observed notes, under their own heading.
 const system = assemble({ role: "ROLE", grounding: "GROUNDING", preferences: ["Go in small steps"], profile: "PROFILE", summary: null, digest: [] }, "en").system;

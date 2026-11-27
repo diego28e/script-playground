@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Check, ChevronDown, Circle, PenLine, Undo2 } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, ChevronDown, Circle, PenLine, Undo2 } from "lucide-react";
 import type { BoardDone, BoardOffer } from "@/lib/board/offer";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +29,9 @@ const COPY = {
     struggles: "Te costó",
     minutes: (minutes: number) => `${Math.max(1, Math.round(minutes))} min`,
     ready: "Lista para practicar: va primero en tu práctica.",
+    toPractice: "A tu práctica",
+    waiting: "se prepara en tu próxima práctica",
+    notPlaced: "no encajó en este curso",
     practise: "Ir a practicar",
     replay: "Ver la pizarra",
     states: { new: "Nueva", learning: "Aprendiendo", reviewing: "Repasando", secure: "Dominada" },
@@ -51,6 +54,9 @@ const COPY = {
     struggles: "You found hard",
     minutes: (minutes: number) => `${Math.max(1, Math.round(minutes))} min`,
     ready: "Ready to practise: it goes first in your practice.",
+    toPractice: "Into your practice",
+    waiting: "set up on your next practice",
+    notPlaced: "didn't fit this course",
     practise: "Go to practice",
     replay: "See the board",
     states: { new: "New", learning: "Learning", reviewing: "Reviewing", secure: "Secure" },
@@ -136,6 +142,22 @@ function Found({ done, language, id, boardHref, practiceHref }: { done: BoardDon
         {part(t.showed, done.learnerDid)}
         {part(t.struggles, done.struggles)}
       </dl>
+      {done.practice.length > 0 && (
+        <div className="mt-2">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <CalendarClock className="size-3.5" aria-hidden="true" />
+            {t.toPractice}
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm leading-relaxed">
+            {done.practice.map((item, index) => (
+              <li key={index} className={cn(item.status === "none" && "text-muted-foreground")}>
+                {(language === "es" ? item.labelEs : item.labelEn) ?? item.text}
+                {item.status !== "added" && <span className="ml-1.5 text-xs text-muted-foreground">· {item.status === "waiting" ? t.waiting : t.notPlaced}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         {done.readyToPractise && (
           <span className="text-muted-foreground">

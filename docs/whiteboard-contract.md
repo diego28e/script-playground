@@ -166,9 +166,21 @@ is applied once.
     "objectives": [
       { "text": "Run a .ts file and read its type errors", "met": true, "untickedByLearner": false },
       { "text": "Explain why Node runs code with type errors", "met": false, "untickedByLearner": true }
+    ],
+    "practice": [
+      {
+        "skill": "narrow a string | number with typeof before calling a string method",
+        "why": "struggled",
+        "happened": "Called .toUpperCase() on an id typed string | number and read the error as a bug in tsc.",
+        "challenge": "formatId(id: string | number) returns the id in capitals, or padded to 6 digits when it's a number."
+      }
     ]
   }
 }
+```
+
+```json
+{ "id": "…", "type": "practice", "at": 1795651000000, "skill": "sum an array with reduce", "challenge": "Sum the cart's prices, an empty cart giving 0." }
 ```
 
 ```json
@@ -189,6 +201,19 @@ is applied once.
   A job closing is not an end.
 - **`objectives`** are the board's checklist at the end, at most 6: each item's text, whether it was met (ticked and
   left ticked), and whether the learner unticked it at any point.
+- **`practice`** in the summary is what the board picks for the learner's spaced practice, at most 5, hardest first:
+  - `skill`: one narrow skill in the teacher's words ("narrow a union with typeof"), not the lesson's topic;
+  - `why`: `struggled` (they found it hard), `new` (they met it on the board and should practise it; the default) or
+    `asked` (they asked to);
+  - `happened`: a sentence on what happened;
+  - `challenge`: the board's challenge or example for it, with its names and numbers, so the practice tasks are
+    written in the same spirit. No solution.
+
+  The board's own skill doesn't go here: `readyToPractise` sends it.
+- **`practice`, the event,** is sent the moment the learner asks during the lesson to practise something later ("add
+  this to my practice"), with the same fields (`why` defaults to `asked`). The teacher says it's added. It answers 200
+  with `{ "requested": true }`, or `{ "requested": false, "reason": "duplicate" }` (the same words on this board
+  already) or `"limit"` (6 a board, the end's picks and unticked items included).
 - **`preference`** is sent the moment the teacher saves (`remember`) or removes (`forget`) one, or the learner removes
   one in Didactra's "How I learn" panel.
   - `scope` is `all` or `board`. It's a hint: the platform files a line about drawing, the board, a diagram, a trace or
@@ -204,15 +229,19 @@ What the platform does:
   - when `readyToPractise`, marks the skill as taught, so practice offers its tasks first. It never marks it mastered;
   - folds `profileNotes` into the learner profile;
   - keeps `objectives`, shown in the lesson panel's "What the board found". An item unticked by the learner counts as
-    something they found hard.
+    something they found hard, and goes to practice;
+  - turns each of `practice` into a practice request, like the lab tutor's "practise this in a few days": on the
+    learner's next practice visit a model matches it to a course skill or makes a narrow skill for it, its tasks are
+    written from the challenge, and spaced practice schedules it. "What the board found" lists them.
+- `practice` stores one such request.
 - `preference` stores or removes the line in the learner's preferences.
 - **The answers:**
 
   | Status | Meaning |
   |---|---|
   | 204 | done |
-  | 200 | a `preference` applied: `{ "preferenceId": "…", "scope": "all" or "board" }`, the scope it was filed under. A `forget` of a line that doesn't exist answers 200 too, with `"preferenceId": null`. |
-  | 409 | an event already applied; for a `preference`, with the same body as its first answer |
+  | 200 | a `preference` applied: `{ "preferenceId": "…", "scope": "all" or "board" }`, the scope it was filed under. A `forget` of a line that doesn't exist answers 200 too, with `"preferenceId": null`. A `practice` applied: `{ "requested": … }`, as above. |
+  | 409 | an event already applied; for a `preference` or a `practice`, with the same body as its first answer |
   | 401 / 404 / 410 | as for the context |
 
 ## 4. The frame's messages (full screen)
@@ -271,6 +300,8 @@ They stay in Didactra. The platform links to them with a launch token whose payl
   - the preferences (their table, the guard for board lines, the `preference` event, `preferences` in the context) and
     the "How I learn" page;
   - `objectives` in the lesson panel;
+  - practice from the board: the summary's `practice` and the `practice` event as practice requests, resolved by the lab
+    tutor's resolver, and listed in "What the board found";
   - full screen: the button to go in, listening to the frame, the layout, the Fullscreen API, Back.
 - **Didactra (its repo):**
   - `/launch`, the cookie, and identity per learner;
@@ -283,4 +314,6 @@ They stay in Didactra. The platform links to them with a launch token whose payl
   - a built page;
   - scoped `remember` and `forget`, sent as `preference` events, and "How I learn" showing the platform's preferences;
   - the checklist's outcomes in `objectives`;
+  - the summary's `practice` picks, the `practice` event when the learner asks, and the recap naming what goes to
+    practice;
   - the exit button while in full screen and its messages, and settings panels that are easy to close on a phone.

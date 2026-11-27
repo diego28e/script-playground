@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { practice } from "@/lib/practice/config";
 import { normaliseKey } from "@/lib/practice/draft";
 import { tutorSkillForms } from "@/lib/practice/graph";
+import { practiceLanguage, type PracticeLanguage } from "@/lib/practice/language";
 import { loadLearner } from "@/lib/practice/learner";
 
 // Practice from the tutor (docs/practice.md, "Practice from the tutor"). In the lab, when the tutor closes a detour or
@@ -19,19 +20,21 @@ import { loadLearner } from "@/lib/practice/learner";
 //     it), admitted by the learner's own request. Its tasks are code-first and written in the spirit of the tutor's
 //     challenge, on the fly the first time they're needed (lib/practice/discovery.ts prepareDiscovery).
 // The admin sees each such skill among the discoveries and may add it to the course for everyone.
+// The whiteboard sends requests too (lib/board/events.ts): what it picked for practice at the end of a board, what the
+// learner unticked on its checklist, and what they asked for during the lesson, each with the board's challenge.
 
 const FOUND_PREFIX = "found";
 const RESOLVE_MODEL = "claude-sonnet-5-5";
 const MAX_TRIES = 3;
 
-const SYSTEM_PROMPT = `A learner in a programming course (Python, LangChain, LangGraph) asked their AI tutor, while working on a notebook, to practise something later in their spaced practice: a missing prerequisite the tutor cleared in a detour, or more exercises on something they want to master. Decide what skill their practice should drill.
+const SYSTEM_PROMPT = `A learner in a programming course (Python, LangChain, LangGraph) is to practise something later in their spaced practice, from their AI tutor: the lab's tutor while they worked on a notebook (a missing prerequisite it cleared in a detour, or more exercises on something they want to master), or the whiteboard teacher that talks and draws with them (something they found hard, met for the first time, or asked to practise). Decide what skill their practice should drill.
 
 RULES
 - The skill is the narrow thing the learner wanted to practise, read from the conversation: one idea ("use min() to find the binding limit among several capacities"), not the lesson's broader topic.
 - If one of the COURSE SKILLS or FOUND SKILLS is that same narrow skill, give its id exactly in existingSkillId. A broader skill that merely uses it doesn't count.
 - Otherwise define newSkill: a short kebab-case key; labels and a one-sentence description in Spanish and English; knowledge "procedural" for how-to (most cases), "declarative" for facts and concepts; runnable true when plain offline Python can practise it; criteriaHint: one sentence on what a correct answer shows.
 - anchorSkillId: the course skill (from LESSON SKILLS when one fits) whose work uses the new skill, the one it is part of. Always give it with a new skill.
-- context: two to four sentences in English describing the tutor's challenge (its scenario, its numbers, what the learner had to compute), so practice tasks can be written in the same spirit. No solution code.
+- context: two to four sentences in English describing the tutor's challenge (or the board's) (its scenario, its numbers, what the learner had to compute), so practice tasks can be written in the same spirit. No solution code.
 - rationale: one sentence in English.
 Answer with the JSON object only.`;
 
@@ -79,7 +82,50 @@ const ResolutionSchema = z.object({
   rationale: z.string().default(""),
 });
 
-type Detail = { notebookPath?: string; messages?: { role: string; content: string }[] };
+type Detail = {
+  notebookPath?: string;
+  messages?: { role: string; content: string }[];
+  // From the whiteboard (lib/board/events.ts).
+  source?: "whiteboard";
+  boardSkill?: string | null;
+  why?: "struggled" | "asked" | "new";
+  happened?: string | null;
+  challenge?: string | null;
+};
+
+/** The instructions for the course's language: Python's as they always were, TypeScript's with its background. */
+export function resolvePrompt(language: PracticeLanguage): string {
+  if (language === "python") return SYSTEM_PROMPT;
+  return SYSTEM_PROMPT.replace("(Python, LangChain, LangGraph)", "(TypeScript and Node.js for the backend)")
+    .replace("runnable true when plain offline Python can practise it", "runnable true when one TypeScript file with Node's built-in modules can practise it")
+    .replace('("use min() to find the binding limit among several capacities")', '("narrow a union with a type guard before using its members")');
+}
+
+const BOARD_WHY = {
+  struggled: "on the whiteboard: something the learner found hard",
+  asked: "on the whiteboard: the learner asked to practise it",
+  new: "on the whiteboard: something the learner met there, worth practising",
+} as const;
+
+/** What happened, for the model: the lab's last messages, or what the board said about it and its challenge. */
+export function requestConversation(detail: Detail): string {
+  if (detail.source === "whiteboard") {
+    return [
+      `# What happened on the board\n${detail.happened || "(not said)"}`,
+      `# The board's challenge\n${detail.challenge || "(none given)"}`,
+      detail.boardSkill ? `# The board was on the course skill\n${detail.boardSkill}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return `# The conversation (oldest first)\n${(detail.messages ?? []).map((message) => `## ${message.role}\n${message.content}`).join("\n\n") || "(not kept)"}`;
+}
+
+/** How the request came, for the model. */
+export function requestOrigin(evidence: string, detail: Detail): string {
+  if (detail.source === "whiteboard") return BOARD_WHY[detail.why ?? "new"];
+  return evidence === "REQUESTED" ? "the learner asked for more practice on it" : evidence === "PASSED" ? "a detour the learner passed" : "a detour the learner skipped (said they knew it)";
+}
 
 async function courseLessonIds(courseId: string): Promise<string[]> {
   const lessons = await prisma.lesson.findMany({ where: { module: { courseId } }, select: { id: true } });
@@ -133,17 +179,18 @@ export async function resolveNextTutorRequest(userId: string, courseId: string, 
     graph: { skills: SkillNode[] };
   } | null;
   const courseSkillIds = new Set((base?.graph.skills ?? []).map((skill) => skill.id));
-  const [lesson, foundRows] = await Promise.all([
+  const [lesson, foundRows, course] = await Promise.all([
     prisma.lesson.findUnique({ where: { id: request.lessonId }, select: { code: true, title: true, objectives: true } }),
     prisma.practiceFoundSkill.findMany({ where: { courseId }, select: { key: true, labelEn: true, node: true, lessonId: true } }),
+    prisma.course.findUnique({ where: { id: courseId }, select: { practiceLanguage: true } }),
   ]);
   const meta = loaded.published.skills;
   const lessonSkills = Object.entries(meta).filter(([key, entry]) => entry.lessonId === request.lessonId && courseSkillIds.has(key));
   const detail = (request.detail ?? {}) as Detail;
   const facts = [
-    `# The request\nIn the tutor's words: ${request.skill}\nHow it came: ${request.evidence === "REQUESTED" ? "the learner asked for more practice on it" : request.evidence === "PASSED" ? "a detour the learner passed" : "a detour the learner skipped (said they knew it)"}`,
+    `# The request\nIn the tutor's words: ${request.skill}\nHow it came: ${requestOrigin(request.evidence, detail)}`,
     lesson ? `# The lesson: ${lesson.code ?? ""} ${lesson.title}\nObjectives:\n${lesson.objectives.map((objective) => `- ${objective}`).join("\n")}` : "",
-    `# The conversation (oldest first)\n${(detail.messages ?? []).map((message) => `## ${message.role}\n${message.content}`).join("\n\n") || "(not kept)"}`,
+    requestConversation(detail),
     `# LESSON SKILLS (id: label)\n${lessonSkills.map(([key, entry]) => `- ${key}: ${entry.labelEn}`).join("\n") || "(none)"}`,
     `# COURSE SKILLS (id: label)\n${[...courseSkillIds].map((key) => `- ${key}: ${meta[key]?.labelEn ?? key}`).join("\n")}`,
     `# FOUND SKILLS (id: label)\n${foundRows.map((row) => `- ${row.key}: ${row.labelEn}`).join("\n") || "(none)"}`,
@@ -159,7 +206,7 @@ export async function resolveNextTutorRequest(userId: string, courseId: string, 
     chosenFirst: true,
     deadline,
     contents: [{ role: "user", parts: [{ text: facts }] }],
-    config: { systemInstruction: SYSTEM_PROMPT, responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 2048 },
+    config: { systemInstruction: resolvePrompt(practiceLanguage(course?.practiceLanguage)), responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, thinkingConfig: { thinkingLevel: "LOW" as ThinkingLevel }, maxOutputTokens: 2048 },
   });
   if (!result.ok) return giveUp(`no model answered (${result.reason})`);
   let answer: z.infer<typeof ResolutionSchema>;

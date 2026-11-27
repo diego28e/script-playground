@@ -12,6 +12,19 @@ import { forgetPreference, PREFERENCE_CHARS, rememberPreference } from "@/lib/pr
 
 const line = z.string().trim().min(1).max(400);
 
+// Something from the board for the learner's spaced practice (docs/whiteboard-contract.md, "practice"): the narrow
+// skill in the teacher's words, why it goes there, what happened, and the board's challenge, which the practice tasks
+// are written in the spirit of.
+const PracticeItem = z.object({
+  skill: z.string().trim().min(3).max(200),
+  why: z.enum(["struggled", "asked", "new"]).default("new"),
+  happened: z.string().trim().max(600).optional(),
+  challenge: z.string().trim().max(1500).optional(),
+});
+type PracticeItem = z.infer<typeof PracticeItem>;
+/** The most a board sends to practice: each one costs a model call to resolve and, the first time, a task to write. */
+export const BOARD_PRACTICE_MAX = 6;
+
 const Summary = z.object({
   taught: z.array(line).max(12).default([]),
   learnerDid: z.array(line).max(12).default([]),
@@ -20,6 +33,8 @@ const Summary = z.object({
   profileNotes: z.array(line).max(8).default([]),
   // The board's checklist at the end (docs/whiteboard-teaching.md §3).
   objectives: z.array(z.object({ text: line, met: z.boolean(), untickedByLearner: z.boolean().default(false) })).max(6).default([]),
+  // What the board picked for the learner's practice, hardest first (at most 5).
+  practice: z.array(PracticeItem).max(5).default([]),
 });
 
 const base = { id: z.string().trim().min(1).max(80), at: z.number().int().positive() };
@@ -37,8 +52,35 @@ export const BoardEvent = z.discriminatedUnion("type", [
     text: z.string().trim().max(PREFERENCE_CHARS * 2).optional(),
     preferenceId: z.string().trim().max(40).optional(),
   }),
+  // The learner asked, during the lesson, to practise something later ("add this to my practice").
+  z.object({ ...base, type: z.literal("practice"), ...PracticeItem.shape, why: z.enum(["struggled", "asked", "new"]).default("asked") }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;
+
+type BoardRow = { id: string; userId: string; lessonId: string; skillKey: string | null };
+const sameSkill = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, " ") === b.trim().toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * Stores one practice request from a board, waiting to be resolved on the learner's next practice visit
+ * (lib/practice/tutor-requests.ts): to a course skill, or a narrow skill made for it. Not twice for the same words on
+ * the same board, and not past BOARD_PRACTICE_MAX a board.
+ */
+async function requestPractice(session: BoardRow, item: PracticeItem): Promise<{ requested: boolean; reason?: "duplicate" | "limit" }> {
+  const earlier = await prisma.practiceRequest.findMany({ where: { userId: session.userId, sessionId: session.id }, select: { skill: true } });
+  if (earlier.some((row) => sameSkill(row.skill, item.skill))) return { requested: false, reason: "duplicate" };
+  if (earlier.length >= BOARD_PRACTICE_MAX) return { requested: false, reason: "limit" };
+  await prisma.practiceRequest.create({
+    data: {
+      userId: session.userId,
+      skill: item.skill,
+      evidence: "REQUESTED",
+      lessonId: session.lessonId,
+      sessionId: session.id,
+      detail: { source: "whiteboard", boardSkill: session.skillKey, why: item.why, happened: item.happened ?? null, challenge: item.challenge ?? null } as Prisma.InputJsonObject,
+    },
+  });
+  return { requested: true };
+}
 
 export type Applied = "applied" | "duplicate" | "missing" | "closed";
 /** What applying an event came to, and the answer's body when it has one (a preference). */
@@ -79,6 +121,11 @@ export async function applyBoardEvent(sid: string, event: BoardEvent): Promise<A
     await prisma.boardSessionEvent.update({ where: { id: logged.id }, data: { result: body } });
     return { outcome: "applied", body };
   }
+  if (event.type === "practice") {
+    const body = await requestPractice(session, event);
+    await prisma.boardSessionEvent.update({ where: { id: logged.id }, data: { result: body } });
+    return { outcome: "applied", body };
+  }
   const totals = {
     minutes: Math.max(session.minutes, event.minutes),
     costUsd: Math.max(session.costUsd, event.costUsd),
@@ -101,6 +148,7 @@ export async function applyBoardEvent(sid: string, event: BoardEvent): Promise<A
         skill: session.skillKey,
         evidence: "REQUESTED",
         lessonId: session.lessonId,
+        sessionId: sid,
         detail: { source: "whiteboard", boardSession: sid, taught: summary.taught, struggles: summary.struggles } as Prisma.InputJsonObject,
         resolution: "course",
         resolvedKey: session.skillKey,
@@ -108,9 +156,16 @@ export async function applyBoardEvent(sid: string, event: BoardEvent): Promise<A
       },
     });
   }
+  // What the board picked for practice, and every objective the learner unticked (they said it isn't there yet), each
+  // a request for the learner's next practice visit to resolve. In order: the board's own picks first.
+  const unticked = summary.objectives.filter((objective) => objective.untickedByLearner).map((objective) => objective.text);
+  const picks: PracticeItem[] = [
+    ...summary.practice,
+    ...unticked.filter((text) => !summary.practice.some((item) => sameSkill(item.skill, text))).map((text) => ({ skill: text.slice(0, 200), why: "struggled" as const, happened: "The learner unticked it on the board's checklist." })),
+  ];
+  for (const item of picks) await requestPractice(session, item);
   // What the session showed about how this learner learns and what they know joins their profile, after the answer.
   // An objective the learner unticked is something they found hard, whatever the teacher thought.
-  const unticked = summary.objectives.filter((objective) => objective.untickedByLearner).map((objective) => objective.text);
   const struggles = [...summary.struggles, ...unticked.filter((text) => !summary.struggles.includes(text))];
   after(() => learnFromBoardSummary(session.userId, session.courseId, session.language === "es" ? "es" : "en", { ...summary, struggles }, LESSON_TUTOR_CHAIN));
   return { outcome: "applied" };
