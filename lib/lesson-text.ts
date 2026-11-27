@@ -1,6 +1,6 @@
-// A lesson's own text, for the AI work that reads a lesson: drafting its practice skills (lib/practice/draft.ts) and
-// writing its audio narration (lib/lesson-audio/script.ts). A reading's body is in the database; a notebook is read
-// from the course repository at the commit the course was imported from.
+// A lesson's own text, for the AI work that reads a lesson: drafting its practice skills (lib/practice/draft.ts), writing
+// its audio narration (lib/lesson-audio/script.ts), and the teachers that talk about it. A reading's body is in the
+// database; a notebook is read from the course repository at the commit the course was imported from.
 
 /** Cuts text that runs past `max`, saying how much was left out. */
 export const clipText = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text);
@@ -16,13 +16,12 @@ export function notebookText(raw: string): string {
     .join("\n\n");
 }
 
-/** The lesson's own text, at most `limit` characters: the reading's body, or its notebook from the course repository. */
-export async function lessonText(
+/** The lesson's own text, whole: the reading's body, or its notebook from the course repository. */
+export async function lessonSource(
   course: { sourceRepoUrl: string | null; sourceRef: string | null },
   lesson: { body: string | null; sourcePath: string | null },
-  limit: number,
 ): Promise<string | null> {
-  if (lesson.body) return clipText(lesson.body, limit);
+  if (lesson.body) return lesson.body;
   const repo = course.sourceRepoUrl?.match(/github\.com\/([^/]+\/[^/.]+)/)?.[1];
   if (!repo || !course.sourceRef || !lesson.sourcePath) return null;
   const url = `https://raw.githubusercontent.com/${repo}/${course.sourceRef}/${lesson.sourcePath.split("/").map(encodeURIComponent).join("/")}`;
@@ -30,8 +29,21 @@ export async function lessonText(
   if (!response?.ok) return null;
   const raw = await response.text();
   try {
-    return clipText(lesson.sourcePath.endsWith(".ipynb") ? notebookText(raw) : raw, limit);
+    return lesson.sourcePath.endsWith(".ipynb") ? notebookText(raw) : raw;
   } catch {
     return null;
   }
+}
+
+/**
+ * The lesson's own text, at most `limit` characters, cut from its start. An interview-challenge lesson is better read
+ * in parts: lessonTextFor (lib/lesson-sections.ts).
+ */
+export async function lessonText(
+  course: { sourceRepoUrl: string | null; sourceRef: string | null },
+  lesson: { body: string | null; sourcePath: string | null },
+  limit: number,
+): Promise<string | null> {
+  const text = await lessonSource(course, lesson);
+  return text === null ? null : clipText(text, limit);
 }

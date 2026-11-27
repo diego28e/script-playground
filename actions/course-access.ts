@@ -41,6 +41,8 @@ export type AdminCourse = {
   practiceVoice: boolean;
   /** The language of its code practice: the scratchbook's, and new code tasks' (docs/practice.md, "Languages"). */
   practiceLanguage: PracticeLanguage;
+  /** Whether its lessons' "## Solutions" sections are folded behind "Show solutions" (docs/lesson-solutions.md). */
+  foldSolutions: boolean;
   moduleCount: number;
   lessonCount: number;
   enrolledCount: number;
@@ -63,6 +65,7 @@ export async function listCoursesForAdmin(): Promise<AdminCourse[]> {
       practiceScratchbook: true,
       practiceVoice: true,
       practiceLanguage: true,
+      foldSolutions: true,
       access: { orderBy: { createdAt: "asc" }, select: { id: true, email: true } },
       modules: { select: { _count: { select: { lessons: true } } } },
       _count: { select: { enrollments: true } },
@@ -156,6 +159,18 @@ export async function setCoursePracticeWidget(courseId: string, widget: "scratch
     });
     revalidatePath(`/practice/${course.slug}`);
     revalidatePath("/admin/courses");
+    return { success: true };
+  } catch {
+    return { success: false, error: "The course couldn't be updated. Try again." };
+  }
+}
+
+/** Folds, or unfolds, the "## Solutions" section of the course's reading lessons on their pages. */
+export async function setCourseFoldSolutions(courseId: string, on: boolean): Promise<Result> {
+  if (!(await requireAdmin())) return { success: false, error: "Only admins can change a course's lesson pages." };
+  try {
+    const course = await prisma.course.update({ where: { id: courseId }, data: { foldSolutions: Boolean(on) }, select: { slug: true } });
+    refresh(course.slug);
     return { success: true };
   } catch {
     return { success: false, error: "The course couldn't be updated. Try again." };

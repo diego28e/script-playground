@@ -5,12 +5,15 @@ import remarkGfm from "remark-gfm";
 import { ExternalLink } from "lucide-react";
 import { sourceFileUrl } from "@/lib/lab";
 import { MermaidDiagram } from "@/components/courses/mermaid-diagram";
+import { SolutionsFold } from "@/components/courses/solutions-fold";
+import { splitAtSolutions } from "@/lib/lesson-sections";
 
 // A course guide (a Markdown file in the course repository) rendered in the lesson page, with GitHub's
 // extensions (tables, task lists, strikethrough) and the platform's tokens, since the app has no typography
 // plugin. A fenced block tagged `mermaid` is drawn as a diagram (docs/lesson-diagrams.md). Relative links are resolved against the guide's own folder: one to another lesson's file opens that
 // lesson's page, anything else opens the file on GitHub at the imported commit (a private course has no repository to
-// link to, so there it stays plain text).
+// link to, so there it stays plain text). In a course that folds its solutions (docs/lesson-solutions.md), everything
+// after a "## Solutions" heading is behind "Show solutions".
 
 type Props = {
   markdown: string;
@@ -20,6 +23,8 @@ type Props = {
   sourceRef: string | null;
   /** Repository path → lesson page, for links between lessons. */
   lessonPages: Record<string, string>;
+  /** Fold everything after a "## Solutions" heading (the course's foldSolutions). */
+  foldSolutions?: boolean;
 };
 
 function textOf(node: ReactNode): string {
@@ -37,7 +42,7 @@ function headingId(children: ReactNode) {
     .replace(/\s/g, "-");
 }
 
-function resolveLink(href: string, { sourcePath, repoUrl, sourceRef, lessonPages }: Omit<Props, "markdown">) {
+function resolveLink(href: string, { sourcePath, repoUrl, sourceRef, lessonPages }: Omit<Props, "markdown" | "foldSolutions">) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//")) return { href, external: true };
   if (href.startsWith("#")) return { href, external: false };
   const [path, hash = ""] = href.split("#");
@@ -50,7 +55,7 @@ function resolveLink(href: string, { sourcePath, repoUrl, sourceRef, lessonPages
   return file ? { href: hash ? `${file}#${hash}` : file, external: true } : null;
 }
 
-export function LessonMarkdown({ markdown, ...context }: Props) {
+export function LessonMarkdown({ markdown, foldSolutions = false, ...context }: Props) {
   const heading = (Tag: "h2" | "h3" | "h4", className: string) =>
     function Heading({ children }: { children?: ReactNode }) {
       return (
@@ -60,10 +65,11 @@ export function LessonMarkdown({ markdown, ...context }: Props) {
       );
     };
 
+  const h2Class = "mt-10 mb-4 text-2xl font-semibold tracking-tight first:mt-0";
   const components: Components = {
     // The page already shows the lesson title, so the guide's own title steps down a level.
-    h1: heading("h2", "mt-10 mb-4 text-2xl font-semibold tracking-tight first:mt-0"),
-    h2: heading("h2", "mt-10 mb-4 text-2xl font-semibold tracking-tight first:mt-0"),
+    h1: heading("h2", h2Class),
+    h2: heading("h2", h2Class),
     h3: heading("h3", "mt-8 mb-3 text-lg font-semibold tracking-tight"),
     h4: heading("h4", "mt-6 mb-2 text-base font-semibold"),
     p: ({ children }) => <p className="my-4 leading-7">{children}</p>,
@@ -138,13 +144,28 @@ export function LessonMarkdown({ markdown, ...context }: Props) {
       type === "checkbox" ? <input type="checkbox" checked={checked} readOnly disabled className="mr-2 size-3.5 accent-[var(--primary)]" /> : null,
   };
 
+  const render = (text: string) => (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {text}
+    </ReactMarkdown>
+  );
+  const split = foldSolutions ? splitAtSolutions(markdown) : null;
+
   return (
     // Long commands and paths in running text may break anywhere rather than push the page sideways on a
     // phone; code blocks and tables scroll inside their own boxes instead.
     <div className="text-[15px] text-foreground/90 [overflow-wrap:anywhere]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {markdown}
-      </ReactMarkdown>
+      {split ? (
+        <>
+          {render(split.before)}
+          <h2 id={headingId(split.heading)} className={`scroll-mt-24 ${h2Class}`}>
+            {split.heading}
+          </h2>
+          <SolutionsFold>{render(split.solutions)}</SolutionsFold>
+        </>
+      ) : (
+        render(markdown)
+      )}
     </div>
   );
 }

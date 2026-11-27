@@ -88,7 +88,7 @@ The answer (200, JSON). Text fields are in the session's language, except code a
     "code": "01.04",
     "title": "…",
     "objectives": ["…"],
-    "text": "the part of the lesson that teaches this skill, up to 12,000 characters"
+    "text": "the part of the lesson that teaches this skill, up to 12,000 characters (37,000 for a challenge lesson)"
   },
   "skill": {
     "key": "explain-package-manager-field",
@@ -117,6 +117,12 @@ The answer (200, JSON). Text fields are in the session's language, except code a
 
 - **`kind`** is `skill` or `lesson`. For `lesson`, `skill` is `null`, and `lesson.text` is the lesson's start, up to
   the limit.
+- **`lesson.text` of an interview-challenge lesson** (one with `## The challenge` and `## Solutions`,
+  `lib/lesson-sections.ts`) isn't the lesson's start but its parts, under their headings: the problem without the
+  setup, the follow-up questions, `## Solutions` with the reference solution and how the tests check it, and the
+  answers to the follow-up questions. Each part has its own budget, and the whole is at most 37,000 characters (31,373
+  for the largest lesson so far). Didactra reads `lesson.text` up to 12,000 characters until it raises its own cut
+  (`normalize`, `apps/agent/src/platform/context.ts`).
 - **`state`** is the platform's reading of the learner's practice state (lk-practice) for that skill. It is one of
   `new`, `learning`, `reviewing` or `secure`.
 - **`course.code`** is the language the course's code is in: `python` or `typescript`. The tracer runs JS/TS today;

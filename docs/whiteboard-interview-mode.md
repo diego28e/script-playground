@@ -144,6 +144,9 @@ the same way the importer already parses headers and objectives:
 
   The follow-up list is its own part, so it's never cut, however long the spec above it. Each part is clipped on its own, with
   `clipText`'s note of how much was left out, and a part over budget is a warning in the import's output.
+- **Built for the other features (2026-11-26):** `lib/lesson-sections.ts` splits a challenge lesson into these parts
+  (all but `hints`, which no lesson has yet), with these budgets. The board, the lesson's teacher, the practice coach
+  and the practice drafter read them; the interview mode, `hints` and the import's over-budget warning aren't built.
 - **Teaching mode benefits too:** on a challenge lesson, the normal board gets `brief` + `reference` + `modelAnswers`
   (it may explain everything), instead of a blind first 12,000 characters.
 - **Cost:** for the largest lesson so far (04.01), the start-of-session parts are about 17,000 characters with hints

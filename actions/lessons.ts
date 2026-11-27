@@ -32,6 +32,7 @@ export async function getLessonWorkspace(courseSlug: string, moduleSlug: string,
         visibility: true,
         sourceRepoUrl: true,
         sourceRef: true,
+        foldSolutions: true,
         modules: {
           orderBy: { position: "asc" },
           select: {

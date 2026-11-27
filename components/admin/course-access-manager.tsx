@@ -4,8 +4,8 @@ import { useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowUpRight, AudioLines, Globe, Lock, Rocket, SquareTerminal, Undo2, X } from "lucide-react";
-import { addCourseAccess, removeCourseAccess, setCoursePracticeLanguage, setCoursePracticeWidget, setCourseStatus, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
+import { ArrowUpRight, AudioLines, EyeOff, Globe, Lock, Rocket, SquareTerminal, Undo2, X } from "lucide-react";
+import { addCourseAccess, removeCourseAccess, setCourseFoldSolutions, setCoursePracticeLanguage, setCoursePracticeWidget, setCourseStatus, setCourseVisibility, type AdminCourse, type CourseAccessEntry } from "@/actions/course-access";
 import { LANGUAGE, PRACTICE_LANGUAGES } from "@/lib/practice/language";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -148,6 +148,11 @@ function CourseCard({ course }: { course: AdminCourse }) {
           });
     if (!ok) return;
     if (await run("status", () => setCourseStatus(course.id, next))) toast.success(next === "PUBLISHED" ? `${course.title} is published.` : `${course.title} is a draft again.`);
+  };
+
+  const toggleFold = async (on: boolean) => {
+    if (busy) return;
+    if (await run("fold", () => setCourseFoldSolutions(course.id, on))) toast.success(`Fold solutions: ${on ? "on" : "off"} for ${course.title}.`);
   };
 
   const toggleWidget = async (widget: "scratchbook" | "voice", label: string, on: boolean) => {
@@ -328,6 +333,35 @@ function CourseCard({ course }: { course: AdminCourse }) {
             );
           })}
         </ul>
+      </div>
+
+      <div className="mt-5 border-t border-border pt-5">
+        <h4 className="text-sm font-medium">Lesson pages</h4>
+        <div className="mt-3 flex items-start gap-3 rounded-lg border border-border px-4 py-3 sm:max-w-[calc(50%-0.25rem)]">
+          <EyeOff className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p id={`${group}-fold`} className="text-sm font-medium">
+              Fold solutions
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Everything from a reading&apos;s &ldquo;## Solutions&rdquo; heading to its end stays behind Show solutions. For courses practised by not reading the answer first.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={course.foldSolutions}
+            aria-labelledby={`${group}-fold`}
+            disabled={Boolean(busy)}
+            onClick={() => void toggleFold(!course.foldSolutions)}
+            className={cn(
+              "relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60",
+              course.foldSolutions ? "bg-primary" : "bg-muted-foreground/30",
+            )}
+          >
+            <span className={cn("inline-block size-5 rounded-full bg-background shadow transition-transform", course.foldSolutions ? "translate-x-[1.375rem]" : "translate-x-0.5")} />
+          </button>
+        </div>
       </div>
 
       {(isPrivate || course.access.length > 0) && (

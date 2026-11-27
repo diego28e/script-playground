@@ -20,7 +20,8 @@ platform supplies the graph, the tasks, the grades and the time, and stores the 
 
 ## The skill graph
 
-- **Drafting.** For each lesson, a model reads the objectives, the lesson's text and the course outline. It proposes
+- **Drafting.** For each lesson, a model reads the objectives, the lesson's text (an interview-challenge lesson as its
+  problem, reference solution and model answers, without the setup, up to 35,000 characters) and the course outline. It proposes
   skills: an id, a label and description in Spanish and English, `knowledge` (declarative or procedural), the task
   forms that fit, and a criteria hint for graders. It also proposes prerequisite edges to skills of earlier lessons,
   `hard` or `soft`. Skills are small and checkable ("read an environment variable with a default", not "configuration").
@@ -628,7 +629,8 @@ It works in two ways, chosen by what the learner just said. **Coaching**, when t
 (leading with the conclusion, filler). **Teaching**, when they ask what something is, how to do it or why, or say they
 don't know: the method the lesson tutor uses (`lib/voice/teaching.ts`, `docs/lesson-tutor.md` "How it teaches"): one
 concept at a time through what, how, why, in practice and what goes wrong, a step or two a reply, with the exact
-commands and files. It teaches from the lesson the task's skill comes from (its text, up to 12,000 characters).
+commands and files. It teaches from the lesson the task's skill comes from (its text, up to 12,000 characters; an
+interview-challenge lesson as its parts, the problem and its follow-up questions first, `lib/lesson-sections.ts`).
 
 Only the answer to the task on screen is protected. Asked to explain what that task asks, the coach asks for a best
 attempt in the task first (a miss only brings the skill back sooner) and promises the explanation right after. Asked

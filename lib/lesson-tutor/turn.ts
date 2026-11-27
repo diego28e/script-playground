@@ -3,7 +3,7 @@ import { z } from "zod";
 import { MODEL_CHAIN, TUTOR_CHAIN, generateWithFallback, type ModelEntry } from "@/lib/ai/gemini";
 import { pacificDay } from "@/lib/ai/quota";
 import { courseVisibleTo, viewerById } from "@/lib/course-access";
-import { lessonText } from "@/lib/lesson-text";
+import { lessonTextFor, type ChallengePart } from "@/lib/lesson-sections";
 import { estimatedStarts, readTimings, transcriptWords, wordAt } from "@/lib/lesson-audio/words";
 import { prisma } from "@/lib/prisma";
 import { TEACHING } from "@/lib/voice/teaching";
@@ -27,6 +27,16 @@ import { runVoiceTurn, type TurnEvent } from "@/lib/voice/turn";
 export const TURNS_PER_DAY = 300;
 /** The lesson as the teacher knows it, at most this many characters. */
 const LESSON_CHARS = 16_000;
+/**
+ * An interview-challenge lesson (lib/lesson-sections.ts), within the same limit: the problem and its follow-up
+ * questions first, whole, then as much of the reference solution and the model answers as fits.
+ *
+ * So a learner who asks the teacher about a challenge before trying it may hear its solution: the teacher has it, and
+ * nothing tells it to hold it back. It had part of it before too, cut from the lesson's start (a lesson whose solutions
+ * start before 16,000 characters). Holding it back would need a rule, such as giving the solution parts only once the
+ * lesson is marked done; the user chose not to (2026-11-26): the teacher keeps the solution.
+ */
+const CHALLENGE = { order: ["brief", "followUps", "reference", "modelAnswers"] as readonly ChallengePart[], limit: LESSON_CHARS };
 /** What the teacher had just said, and what it was about to say, around the moment the learner stopped. */
 const WORDS_BEFORE = 260;
 const WORDS_AFTER = 80;
@@ -121,7 +131,7 @@ async function loadLesson(lessonId: string): Promise<LessonContext | null> {
     course: course.title,
     title: lesson.title.replaceAll("`", ""),
     objectives: lesson.objectives,
-    text: await lessonText(course, lesson, LESSON_CHARS),
+    text: await lessonTextFor(course, lesson, LESSON_CHARS, CHALLENGE),
     script,
     starts,
     seconds,

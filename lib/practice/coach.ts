@@ -7,7 +7,7 @@ import { LESSON_TUTOR_CHAIN, type LessonTurnEvent } from "@/lib/lesson-tutor/tur
 import { prisma } from "@/lib/prisma";
 import { latestGraph, type Answer, type Feedback, type SessionItem } from "@/lib/practice/learner";
 import type { TaskContent } from "@/lib/practice/tasks";
-import { lessonText } from "@/lib/lesson-text";
+import { lessonTextFor, type ChallengePart } from "@/lib/lesson-sections";
 import { TEACHING } from "@/lib/voice/teaching";
 import { runVoiceTurn } from "@/lib/voice/turn";
 import type { VoiceLanguage } from "@/lib/voice/deepgram";
@@ -120,6 +120,13 @@ function answerOf(content: TaskContent, answer: Answer, feedback: Feedback, lang
 
 /** The lesson as the coach knows it, at most this many characters: where its commands and settings come from. */
 const LESSON_CHARS = 12_000;
+/**
+ * An interview-challenge lesson (lib/lesson-sections.ts), within the same limit: the problem and its follow-up
+ * questions first, then what fits of the reference solution and the model answers. As with the lesson's teacher
+ * (lib/lesson-tutor/turn.ts), the coach may then tell a learner the challenge's solution; the user chose not to hold it
+ * back (2026-11-26).
+ */
+const CHALLENGE = { order: ["brief", "followUps", "reference", "modelAnswers"] as readonly ChallengePart[], limit: LESSON_CHARS };
 const lessons = new Map<string, { at: number; value: Promise<string | null> }>();
 
 /** A lesson's title and text, kept ten minutes: a conversation is many turns about the same lesson. */
@@ -132,7 +139,7 @@ function lessonBlock(lessonId: string): Promise<string | null> {
       select: { code: true, title: true, body: true, sourcePath: true, module: { select: { course: { select: { title: true, sourceRepoUrl: true, sourceRef: true } } } } },
     });
     if (!lesson) return null;
-    const text = await lessonText(lesson.module.course, lesson, LESSON_CHARS).catch(() => null);
+    const text = await lessonTextFor(lesson.module.course, lesson, LESSON_CHARS, CHALLENGE).catch(() => null);
     return text ? `# The lesson this comes from: ${lesson.code ?? ""} ${lesson.title.replaceAll("`", "")}\nTeach from it: its commands, settings and explanations are the course's own.\n"""\n${text}\n"""` : null;
   })();
   lessons.set(lessonId, { at: Date.now(), value });

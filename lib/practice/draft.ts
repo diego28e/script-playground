@@ -2,7 +2,7 @@ import { Type, type Content, type Schema, type ThinkingLevel } from "@google/gen
 import { z } from "zod";
 import { authoringChain, generateWithFallback, isAuthoringModel } from "@/lib/ai/gemini";
 import { prisma } from "@/lib/prisma";
-import { lessonText } from "@/lib/lesson-text";
+import { lessonTextFor, type ChallengePart } from "@/lib/lesson-sections";
 import { REQUEST_BUDGET_MS } from "@/lib/request-budget";
 import { practiceLanguage, type PracticeLanguage } from "@/lib/practice/language";
 
@@ -110,6 +110,12 @@ export const RESPONSE_SCHEMA: Schema = {
 };
 
 const SOURCE_LIMIT = 30_000;
+/**
+ * An interview-challenge lesson (lib/lesson-sections.ts): the problem, the reference solution with how the tests check
+ * it, and the model answers to the follow-up questions, without the setup. Their budgets add up to 34,000, past
+ * SOURCE_LIMIT: at 30,000 the end of 30.01's model answers would be cut (30,262 characters whole).
+ */
+const CHALLENGE = { order: ["brief", "reference", "modelAnswers"] as readonly ChallengePart[], limit: 35_000 };
 
 /** A key the graph accepts: lowercase kebab-case. */
 export function normaliseKey(key: string): string {
@@ -176,7 +182,7 @@ export async function draftLesson(lessonId: string, userId: string, model?: stri
     other.module.position < lesson.module.position || (other.module.position === lesson.module.position && other.position < lesson.position);
   const earlier = allSkills.filter((skill) => skill.lessonId !== lesson.id && isEarlier(skill.lesson));
 
-  const text = await lessonText(course, lesson, SOURCE_LIMIT);
+  const text = await lessonTextFor(course, lesson, SOURCE_LIMIT, CHALLENGE);
   const context = [
     `# Course: ${course.title}\n${course.modules.map((m) => `- Module ${String(m.position).padStart(2, "0")}: ${m.title}`).join("\n")}`,
     `# Lesson ${lesson.code ?? ""}: ${lesson.title} (module ${String(lesson.module.position).padStart(2, "0")}: ${lesson.module.title})`,

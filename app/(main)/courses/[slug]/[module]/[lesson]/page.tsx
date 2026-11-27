@@ -88,6 +88,7 @@ export default async function LessonPage({ params }: Props) {
                 repoUrl={data.course.sourceRepoUrl}
                 sourceRef={data.course.sourceRef}
                 lessonPages={lessonPages}
+                foldSolutions={data.course.foldSolutions}
             />
         );
     }

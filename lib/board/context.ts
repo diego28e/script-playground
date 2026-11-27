@@ -1,6 +1,6 @@
 import type { PracticeState } from "@intellectif/lk-practice";
 import { prisma } from "@/lib/prisma";
-import { lessonText } from "@/lib/lesson-text";
+import { lessonTextFor, type ChallengePart } from "@/lib/lesson-sections";
 import { readProfile } from "@/lib/voice/profile";
 import { preferencesOf, type Preferences } from "@/lib/preferences";
 
@@ -10,6 +10,14 @@ import { preferencesOf, type Preferences } from "@/lib/preferences";
 // for how to teach them, word for word (lib/preferences.ts).
 
 const LESSON_CHARS = 12_000;
+/**
+ * An interview-challenge lesson (lib/lesson-sections.ts), as the parts the board teaches from: the problem, its
+ * follow-up questions, the reference solution with how the tests check it, and the model answers. The board teaches, so
+ * it may know the solution; the interview mode, when it's built, will send the solution only at the debrief
+ * (docs/whiteboard-interview-mode.md). The parts' budgets add up to 36,000, so nothing measured so far is cut (31,373 at
+ * most, 30.01). Didactra cuts lesson.text to 12,000 on its side (apps/agent/src/platform/context.ts) until it's raised.
+ */
+const CHALLENGE = { order: ["brief", "followUps", "reference", "modelAnswers"] as readonly ChallengePart[], limit: 37_000 };
 const PROFILE_CHARS = 4_000;
 const RECENT_ANSWERS = 5;
 const EARLIER_SESSIONS = 3;
@@ -116,7 +124,7 @@ export async function boardContext(sid: string): Promise<{ context: BoardContext
   const language = session.language === "es" ? "es" : "en";
 
   const [text, profile, learner, skill, earlier, preferences] = await Promise.all([
-    lessonText(session.course, session.lesson, LESSON_CHARS),
+    lessonTextFor(session.course, session.lesson, LESSON_CHARS, CHALLENGE),
     readProfile(session.userId, session.courseId, language),
     prisma.practiceLearner.findFirst({ where: { userId: session.userId, courseId: session.courseId }, select: { id: true, state: true } }),
     session.skillKey

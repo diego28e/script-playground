@@ -1,8 +1,11 @@
 // Checks the whiteboard's contract on the platform's side (docs/whiteboard-contract.md): the signed launch and service
 // tokens, the events Didactra may send, and how a learner's practice state and a session's summary are told to the
-// teacher. No database and no model: these are pure functions.
+// teacher, and how an interview-challenge lesson is split for the AI features that read it (lib/lesson-sections.ts).
+// No database and no model: these are pure functions.
 //
 //   pnpm board:check
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { PracticeState } from "@intellectif/lk-practice";
 import { issueLaunch, issueService, LAUNCH_MS, readLaunch, serviceSession } from "@/lib/board/token";
 import { BoardEvent } from "@/lib/board/events";
@@ -10,6 +13,8 @@ import { stateName, summaryText } from "@/lib/board/context";
 import { fileScope } from "@/lib/preferences";
 import { assemble } from "@/lib/voice/context";
 import { requestConversation, requestOrigin, resolvePrompt } from "@/lib/practice/tutor-requests";
+import { clipText } from "@/lib/lesson-text";
+import { CHALLENGE_BUDGETS, challengeParts, challengeText, clipPart, isChallengeLesson, lessonTextFor, splitAtSolutions, type ChallengePart } from "@/lib/lesson-sections";
 
 let failures = 0;
 const check = (name: string, pass: boolean, detail = "") => {
@@ -116,5 +121,130 @@ const system = assemble({ role: "ROLE", grounding: "GROUNDING", preferences: ["G
 check("preferences sit before the profile, after the grounding", system.indexOf("GROUNDING") < system.indexOf("- Go in small steps") && system.indexOf("- Go in small steps") < system.indexOf("PROFILE") && system.includes("HOW THIS LEARNER ASKED TO BE TAUGHT"));
 check("no preferences, no heading", !assemble({ role: "R", grounding: "G", preferences: [], profile: null, summary: null, digest: [] }, "en").system.includes("ASKED TO BE TAUGHT"));
 
-console.log(failures ? `${failures} FAILED` : "All passed.");
-process.exit(failures ? 1 : 0);
+// Interview-challenge lessons, split into parts (docs/whiteboard-interview-mode.md §4). The fixture is lesson 01.01 of
+// the "Live-Coding Interview Challenges in TypeScript" course, copied as it was imported.
+const lesson = readFileSync(join(__dirname, "fixtures", "challenge-01-01-bounded-promise-pool.md"), "utf8");
+const parts = challengeParts(lesson);
+check("a challenge lesson is recognized by its headings", isChallengeLesson(lesson) && parts !== null);
+check(
+  "the brief runs from the title to the follow-up questions, without the setup",
+  Boolean(parts?.brief?.startsWith("# 01.01 · Bounded Promise Pool")) &&
+    Boolean(parts?.brief?.includes("## Learning objectives")) &&
+    Boolean(parts?.brief?.includes("### Testing expectations")) &&
+    !parts?.brief?.includes("## Your setup") &&
+    !parts?.brief?.includes("## Interview follow-up questions") &&
+    !parts?.brief?.includes("## Solutions"),
+);
+check("the brief keeps one divider where the setup was", !/---\s*\n\s*---/.test(parts?.brief ?? ""));
+check("the follow-ups are the numbered list", Boolean(parts?.followUps?.startsWith("1. ")) && (parts?.followUps?.match(/^\d+\. /gm)?.length ?? 0) === 7 && !parts?.followUps?.includes("---"));
+check("the interviewer's notes are the talk-through, without its heading", Boolean(parts?.interviewerNotes) && !parts?.interviewerNotes?.includes("###") && !parts?.interviewerNotes?.includes("```ts"));
+check(
+  "the reference is the solution and how the tests check it, with both headings",
+  Boolean(parts?.reference?.startsWith("### The reference solution")) && Boolean(parts?.reference?.includes("### How the tests check it")) && !parts?.reference?.includes("### Answers"),
+);
+check("the model answers are every numbered answer", Boolean(parts?.modelAnswers?.startsWith("**1. ")) && Boolean(parts?.modelAnswers?.includes("**7. ")) && !parts?.modelAnswers?.includes("###"));
+const teaching: ChallengePart[] = ["brief", "followUps", "reference", "modelAnswers"];
+const board = parts ? challengeText(parts, teaching, 37_000) : "";
+check(
+  "the board's text keeps the parts in order, under their headings, whole",
+  board.indexOf("## The challenge") < board.indexOf("## Interview follow-up questions") &&
+    board.indexOf("## Interview follow-up questions") < board.indexOf("## Solutions") &&
+    board.indexOf("## Solutions") < board.indexOf("### The reference solution") &&
+    board.indexOf("### How the tests check it") < board.indexOf("### Answers to the follow-up questions") &&
+    !board.includes("### Talking it through") &&
+    !board.includes("more characters)") &&
+    !board.includes("left out for length"),
+);
+const small = parts ? challengeText(parts, teaching, 12_000) : "";
+check(
+  "within a small limit, the problem and the follow-ups come whole and the solution is cut, saying so",
+  small.length <= 12_000 && small.includes(parts?.brief ?? "?") && small.includes(parts?.followUps ?? "?") && small.includes("more characters)"),
+  String(small.length),
+);
+const tiny = parts ? challengeText(parts, teaching, 7_000) : "";
+check("a part with no room is left out and named", tiny.length <= 7_000 && tiny.includes("left out for length: the reference solution, the answers to the follow-up questions") && tiny.includes("## Interview follow-up questions"), String(tiny.length));
+const drafter = parts ? challengeText(parts, ["brief", "reference", "modelAnswers"], 35_000) : "";
+check("the drafter's text has no follow-up list", !drafter.includes("## Interview follow-up questions") && drafter.includes("### Answers to the follow-up questions"));
+
+// Each part's budget.
+const long = (heading: string, size: number) => `${heading}\n\n${"word ".repeat(size / 5)}`;
+const big = [
+  "# 99.01 · Big",
+  long("## The challenge", 20_000),
+  long("## Interview follow-up questions", 3_000),
+  "## Solutions",
+  long("### Talking it through in an interview", 4_000),
+  long("### The reference solution", 6_000),
+  long("### How the tests check it", 3_000),
+  long("### Answers to the follow-up questions", 13_000),
+].join("\n\n");
+const bigParts = challengeParts(big);
+const bigText = bigParts ? challengeText(bigParts, ["brief", "followUps", "interviewerNotes", "reference", "modelAnswers"], 60_000) : "";
+const within = (part: ChallengePart) => {
+  const clipped = clipPart(bigParts?.[part] ?? "", CHALLENGE_BUDGETS[part]);
+  return bigText.includes(clipped) && clipped.includes("more characters)") && clipped.length <= CHALLENGE_BUDGETS[part] + 40;
+};
+check("each part is clipped to its own budget, with the note", (["brief", "followUps", "interviewerNotes", "reference", "modelAnswers"] as const).every(within));
+const code = "```ts\nconst a = 1;\nconst b = 2;\n```\n\nAfter the code.";
+check(
+  "a cut inside a code block closes it before the note, and a cut after one doesn't",
+  clipPart(code, 18) === `${code.slice(0, 18)}\n\`\`\`\n… (${code.length - 18} more characters)` && clipPart(code, 40) === clipText(code, 40),
+);
+const fenced = challengeParts("# T\n\n## The challenge\n\n```bash\n## not a heading\n```\n\n## Solutions\n\n### The reference solution\n\nx");
+check("a heading inside a code block doesn't split the lesson", Boolean(fenced?.brief?.includes("## not a heading")) && fenced?.reference === "### The reference solution\n\nx");
+
+// Ordinary lessons, and challenges without some sections.
+const ordinary = "# 01.04 · Package managers\n\n## What\n\ntext\n\n## Exercises\n\n### 1. Paths\n\n## Solutions\n\n### 1. Paths\n\nanswer";
+check("an ordinary lesson with ## Solutions isn't a challenge", !isChallengeLesson(ordinary) && challengeParts(ordinary) === null && !isChallengeLesson("# x\n\n## The challenge\n\ntext"));
+/** The text without one section: its heading up to the next heading of its level or above. */
+const without = (text: string, heading: string) => {
+  const start = text.indexOf(`\n${heading}\n`);
+  const level = heading.startsWith("### ") ? 3 : 2;
+  const rest = text.slice(start + heading.length + 2);
+  const next = rest.search(new RegExp(`^#{2,${level}} `, "m"));
+  return text.slice(0, start + 1) + (next < 0 ? "" : rest.slice(next));
+};
+const noFollowUps = challengeParts(without(lesson, "## Interview follow-up questions"));
+check("without follow-up questions, the brief runs to the solutions", noFollowUps?.followUps === null && Boolean(noFollowUps?.brief?.includes("### Testing expectations")) && !noFollowUps?.brief?.includes("## Solutions"));
+const noAnswers = challengeParts(without(without(lesson, "### Answers to the follow-up questions"), "### Talking it through in an interview"));
+const noAnswersText = noAnswers ? challengeText(noAnswers, teaching, 37_000) : "";
+check(
+  "without the model answers or the talk-through, those parts are null and not shown",
+  noAnswers?.modelAnswers === null && noAnswers.interviewerNotes === null && Boolean(noAnswers.reference) && !noAnswersText.includes("### Answers"),
+);
+const noSetup = challengeParts(without(lesson, "## Your setup"));
+check("without a setup, the brief is the same", noSetup?.brief === parts?.brief);
+const noSolutionParts = challengeParts("# T\n\n## The challenge\n\nspec\n\n## Interview follow-up questions\n\n1. Why?\n\n## Solutions\n\nSee the repository.");
+check(
+  "a challenge whose solutions have no known sections gives the problem alone",
+  noSolutionParts !== null && noSolutionParts.reference === null && challengeText(noSolutionParts, teaching, 37_000) === "# T\n\n## The challenge\n\nspec\n\n## Interview follow-up questions\n\n1. Why?",
+);
+check("Windows line endings split the same", challengeParts(lesson.replace(/\n/g, "\r\n"))?.modelAnswers === parts?.modelAnswers);
+
+// The lesson page's fold (docs/lesson-solutions.md): everything after ## Solutions, wherever it is.
+const split = splitAtSolutions(lesson);
+check(
+  "the page folds from the ## Solutions heading to the end",
+  split !== null &&
+    split.heading === "Solutions" &&
+    !split.before.includes("## Solutions") &&
+    split.before.includes("## Interview follow-up questions") &&
+    split.solutions.includes("### Answers to the follow-up questions") &&
+    `${split.before}\n## ${split.heading}\n${split.solutions}` === lesson.replace(/\r/g, ""),
+);
+check(
+  "a lesson without ## Solutions isn't folded, nor one with it only in a code block",
+  splitAtSolutions("# T\n\n## What\n\n```md\n## Solutions\n```") === null && splitAtSolutions(ordinary)?.solutions === "\n### 1. Paths\n\nanswer",
+);
+
+void (async () => {
+  const course = { sourceRepoUrl: null, sourceRef: null };
+  const longOrdinary = `${ordinary}\n\n${"more ".repeat(5_000)}`;
+  const challenge = { order: teaching, limit: 37_000 };
+  check("an ordinary lesson comes back cut at the limit, as before", (await lessonTextFor(course, { body: longOrdinary, sourcePath: null }, 12_000, challenge)) === clipText(longOrdinary, 12_000));
+  check("a challenge lesson comes back in parts", (await lessonTextFor(course, { body: lesson, sourcePath: null }, 12_000, challenge)) === board);
+  check("no text is still no text", (await lessonTextFor(course, { body: null, sourcePath: null }, 12_000, challenge)) === null);
+
+  console.log(failures ? `${failures} FAILED` : "All passed.");
+  process.exit(failures ? 1 : 0);
+})();

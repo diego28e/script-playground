@@ -33,7 +33,8 @@ skill being learned, the lesson that teaches it, the learner's profile, and how 
 - **The context** (`GET /api/board/sessions/<sid>/context`, `lib/board/context.ts`): Didactra's server asks what to
   teach:
   - the skill, its prerequisites and what comes after, with the learner's state in each;
-  - the lesson's text, up to 12,000 characters, and its objectives;
+  - the lesson's text, up to 12,000 characters, and its objectives. An interview-challenge lesson is sent as its
+    parts instead (contract §2): the problem, its follow-up questions, the reference solution and the model answers;
   - the learner's profile;
   - their last 5 practice answers on the skill;
   - what the last 3 boards on it found.

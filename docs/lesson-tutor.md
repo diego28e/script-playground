@@ -36,7 +36,9 @@ models are often busy, and a hang there is seconds of silence; about a tenth of 
 Gemini models. The model is told:
 
 - **The lesson**: the course, its title and objectives, and its text (16,000 characters at most), kept 10 minutes per
-  lesson in the service.
+  lesson in the service. An interview-challenge lesson (`lib/lesson-sections.ts`) comes in parts within the same
+  limit: the problem and its follow-up questions whole, then what fits of the reference solution and the model
+  answers. So the teacher may tell a learner the solution before they try the challenge, by choice (2026-11-26).
 - **Where the learner stopped**: the last 260 words the teacher had said and the next 80, found from the transcript's
   word timings (or their estimate), with the time ("1:10 / 15:02").
 - **How to answer, as the teacher**: what the recording had just said and was about to say is context for the

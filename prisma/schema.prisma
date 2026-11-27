@@ -153,6 +153,10 @@ model Course {
   // Audio and video lessons pause where the learner has a step to do on their own computer (docs/lesson-stops.md),
   // switched in Admin → Stops. Off until the course's stops have been generated and reviewed.
   lessonStops      Boolean                  @default(false)
+  // A reading lesson's "## Solutions" section, to the end of the lesson, is folded behind "Show solutions" on its page
+  // (docs/lesson-solutions.md), switched in Admin → Courses. For courses that are practised by not reading
+  // the solution first, such as the interview challenges.
+  foldSolutions    Boolean                  @default(false)
   sourceRepoUrl    String?
   // The commit the course was last imported from.
   sourceRef        String?
